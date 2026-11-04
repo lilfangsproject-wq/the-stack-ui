@@ -284,7 +284,11 @@ function showCloudConnect(errMsg) {
         fd.get("branch") ||
           (typeof GH_DEFAULT_BRANCH === "string" ? GH_DEFAULT_BRANCH : "main")
       ).trim();
-      ghState.token = String(fd.get("token") || "").trim();
+      const rawTok = String(fd.get("token") || "");
+      ghState.token =
+        typeof ghSanitizeToken === "function"
+          ? ghSanitizeToken(rawTok)
+          : rawTok.replace(/\s+/g, "").trim();
       ghSaveCreds();
       await bootCloud();
     });
@@ -306,12 +310,20 @@ async function bootCloud() {
   state.cloudMode = true;
   state.pocketMode = false;
   if (typeof ghLoadCreds === "function") ghLoadCreds();
+  if (typeof ghSanitizeToken === "function" && ghState.token) {
+    ghState.token = ghSanitizeToken(ghState.token);
+    if (typeof ghSaveCreds === "function") ghSaveCreds();
+  }
   if (!ghState.token) {
     showCloudConnect();
     return false;
   }
   status.textContent = "Connecting to GitHub hub…";
   try {
+    if (typeof ghProbeGithub === "function") {
+      status.textContent = "Checking GitHub reachability…";
+      await ghProbeGithub();
+    }
     const health = await api("/api/health");
     // Prove hub readable
     const { channels } = await api("/api/channels");

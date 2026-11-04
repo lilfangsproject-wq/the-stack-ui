@@ -88,14 +88,43 @@ function ghSleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function ghSanitizeToken(raw) {
+  // iOS paste can add spaces, newlines, or zero-width chars that make fetch throw.
+  return String(raw || "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+async function ghProbeGithub() {
+  // Split "phone can't reach GitHub at all" from "token/auth problem".
+  try {
+    const res = await fetch("https://api.github.com/zen", {
+      cache: "no-store",
+      headers: { Accept: "application/vnd.github+json" },
+    });
+    if (!res.ok) throw new Error(`zen_${res.status}`);
+  } catch (err) {
+    const wrapped = new Error(
+      "This phone cannot reach api.github.com (blocked Wi‑Fi, VPN, content blocker, or offline). Open https://api.github.com/zen in Safari — if that fails, switch network and retry."
+    );
+    wrapped.cause = err;
+    wrapped.status = 0;
+    throw wrapped;
+  }
+}
+
 async function ghApi(path, options = {}) {
+  const token = ghSanitizeToken(ghState.token);
+  if (token && token !== ghState.token) ghState.token = token;
   let res;
   try {
     res = await fetch(`https://api.github.com${path}`, {
       ...options,
+      cache: "no-store",
       headers: {
         Accept: "application/vnd.github+json",
-        Authorization: `Bearer ${ghState.token}`,
+        Authorization: `Bearer ${token}`,
         "X-GitHub-Api-Version": "2022-11-28",
         ...(options.headers || {}),
       },
@@ -103,7 +132,7 @@ async function ghApi(path, options = {}) {
   } catch (err) {
     // Safari often surfaces offline/CORS blips as TypeError: Load failed.
     const wrapped = new Error(
-      "Could not reach GitHub from this phone (network). Check signal/Wi‑Fi and try again."
+      "Could not reach GitHub from this phone (network). Check signal/Wi‑Fi, disable content blockers for this site, try cellular ↔ Wi‑Fi, then try again."
     );
     wrapped.cause = err;
     wrapped.status = 0;
