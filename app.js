@@ -183,15 +183,27 @@ async function bootCloud() {
   try {
     const health = await api("/api/health");
     // Prove hub readable
-    await api("/api/channels");
+    const { channels } = await api("/api/channels");
+    if ((!channels || !channels.length) && ghState.branch === "main") {
+      ghState.branch =
+        typeof GH_DEFAULT_BRANCH === "string"
+          ? GH_DEFAULT_BRANCH
+          : "cursor/the-stack-hub-github-sync";
+      ghSaveCreds();
+      return bootCloud();
+    }
+    if (!channels || !channels.length) {
+      throw new Error(
+        `No hub channels on ${ghState.repo}@${ghState.branch}. Set Branch to cursor/the-stack-hub-github-sync and reconnect.`
+      );
+    }
     state.hostLabel = "github";
     status.textContent = `Cloud · ${health.host}`;
     if (form) form.classList.add("hidden");
     await loadTokenHint();
     const el = document.getElementById("phone-hint");
     el.hidden = false;
-    el.textContent =
-      "Cloud mode · vault SoT on GitHub · Mac not required · Add to Home Screen";
+    el.textContent = `Cloud · ${ghState.repo}@${ghState.branch} · Add to Home Screen`;
     await loadChannels();
     await loadLists();
     showView("home");
@@ -423,12 +435,31 @@ async function loadHome() {
     if (!data) throw err;
     state.pocketMode = true;
   }
+  const channelCount = (data.channels || []).length || data.summary?.channels || 0;
+  const branchLabel =
+    state.cloudMode && typeof ghState !== "undefined"
+      ? `${ghState.repo}@${ghState.branch}`
+      : state.hostLabel;
   document.getElementById("home-headline").textContent =
     data.summary?.headline || "Agent hub";
   const body = document.getElementById("home-body");
   const todos = data.todos || [];
   const reports = data.reports || [];
   const mentions = data.mentions || [];
+  const emptyHub =
+    state.cloudMode &&
+    !channelCount &&
+    !(data.summary?.dms || 0) &&
+    !(mentions.length || reports.length || todos.length);
+  const emptyBanner = emptyHub
+    ? `<section class="home-section home-fix">
+        <h2>Hub empty</h2>
+        <p>Connected, but this branch has no Stack hub files (usually still on <code>main</code>).</p>
+        <p>Branch should be <code>cursor/the-stack-hub-github-sync</code>.</p>
+        <p class="owner">Now: <code>${esc(branchLabel)}</code></p>
+        <button type="button" id="home-reconnect" class="primary-btn">Fix branch &amp; reconnect</button>
+      </section>`
+    : "";
   const todoHtml = todos.length
     ? todos
         .map(
@@ -475,6 +506,7 @@ async function loadHome() {
         .join("")}</div>`
     : `<p class="home-empty">No reports yet. Agents post into #the-digest.</p>`;
   body.innerHTML = `
+    ${emptyBanner}
     <section class="home-section">
       <h2>Mentions</h2>
       ${mentionHtml}
@@ -487,6 +519,26 @@ async function loadHome() {
       <h2>What’s going on</h2>
       ${reportHtml}
     </section>`;
+  document.getElementById("home-reconnect")?.addEventListener("click", () => {
+    if (typeof ghState !== "undefined") {
+      ghState.branch =
+        typeof GH_DEFAULT_BRANCH === "string"
+          ? GH_DEFAULT_BRANCH
+          : "cursor/the-stack-hub-github-sync";
+      if (typeof ghSaveCreds === "function") ghSaveCreds();
+    }
+    document.getElementById("shell").classList.add("hidden");
+    document.getElementById("boot").classList.remove("hidden");
+    showCloudConnect(
+      "Branch set to cursor/the-stack-hub-github-sync — tap Open cloud hub again."
+    );
+    const form = document.getElementById("cloud-connect");
+    if (form) {
+      form.classList.remove("hidden");
+      const branch = form.querySelector('[name="branch"]');
+      if (branch) branch.value = "cursor/the-stack-hub-github-sync";
+    }
+  });
 }
 
 function nearBottom(el) {

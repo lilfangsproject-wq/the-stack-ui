@@ -19,8 +19,16 @@ function ghLoadCreds() {
     const data = JSON.parse(raw);
     ghState.token = data.token || "";
     ghState.repo = data.repo || GH_DEFAULT_REPO;
-    ghState.branch = data.branch || GH_DEFAULT_BRANCH;
+    let branch = data.branch || GH_DEFAULT_BRANCH;
+    // Phone often saved "main" before hub existed there — migrate to the live hub branch.
+    if (!branch || branch === "main") {
+      branch = GH_DEFAULT_BRANCH;
+    }
+    ghState.branch = branch;
     ghState.enabled = Boolean(ghState.token);
+    if (data.branch !== ghState.branch && ghState.token) {
+      ghSaveCreds();
+    }
   } catch {
     /* ignore */
   }
@@ -452,8 +460,10 @@ async function ghRoute(path, options = {}) {
     return {
       ok: true,
       name: "The Stack",
-      version: "0.9-cloud",
-      host: `github://${ghState.repo}`,
+      version: "0.12-cloud",
+      host: `github://${ghState.repo}@${ghState.branch}`,
+      repo: ghState.repo,
+      branch: ghState.branch,
       zero_spend: true,
       hub: true,
       sync: "vault+github",
