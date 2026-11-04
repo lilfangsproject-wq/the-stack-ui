@@ -78,8 +78,32 @@ async function pocketFlushOutbox() {
   if (box.length !== remain.length) await refresh();
 }
 
+function wantsCloudHub() {
+  try {
+    return (
+      new URLSearchParams(location.search).has("cloud") ||
+      location.pathname.endsWith("/cloud.html") ||
+      location.hash === "#cloud"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function shellReady() {
+  const shell = document.getElementById("shell");
+  return Boolean(shell && !shell.classList.contains("hidden"));
+}
+
 async function api(path, options = {}) {
-  if (state.cloudMode && typeof ghRoute === "function") {
+  // Cloud hub never hits relative /api on GitHub Pages (that 404s at site root).
+  if (state.cloudMode || wantsCloudHub()) {
+    if (typeof ghRoute !== "function") {
+      throw new Error("Cloud GitHub client missing (github_hub.js)");
+    }
+    if (!ghState?.token) {
+      throw new Error("Connect with a GitHub PAT first");
+    }
     return ghRoute(path, options);
   }
   const res = await fetch(path, {
@@ -142,6 +166,9 @@ async function bootCloud() {
   const bootEl = document.getElementById("boot");
   const status = document.getElementById("boot-status");
   const form = document.getElementById("cloud-connect");
+  // Stay in cloud mode on Pages even before PAT — never fall back to /api/*.
+  state.cloudMode = true;
+  state.pocketMode = false;
   if (typeof ghLoadCreds === "function") ghLoadCreds();
   if (!ghState.token) {
     showCloudConnect();
@@ -149,8 +176,6 @@ async function bootCloud() {
   }
   status.textContent = "Connecting to GitHub hub…";
   try {
-    state.cloudMode = true;
-    state.pocketMode = false;
     const health = await api("/api/health");
     // Prove hub readable
     await api("/api/channels");
@@ -171,7 +196,7 @@ async function bootCloud() {
     showInstallBanner();
     return true;
   } catch (err) {
-    state.cloudMode = false;
+    // Keep cloudMode true so the poll never hits Pages /api/*.
     showCloudConnect(String(err.message || err));
     setLive(false, String(err));
     return false;
@@ -552,16 +577,14 @@ async function boot() {
   const status = document.getElementById("boot-status");
   const retry = document.getElementById("boot-retry");
   retry.classList.add("hidden");
-  const forceCloud =
-    new URLSearchParams(location.search).has("cloud") ||
-    location.pathname.endsWith("/cloud.html") ||
-    location.hash === "#cloud";
+  const forceCloud = wantsCloudHub();
 
   if (typeof ghLoadCreds === "function") ghLoadCreds();
 
   // Product path: cloud GitHub hub (no Mac). Prefer when forced or when
   // there is no local /api and we already have (or can collect) a PAT.
   if (forceCloud) {
+    state.cloudMode = true;
     await bootCloud();
     return;
   }
@@ -784,7 +807,10 @@ if ("serviceWorker" in navigator) {
 
 boot();
 state.pollTimer = setInterval(() => {
+  // Do not poll while the boot/connect card is showing (Pages has no /api).
+  if (!shellReady()) return;
   if (state.pocketMode && !state.cloudMode) return;
+  if (state.cloudMode && !ghState?.token) return;
   // Cloud polls slower to respect GitHub API limits
   if (state.cloudMode && state._cloudTick && Date.now() - state._cloudTick < 18000) return;
   if (state.cloudMode) state._cloudTick = Date.now();
