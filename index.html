@@ -64,6 +64,12 @@
         <input name="slug" placeholder="new-channel" required autocomplete="off" />
         <button type="submit" aria-label="Add channel">+</button>
       </form>
+      <div class="section-label">Direct messages</div>
+      <nav id="dm-list" class="channel-list"></nav>
+      <form id="new-dm" class="new-channel">
+        <input name="member" placeholder="Agent name" required autocomplete="off" />
+        <button type="submit" aria-label="Open DM">+</button>
+      </form>
       <div class="section-label">Lists</div>
       <nav id="list-nav" class="channel-list"></nav>
       <p id="token-hint" class="token-hint"></p>
@@ -94,7 +100,7 @@
       <section id="messages" class="messages" aria-live="polite"></section>
       <form id="composer" class="composer">
         <input id="author" name="author" value="Seth" aria-label="Author" autocomplete="nickname" />
-        <textarea id="body" name="body" rows="1" placeholder="Message #the-digest" required></textarea>
+        <textarea id="body" name="body" rows="1" placeholder="Message… use @Name to mention" required></textarea>
         <button type="submit">Send</button>
       </form>
       <p class="composer-hint">Enter sends · Shift+Enter newline · Install via Add to Home Screen</p>

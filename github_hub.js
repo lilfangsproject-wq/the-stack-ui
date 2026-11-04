@@ -147,26 +147,61 @@ async function ghListMessages(slug, parentId = null) {
   return rows;
 }
 
+function ghExtractMentions(body) {
+  const found = [];
+  const seen = new Set();
+  const re = /(?<![\w/])@([A-Za-z][A-Za-z0-9_-]{0,31})/g;
+  let m;
+  while ((m = re.exec(body || ""))) {
+    const key = m[1].toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    found.push(m[1]);
+  }
+  return found;
+}
+
+function ghDmSlug(a, b) {
+  const parts = [String(a || "Seth"), String(b || "Seth")]
+    .map((n) => n.trim().toLowerCase().replace(/\s+/g, "-"))
+    .filter(Boolean)
+    .sort();
+  return "dm-" + [...new Set(parts)].join("-");
+}
+
 async function ghAppendMessage(slug, { body, author, parent_id }) {
   const channels = await ghListChannels();
   let ch = channels.find((c) => c.slug === slug);
   if (!ch) throw new Error("channel_not_found");
   const file = await ghGetFile(`channels/${slug}/messages.jsonl`);
+  const text = String(body || "").trim();
   const row = {
     id: crypto.randomUUID(),
     channel_id: ch.id,
     channel_slug: slug,
     parent_id: parent_id || null,
     author: author || "Seth",
-    body,
+    body: text,
+    mentions: ghExtractMentions(text),
     created_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
   };
   const next = (file.text ? file.text.replace(/\s*$/, "\n") : "") + JSON.stringify(row) + "\n";
-  await ghPutFile(`channels/${slug}/messages.jsonl`, next, `stack: message in #${slug}`);
+  const label = ch.kind === "dm" ? `dm ${slug}` : `#${slug}`;
+  await ghPutFile(`channels/${slug}/messages.jsonl`, next, `stack: message in ${label}`);
+  ch.updated_at = row.created_at;
+  const catalog = await ghReadJson("channels.json", { channels: [] });
+  const nextChannels = (catalog.channels || []).map((c) =>
+    c.slug === slug ? { ...c, ...ch } : c
+  );
+  await ghPutFile(
+    "channels.json",
+    JSON.stringify({ channels: nextChannels }, null, 2) + "\n",
+    `stack: activity ${label}`
+  );
   return row;
 }
 
-async function ghCreateChannel({ slug, name, purpose }) {
+async function ghCreateChannel({ slug, name, purpose, kind, members }) {
   const data = await ghReadJson("channels.json", { channels: [] });
   const channels = data.channels || [];
   if (channels.some((c) => c.slug === slug)) throw new Error("slug_exists");
@@ -175,14 +210,39 @@ async function ghCreateChannel({ slug, name, purpose }) {
     slug,
     name: name || slug,
     purpose: purpose || "",
+    kind: kind === "dm" ? "dm" : "channel",
+    members: Array.isArray(members) ? members : [],
     created_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
     updated_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
   };
   channels.push(ch);
-  channels.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  channels.sort((a, b) => {
+    const ak = a.kind === "dm" ? 1 : 0;
+    const bk = b.kind === "dm" ? 1 : 0;
+    if (ak !== bk) return ak - bk;
+    return String(a.name).localeCompare(String(b.name));
+  });
   await ghPutFile("channels.json", JSON.stringify({ channels }, null, 2) + "\n", `stack: channel #${slug}`);
   await ghPutFile(`channels/${slug}/messages.jsonl`, "", `stack: init #${slug}`);
   return ch;
+}
+
+async function ghEnsureDm(me, member) {
+  const a = (me || "Seth").trim() || "Seth";
+  const b = (member || "").trim();
+  if (!b) throw new Error("member_required");
+  if (a.toLowerCase() === b.toLowerCase()) throw new Error("dm_needs_two_members");
+  const slug = ghDmSlug(a, b);
+  const channels = await ghListChannels();
+  const existing = channels.find((c) => c.slug === slug);
+  if (existing) return existing;
+  return ghCreateChannel({
+    slug,
+    name: `${a} ↔ ${b}`,
+    purpose: `Direct messages · ${a} + ${b}`,
+    kind: "dm",
+    members: [a, b],
+  });
 }
 
 async function ghListLists() {
@@ -220,9 +280,11 @@ async function ghAddListRow(listId, cells) {
   return row;
 }
 
-async function ghBuildHome() {
+async function ghBuildHome(viewer = "Seth") {
   const channels = await ghListChannels();
+  const viewerKey = String(viewer || "Seth").trim().toLowerCase() || "seth";
   const reports = [];
+  const mentions = [];
   let total = 0;
   for (const ch of channels) {
     const file = await ghGetFile(`channels/${ch.slug}/messages.jsonl`);
@@ -235,7 +297,25 @@ async function ghBuildHome() {
         continue;
       }
       total += 1;
+      const tagged = Array.isArray(row.mentions) && row.mentions.length
+        ? row.mentions
+        : ghExtractMentions(row.body || "");
+      if (
+        tagged.some((m) => String(m).toLowerCase() === viewerKey) &&
+        String(row.author || "").toLowerCase() !== viewerKey
+      ) {
+        mentions.push({
+          id: row.id,
+          channel: ch.slug,
+          kind: ch.kind || "channel",
+          author: row.author || "?",
+          body: row.body || "",
+          created_at: row.created_at || "",
+          preview: ((row.body || "").trim().split("\n")[0] || "").slice(0, 160),
+        });
+      }
       if (row.parent_id) continue;
+      if (ch.kind === "dm") continue;
       reports.push({
         id: row.id,
         channel: ch.slug,
@@ -247,6 +327,7 @@ async function ghBuildHome() {
     }
   }
   reports.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  mentions.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
   const listsData = await ghReadJson("lists.json", { lists: [] });
   const todos = [];
   let done = 0;
@@ -279,17 +360,23 @@ async function ghBuildHome() {
       authors.push(r.author);
     }
   }
+  const pubs = channels.filter((c) => c.kind !== "dm");
+  const dms = channels.filter((c) => c.kind === "dm");
   return {
     ok: true,
     generated_at: new Date().toISOString(),
+    viewer: viewer || "Seth",
     summary: {
-      headline: `${todos.length} open todos · ${Math.min(reports.length, 12)} recent reports · ${channels.length} channels`,
+      headline: `${todos.length} open todos · ${Math.min(mentions.length, 12)} mentions · ${Math.min(reports.length, 12)} reports · ${pubs.length} channels · ${dms.length} DMs`,
       open_todos: todos.length,
       done_todos: done,
-      channels: channels.length,
+      mentions: mentions.length,
+      channels: pubs.length,
+      dms: dms.length,
       messages: total,
       authors,
     },
+    mentions: mentions.slice(0, 12),
     reports: reports.slice(0, 12),
     todos: todos.slice(0, 20),
     channels,
@@ -315,11 +402,15 @@ async function ghRoute(path, options = {}) {
       hub: true,
       sync: "vault+github",
       cloud: true,
+      dms: true,
+      mentions: true,
       messages: null,
       usable: true,
     };
   }
-  if (p === "/api/home") return ghBuildHome();
+  if (p === "/api/home") {
+    return ghBuildHome(url.searchParams.get("viewer") || "Seth");
+  }
   if (p === "/api/token-hint") {
     return {
       hint: ghState.token ? `${ghState.token.slice(0, 4)}…${ghState.token.slice(-4)}` : "(none)",
@@ -329,6 +420,13 @@ async function ghRoute(path, options = {}) {
   }
   if (p === "/api/channels" && method === "GET") {
     return { channels: await ghListChannels() };
+  }
+  if (p === "/api/dms" && method === "GET") {
+    const channels = await ghListChannels();
+    return { dms: channels.filter((c) => c.kind === "dm") };
+  }
+  if (p === "/api/dms" && method === "POST") {
+    return ghEnsureDm(body.me || "Seth", body.member || body.with);
   }
   if (p === "/api/channels" && method === "POST") {
     const ch = await ghCreateChannel(body);

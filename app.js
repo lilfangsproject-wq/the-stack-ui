@@ -9,7 +9,11 @@ const state = {
   pocketMode: false,
   cloudMode: false,
   deferredInstall: null,
+  channels: [],
+  unreads: {},
 };
+
+const READS_KEY = "stack-reads-v1";
 
 const POCKET_DB = "the-stack-pocket";
 const POCKET_STORE = "kv";
@@ -211,6 +215,60 @@ function esc(s) {
     .replaceAll('"', "&quot;");
 }
 
+function loadReads() {
+  try {
+    return JSON.parse(localStorage.getItem(READS_KEY) || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+
+function saveReads(reads) {
+  localStorage.setItem(READS_KEY, JSON.stringify(reads));
+}
+
+function markChannelRead(slug, iso) {
+  if (!slug) return;
+  const reads = loadReads();
+  const prev = reads[slug] || "";
+  if (!iso || String(iso) >= String(prev)) {
+    reads[slug] = iso || new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+    saveReads(reads);
+  }
+}
+
+function currentViewer() {
+  const el = document.getElementById("author");
+  return (el && el.value.trim()) || "Seth";
+}
+
+function formatBodyHtml(body) {
+  // Escaped first, then wrap @Name (safe: only [A-Za-z0-9_-] in the name).
+  return esc(body).replace(
+    /(^|[^\w/])@([A-Za-z][A-Za-z0-9_-]{0,31})/g,
+    '$1<span class="mention">@$2</span>'
+  );
+}
+
+function dmLabel(ch, viewer) {
+  if (!ch) return "DM";
+  if (ch.kind !== "dm") return `#${ch.slug}`;
+  const members = ch.members || [];
+  const other =
+    members.find((m) => String(m).toLowerCase() !== String(viewer).toLowerCase()) ||
+    ch.name ||
+    ch.slug;
+  return other;
+}
+
+function navButtonHtml(ch, viewer) {
+  const active = ch.slug === state.channelSlug ? "active" : "";
+  const label = ch.kind === "dm" ? dmLabel(ch, viewer) : `#${ch.slug}`;
+  const unread = state.unreads[ch.slug] || 0;
+  const badge = unread > 0 ? `<span class="unread-badge">${unread > 99 ? "99+" : unread}</span>` : "";
+  return `<button type="button" data-slug="${esc(ch.slug)}" class="${active}"><span class="nav-row"><span class="nav-label">${esc(label)}</span>${badge}</span></button>`;
+}
+
 function fmtTime(iso) {
   try {
     return new Date(iso).toLocaleString();
@@ -280,6 +338,46 @@ function showInstallBanner() {
   banner.hidden = false;
 }
 
+function bindChannelNav(nav) {
+  if (!nav) return;
+  nav.querySelectorAll("button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.channelSlug = btn.dataset.slug;
+      state.threadParentId = null;
+      document.getElementById("thread").classList.add("hidden");
+      setRailOpen(false);
+      showView("channel");
+    });
+  });
+}
+
+function refreshUnreadBadges() {
+  const reads = loadReads();
+  const unreads = {};
+  for (const ch of state.channels || []) {
+    const updated = ch.updated_at || ch.created_at || "";
+    const since = reads[ch.slug] || "";
+    if (!updated) continue;
+    if (!since || String(updated) > String(since)) unreads[ch.slug] = 1;
+  }
+  // Active room is read.
+  if (state.view === "channel" && state.channelSlug) delete unreads[state.channelSlug];
+  state.unreads = unreads;
+}
+
+function paintChannelNav() {
+  const viewer = currentViewer();
+  const pubs = state.channels.filter((c) => c.kind !== "dm");
+  const dms = state.channels.filter((c) => c.kind === "dm");
+  const nav = document.getElementById("channel-list");
+  const dmNav = document.getElementById("dm-list");
+  refreshUnreadBadges();
+  nav.innerHTML = pubs.map((c) => navButtonHtml(c, viewer)).join("");
+  if (dmNav) dmNav.innerHTML = dms.map((c) => navButtonHtml(c, viewer)).join("");
+  bindChannelNav(nav);
+  bindChannelNav(dmNav);
+}
+
 async function loadChannels() {
   let channels;
   try {
@@ -290,24 +388,8 @@ async function loadChannels() {
     if (!channels.length) throw err;
     state.pocketMode = true;
   }
-  const nav = document.getElementById("channel-list");
-  nav.innerHTML = channels
-    .map(
-      (c) =>
-        `<button type="button" data-slug="${esc(c.slug)}" class="${
-          c.slug === state.channelSlug ? "active" : ""
-        }">#${esc(c.slug)}</button>`
-    )
-    .join("");
-  nav.querySelectorAll("button").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.channelSlug = btn.dataset.slug;
-      state.threadParentId = null;
-      document.getElementById("thread").classList.add("hidden");
-      setRailOpen(false);
-      showView("channel");
-    });
-  });
+  state.channels = channels || [];
+  paintChannelNav();
 }
 
 function showView(view) {
@@ -332,7 +414,7 @@ function showView(view) {
 async function loadHome() {
   let data;
   try {
-    data = await api("/api/home");
+    data = await api(`/api/home?viewer=${encodeURIComponent(currentViewer())}`);
     await pocketSet("home", data);
     state.pocketMode = false;
   } catch (err) {
@@ -345,6 +427,7 @@ async function loadHome() {
   const body = document.getElementById("home-body");
   const todos = data.todos || [];
   const reports = data.reports || [];
+  const mentions = data.mentions || [];
   const todoHtml = todos.length
     ? todos
         .map(
@@ -360,6 +443,21 @@ async function loadHome() {
         )
         .join("")
     : `<p class="home-empty">No open todos — agents can add rows to Agent todos.</p>`;
+  const mentionHtml = mentions.length
+    ? `<div class="home-cards">${mentions
+        .map(
+          (r) => `
+      <button type="button" class="home-card home-mention home-open-channel" data-slug="${esc(r.channel)}">
+        <div class="meta">
+          <strong>${esc(r.author)}</strong>
+          <span class="ch">${r.kind === "dm" ? "DM" : "#"}${esc(r.channel)}</span>
+          <time>${esc(fmtTime(r.created_at))}</time>
+        </div>
+        <div class="preview">${esc(r.preview || r.body || "")}</div>
+      </button>`
+        )
+        .join("")}</div>`
+    : `<p class="home-empty">No @${esc(currentViewer())} mentions yet. Agents can ping you with @${esc(currentViewer())}.</p>`;
   const reportHtml = reports.length
     ? `<div class="home-cards">${reports
         .map(
@@ -377,6 +475,10 @@ async function loadHome() {
     : `<p class="home-empty">No reports yet. Agents post into #the-digest.</p>`;
   body.innerHTML = `
     <section class="home-section">
+      <h2>Mentions</h2>
+      ${mentionHtml}
+    </section>
+    <section class="home-section">
       <h2>Open todos</h2>
       <div class="home-cards">${todoHtml}</div>
     </section>
@@ -391,15 +493,27 @@ function nearBottom(el) {
 }
 
 function renderMessages(data) {
-  document.getElementById("channel-title").textContent = `#${data.channel.slug}`;
-  document.getElementById("channel-purpose").textContent = data.channel.purpose || "";
-  document.getElementById("body").placeholder = `Message #${data.channel.slug}`;
+  const ch = data.channel || {};
+  const viewer = currentViewer();
+  const title =
+    ch.kind === "dm" ? dmLabel(ch, viewer) : `#${ch.slug || state.channelSlug}`;
+  document.getElementById("channel-title").textContent = title;
+  document.getElementById("channel-purpose").textContent =
+    ch.purpose || (ch.kind === "dm" ? "Direct messages" : "");
+  document.getElementById("body").placeholder =
+    ch.kind === "dm"
+      ? `Message ${dmLabel(ch, viewer)} · @Name to mention`
+      : `Message #${ch.slug} · @Name to mention`;
   const box = document.getElementById("messages");
   const stick = nearBottom(box) || box.dataset.empty === "1";
   if (!data.messages.length) {
     box.dataset.empty = "1";
     box.dataset.sig = "";
-    box.innerHTML = `<p class="empty-state">No messages yet. Say hello, or import Wispr digests with <code>post_digest.py --all</code>.</p>`;
+    box.innerHTML =
+      ch.kind === "dm"
+        ? `<p class="empty-state">No DMs yet. Say hi — agents can reply in this room.</p>`
+        : `<p class="empty-state">No messages yet. Say hello, or import Wispr digests with <code>post_digest.py --all</code>.</p>`;
+    markChannelRead(ch.slug || state.channelSlug, new Date().toISOString());
     return;
   }
   box.dataset.empty = "0";
@@ -410,7 +524,7 @@ function renderMessages(data) {
         <div class="meta"><strong>${esc(m.author)}</strong><time>${esc(
           fmtTime(m.created_at)
         )}</time></div>
-        <div class="body">${esc(m.body)}</div>
+        <div class="body">${formatBodyHtml(m.body)}</div>
         <button type="button" class="thread-link" data-parent="${esc(m.id)}">
           ${m.reply_count ? `${m.reply_count} replies` : "Reply in thread"}
         </button>
@@ -421,6 +535,9 @@ function renderMessages(data) {
   box.dataset.sig = nextHtml;
   box.innerHTML = nextHtml;
   if (stick) box.scrollTop = box.scrollHeight;
+  const last = data.messages[data.messages.length - 1];
+  if (last?.created_at) markChannelRead(ch.slug || state.channelSlug, last.created_at);
+  state.unreads[ch.slug || state.channelSlug] = 0;
 }
 
 async function loadMessages() {
@@ -457,7 +574,7 @@ async function openThread(parentId) {
         <div class="meta"><strong>${esc(m.author)}</strong><time>${esc(
           fmtTime(m.created_at)
         )}</time></div>
-        <div class="body">${esc(m.body)}</div>
+        <div class="body">${formatBodyHtml(m.body)}</div>
       </article>`
     )
     .join("");
@@ -747,6 +864,22 @@ document.getElementById("new-channel").addEventListener("submit", async (e) => {
   });
   e.target.reset();
   state.channelSlug = slug.toLowerCase().replaceAll(" ", "-");
+  setRailOpen(false);
+  showView("channel");
+});
+
+document.getElementById("new-dm")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const member = String(fd.get("member") || "").trim();
+  if (!member) return;
+  const ch = await api("/api/dms", {
+    method: "POST",
+    body: JSON.stringify({ me: currentViewer(), member }),
+  });
+  e.target.reset();
+  state.channelSlug = ch.slug;
+  await loadChannels();
   setRailOpen(false);
   showView("channel");
 });
