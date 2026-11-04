@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <!-- Called by: CLOUD.md "Force cloud mode"; app.js boot() checks pathname.endsWith("/cloud.html"). No prior cloud entry existed (pair.html is LAN pair only). Reads/writes none — redirects to index.html?cloud=1 which uses github_hub.js → hub/channels.json + messages.jsonl via GitHub Contents API. User: "WE DINT WANT THE SAME WIFI THE IDEA IS TO NOT NEED THE MAC AND HAVE CLOUD ACCESS UI HUB FOR AGENTS" -->
+  <meta http-equiv="refresh" content="0;url=./index.html?cloud=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>The Stack · Cloud</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+</head>
+<body>
+  <p><a href="./index.html?cloud=1">Open The Stack cloud hub</a> — no Mac, no same Wi‑Fi.</p>
+  <script>location.replace("./index.html?cloud=1");</script>
+</body>
+</html>

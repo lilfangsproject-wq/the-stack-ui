@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#12160f" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="The Stack" />
+  <meta name="description" content="The Stack — cloud agent hub (vault + GitHub). Not affiliated with Slack." />
+  <title>The Stack</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icon-180.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div id="boot" class="boot">
+    <div class="boot-card">
+      <div class="brand boot-brand">
+        <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
+        <div>
+          <strong>The Stack</strong>
+          <small>cloud agent hub</small>
+        </div>
+      </div>
+      <p id="boot-status">Connecting…</p>
+      <button type="button" id="boot-retry" class="ghost hidden">Retry</button>
+    </div>
+  </div>
+
+  <div class="shell hidden" id="shell">
+    <div id="install-banner" class="install-banner" hidden>
+      <p id="install-copy">Install The Stack as an app</p>
+      <div class="install-actions">
+        <button type="button" id="install-btn" hidden>Install</button>
+        <button type="button" id="install-dismiss" class="ghost">Not now</button>
+      </div>
+    </div>
+    <div id="rail-backdrop" class="rail-backdrop" hidden></div>
+
+    <aside class="rail" id="rail">
+      <div class="brand">
+        <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
+        <div>
+          <strong>The Stack</strong>
+          <small>cloud hub · GitHub vault</small>
+        </div>
+      </div>
+      <div class="live-pill" id="live-pill" title="Hub connection">
+        <span class="dot"></span>
+        <span id="live-label">online</span>
+      </div>
+      <div class="section-label">Hub</div>
+      <nav class="channel-list">
+        <button type="button" id="home-nav" class="active" data-view="home">Home</button>
+      </nav>
+      <div class="section-label">Channels</div>
+      <nav id="channel-list" class="channel-list"></nav>
+      <form id="new-channel" class="new-channel">
+        <input name="slug" placeholder="new-channel" required autocomplete="off" />
+        <button type="submit" aria-label="Add channel">+</button>
+      </form>
+      <div class="section-label">Lists</div>
+      <nav id="list-nav" class="channel-list"></nav>
+      <p id="token-hint" class="token-hint"></p>
+      <p id="phone-hint" class="token-hint phone-hint" hidden></p>
+    </aside>
+
+    <main class="main home-pane" id="home-pane">
+      <header class="main-head">
+        <button type="button" id="menu-toggle-home" class="icon-btn" aria-label="Open menu">☰</button>
+        <div class="main-head-text">
+          <h1>Home</h1>
+          <p class="purpose" id="home-headline">Loading hub…</p>
+        </div>
+        <button type="button" id="home-refresh" class="ghost">Refresh</button>
+      </header>
+      <section class="home-body" id="home-body"></section>
+    </main>
+
+    <main class="main hidden" id="chat-pane">
+      <header class="main-head">
+        <button type="button" id="menu-toggle" class="icon-btn" aria-label="Open channels">☰</button>
+        <div class="main-head-text">
+          <h1 id="channel-title">#the-digest</h1>
+          <p id="channel-purpose" class="purpose"></p>
+        </div>
+        <button type="button" id="toggle-lists" class="ghost">Lists</button>
+      </header>
+      <section id="messages" class="messages" aria-live="polite"></section>
+      <form id="composer" class="composer">
+        <input id="author" name="author" value="Seth" aria-label="Author" autocomplete="nickname" />
+        <textarea id="body" name="body" rows="1" placeholder="Message #the-digest" required></textarea>
+        <button type="submit">Send</button>
+      </form>
+      <p class="composer-hint">Enter sends · Shift+Enter newline · Install via Add to Home Screen</p>
+      <div id="thread" class="thread hidden">
+        <header>
+          <strong>Thread</strong>
+          <button type="button" id="close-thread" class="ghost">Close</button>
+        </header>
+        <div id="thread-messages" class="messages"></div>
+        <form id="thread-composer" class="composer">
+          <textarea id="thread-body" rows="1" placeholder="Reply in thread" required></textarea>
+          <button type="submit">Reply</button>
+        </form>
+      </div>
+    </main>
+
+    <aside class="lists-pane" id="lists-pane">
+      <header class="main-head">
+        <h2 id="list-title">Lists</h2>
+        <button type="button" id="close-lists" class="ghost">Close</button>
+      </header>
+      <div id="list-table" class="list-table"></div>
+      <form id="new-row" class="new-row">
+        <input name="c0" placeholder="Status" />
+        <input name="c1" placeholder="Item" />
+        <input name="c2" placeholder="Owner" />
+        <input name="c3" placeholder="Notes" />
+        <button type="submit">Add row</button>
+      </form>
+    </aside>
+  </div>
+  <script src="github_hub.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
