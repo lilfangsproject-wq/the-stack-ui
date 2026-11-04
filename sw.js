@@ -4,7 +4,7 @@
  * Data: caches static assets only — no hub schema; hub via GitHub API in page JS.
  * User: cloud access UI hub — no Mac / same Wi‑Fi required.
  */
-const CACHE = "the-stack-shell-v13-fix-empty-main";
+const CACHE = "the-stack-shell-v14-main-hub";
 const SHELL = [
   "./index.html",
   "./cloud.html",

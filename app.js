@@ -139,7 +139,7 @@ function showCloudConnect(errMsg) {
         <input name="repo" value="lilfangsproject-wq/ai-workspace" autocomplete="off" required />
       </label>
       <label>Branch
-        <input name="branch" value="cursor/the-stack-hub-github-sync" autocomplete="off" required />
+        <input name="branch" value="main" autocomplete="off" required />
       </label>
       <label>GitHub PAT (Contents R/W)
         <input name="token" type="password" autocomplete="off" required placeholder="github_pat_…" />
@@ -152,7 +152,10 @@ function showCloudConnect(errMsg) {
       e.preventDefault();
       const fd = new FormData(form);
       ghState.repo = String(fd.get("repo") || "").trim();
-      ghState.branch = String(fd.get("branch") || "main").trim();
+      ghState.branch = String(
+        fd.get("branch") ||
+          (typeof GH_DEFAULT_BRANCH === "string" ? GH_DEFAULT_BRANCH : "main")
+      ).trim();
       ghState.token = String(fd.get("token") || "").trim();
       ghSaveCreds();
       await bootCloud();
@@ -184,17 +187,9 @@ async function bootCloud() {
     const health = await api("/api/health");
     // Prove hub readable
     const { channels } = await api("/api/channels");
-    if ((!channels || !channels.length) && ghState.branch === "main") {
-      ghState.branch =
-        typeof GH_DEFAULT_BRANCH === "string"
-          ? GH_DEFAULT_BRANCH
-          : "cursor/the-stack-hub-github-sync";
-      ghSaveCreds();
-      return bootCloud();
-    }
     if (!channels || !channels.length) {
       throw new Error(
-        `No hub channels on ${ghState.repo}@${ghState.branch}. Set Branch to cursor/the-stack-hub-github-sync and reconnect.`
+        `No hub channels on ${ghState.repo}@${ghState.branch}. Use Branch main and tap Open cloud hub again (or open with ?cloud=1&reset=1).`
       );
     }
     state.hostLabel = "github";
@@ -427,6 +422,7 @@ function showView(view) {
 async function loadHome() {
   let data;
   try {
+    if (typeof ghLoadCreds === "function") ghLoadCreds();
     data = await api(`/api/home?viewer=${encodeURIComponent(currentViewer())}`);
     await pocketSet("home", data);
     state.pocketMode = false;
@@ -435,7 +431,16 @@ async function loadHome() {
     if (!data) throw err;
     state.pocketMode = true;
   }
-  const channelCount = (data.channels || []).length || data.summary?.channels || 0;
+  const channelCount =
+    (Array.isArray(data.channels) ? data.channels.length : 0) ||
+    data.summary?.channels ||
+    0;
+  const dmCount =
+    (Array.isArray(data.channels)
+      ? data.channels.filter((c) => c.kind === "dm").length
+      : 0) ||
+    data.summary?.dms ||
+    0;
   const branchLabel =
     state.cloudMode && typeof ghState !== "undefined"
       ? `${ghState.repo}@${ghState.branch}`
@@ -447,17 +452,35 @@ async function loadHome() {
   const reports = data.reports || [];
   const mentions = data.mentions || [];
   const emptyHub =
-    state.cloudMode &&
-    !channelCount &&
-    !(data.summary?.dms || 0) &&
-    !(mentions.length || reports.length || todos.length);
+    state.cloudMode && !channelCount && !dmCount && !mentions.length && !reports.length;
+  // Stale empty pocket/home after hub landed on main — kick back to connect.
+  if (emptyHub && !state._emptyKick) {
+    state._emptyKick = true;
+    try {
+      await pocketSet("home", null);
+      await pocketSet("channels", null);
+    } catch {
+      /* ignore */
+    }
+    document.getElementById("shell").classList.add("hidden");
+    document.getElementById("boot").classList.remove("hidden");
+    showCloudConnect(
+      "Hub looked empty (old phone cache). Branch should be main — tap Open cloud hub again."
+    );
+    const form = document.getElementById("cloud-connect");
+    if (form) {
+      form.classList.remove("hidden");
+      const branch = form.querySelector('[name="branch"]');
+      if (branch) branch.value = "main";
+    }
+    return;
+  }
   const emptyBanner = emptyHub
     ? `<section class="home-section home-fix">
         <h2>Hub empty</h2>
-        <p>Connected, but this branch has no Stack hub files (usually still on <code>main</code>).</p>
-        <p>Branch should be <code>cursor/the-stack-hub-github-sync</code>.</p>
+        <p>Old phone cache, or wrong branch. Use <code>main</code> and reconnect.</p>
         <p class="owner">Now: <code>${esc(branchLabel)}</code></p>
-        <button type="button" id="home-reconnect" class="primary-btn">Fix branch &amp; reconnect</button>
+        <button type="button" id="home-reconnect" class="primary-btn">Reconnect to main</button>
       </section>`
     : "";
   const todoHtml = todos.length
@@ -522,21 +545,17 @@ async function loadHome() {
   document.getElementById("home-reconnect")?.addEventListener("click", () => {
     if (typeof ghState !== "undefined") {
       ghState.branch =
-        typeof GH_DEFAULT_BRANCH === "string"
-          ? GH_DEFAULT_BRANCH
-          : "cursor/the-stack-hub-github-sync";
+        typeof GH_DEFAULT_BRANCH === "string" ? GH_DEFAULT_BRANCH : "main";
       if (typeof ghSaveCreds === "function") ghSaveCreds();
     }
     document.getElementById("shell").classList.add("hidden");
     document.getElementById("boot").classList.remove("hidden");
-    showCloudConnect(
-      "Branch set to cursor/the-stack-hub-github-sync — tap Open cloud hub again."
-    );
+    showCloudConnect("Branch set to main — tap Open cloud hub again.");
     const form = document.getElementById("cloud-connect");
     if (form) {
       form.classList.remove("hidden");
       const branch = form.querySelector('[name="branch"]');
-      if (branch) branch.value = "cursor/the-stack-hub-github-sync";
+      if (branch) branch.value = "main";
     }
   });
 }
@@ -1047,7 +1066,34 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("./sw.js", { scope: "./" }).catch(() => {});
 }
 
-boot();
+(async function bootEntry() {
+  // Nuclear clear for stuck empty phone sessions.
+  try {
+    const params = new URLSearchParams(location.search);
+    if (params.has("reset") || params.get("cloud") === "reset") {
+      if (typeof ghResetSession === "function") ghResetSession();
+      try {
+        const keys = ["home", "channels", "lists"];
+        for (const k of keys) await pocketSet(k, null);
+      } catch {
+        /* ignore */
+      }
+      if ("caches" in window) {
+        const names = await caches.keys();
+        await Promise.all(names.map((n) => caches.delete(n)));
+      }
+      if ("serviceWorker" in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.unregister()));
+      }
+      location.replace("./?cloud=1");
+      return;
+    }
+  } catch {
+    /* ignore and continue boot */
+  }
+  boot();
+})();
 state.pollTimer = setInterval(() => {
   // Do not poll while the boot/connect card is showing (Pages has no /api).
   if (!shellReady()) return;

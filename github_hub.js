@@ -1,7 +1,7 @@
 /* The Stack — GitHub vault hub client (no Mac required). */
 const GH_DEFAULT_REPO = "lilfangsproject-wq/ai-workspace";
-// Hub SoT for the phone lives on this branch until PR #39 merges to main.
-const GH_DEFAULT_BRANCH = "cursor/the-stack-hub-github-sync";
+// PR #39 merged — hub SoT is on main.
+const GH_DEFAULT_BRANCH = "main";
 const GH_HUB_PREFIX = "Projects/The-Stack/hub";
 const GH_LS_KEY = "stack-github-hub-v1";
 
@@ -19,9 +19,13 @@ function ghLoadCreds() {
     const data = JSON.parse(raw);
     ghState.token = data.token || "";
     ghState.repo = data.repo || GH_DEFAULT_REPO;
+    // Old phone sessions pointed at the PR branch; main now has the hub.
     let branch = data.branch || GH_DEFAULT_BRANCH;
-    // Phone often saved "main" before hub existed there — migrate to the live hub branch.
-    if (!branch || branch === "main") {
+    if (
+      !branch ||
+      branch === "cursor/the-stack-hub-github-sync" ||
+      branch.startsWith("cursor/the-stack-")
+    ) {
       branch = GH_DEFAULT_BRANCH;
     }
     ghState.branch = branch;
@@ -32,6 +36,20 @@ function ghLoadCreds() {
   } catch {
     /* ignore */
   }
+}
+
+function ghResetSession() {
+  try {
+    localStorage.removeItem(GH_LS_KEY);
+    localStorage.removeItem("stack-reads-v1");
+    localStorage.removeItem("stack-install-dismissed");
+  } catch {
+    /* ignore */
+  }
+  ghState.token = "";
+  ghState.repo = GH_DEFAULT_REPO;
+  ghState.branch = GH_DEFAULT_BRANCH;
+  ghState.enabled = false;
 }
 
 function ghSaveCreds() {
