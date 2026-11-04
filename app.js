@@ -14,6 +14,7 @@ const state = {
 };
 
 const READS_KEY = "stack-reads-v1";
+const QUICK_REACTIONS = ["👍", "👀", "✅", "❤️", "🔥"];
 
 const POCKET_DB = "the-stack-pocket";
 const POCKET_STORE = "kv";
@@ -518,18 +519,46 @@ function renderMessages(data) {
   }
   box.dataset.empty = "0";
   const nextHtml = data.messages
-    .map(
-      (m) => `
+    .map((m) => {
+      const mine = new Set(
+        (m.reactions || [])
+          .filter((r) => (r.authors || []).some((a) => String(a).toLowerCase() === viewer.toLowerCase()))
+          .map((r) => r.emoji)
+      );
+      const chips = (m.reactions || [])
+        .map(
+          (r) =>
+            `<button type="button" class="react-chip${
+              mine.has(r.emoji) ? " mine" : ""
+            }" data-id="${esc(m.id)}" data-emoji="${esc(r.emoji)}" title="${esc(
+              (r.authors || []).join(", ")
+            )}">${esc(r.emoji)} ${r.count}</button>`
+        )
+        .join("");
+      const adders = QUICK_REACTIONS.map(
+        (e) =>
+          `<button type="button" class="react-add" data-id="${esc(m.id)}" data-emoji="${esc(
+            e
+          )}" aria-label="React ${esc(e)}">${esc(e)}</button>`
+      ).join("");
+      return `
       <article class="msg" data-id="${esc(m.id)}">
         <div class="meta"><strong>${esc(m.author)}</strong><time>${esc(
           fmtTime(m.created_at)
         )}</time></div>
         <div class="body">${formatBodyHtml(m.body)}</div>
-        <button type="button" class="thread-link" data-parent="${esc(m.id)}">
-          ${m.reply_count ? `${m.reply_count} replies` : "Reply in thread"}
-        </button>
-      </article>`
-    )
+        <div class="react-row">
+          <div class="react-chips">${chips}</div>
+          <div class="react-picker" hidden>${adders}</div>
+          <button type="button" class="ghost react-toggle" data-id="${esc(
+            m.id
+          )}" aria-label="Add reaction">+</button>
+          <button type="button" class="thread-link" data-parent="${esc(m.id)}">
+            ${m.reply_count ? `${m.reply_count} replies` : "Reply in thread"}
+          </button>
+        </div>
+      </article>`;
+    })
     .join("");
   if (box.dataset.sig === nextHtml) return;
   box.dataset.sig = nextHtml;
@@ -775,7 +804,35 @@ document.getElementById("home-body")?.addEventListener("click", (e) => {
 });
 document.getElementById("rail-backdrop").addEventListener("click", () => setRailOpen(false));
 
+async function toggleReaction(messageId, emoji) {
+  if (!messageId || !emoji) return;
+  await api(
+    `/api/channels/${encodeURIComponent(state.channelSlug)}/messages/${encodeURIComponent(
+      messageId
+    )}/reactions`,
+    {
+      method: "POST",
+      body: JSON.stringify({ emoji, author: currentViewer() }),
+    }
+  );
+  await loadMessages();
+}
+
 document.getElementById("messages").addEventListener("click", (e) => {
+  const toggle = e.target.closest(".react-toggle");
+  if (toggle) {
+    e.preventDefault();
+    const article = toggle.closest(".msg");
+    const picker = article?.querySelector(".react-picker");
+    if (picker) picker.hidden = !picker.hidden;
+    return;
+  }
+  const react = e.target.closest(".react-chip, .react-add");
+  if (react) {
+    e.preventDefault();
+    toggleReaction(react.dataset.id, react.dataset.emoji).catch(() => {});
+    return;
+  }
   const btn = e.target.closest(".thread-link");
   if (!btn) return;
   e.preventDefault();

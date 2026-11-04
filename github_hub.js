@@ -117,8 +117,59 @@ async function ghListChannels() {
   return data.channels || [];
 }
 
+function ghReactionsForMessage(byMessage, messageId) {
+  const raw = (byMessage && byMessage[messageId]) || {};
+  const out = [];
+  for (const [emoji, authors] of Object.entries(raw)) {
+    const names = (authors || []).map((a) => String(a || "").trim()).filter(Boolean);
+    if (!names.length) continue;
+    out.push({ emoji, authors: names, count: names.length });
+  }
+  out.sort((a, b) => b.count - a.count || String(a.emoji).localeCompare(String(b.emoji)));
+  return out;
+}
+
+async function ghLoadReactions(slug) {
+  const data = await ghReadJson(`channels/${slug}/reactions.json`, { by_message: {} });
+  return data.by_message || {};
+}
+
+async function ghToggleReaction(slug, messageId, { emoji, author }) {
+  const mark = String(emoji || "").trim();
+  if (!mark) throw new Error("emoji_required");
+  const who = (author || "Seth").trim() || "Seth";
+  const byMessage = await ghLoadReactions(slug);
+  const bucket = { ...(byMessage[messageId] || {}) };
+  const authors = [...(bucket[mark] || [])].map((a) => String(a));
+  const has = authors.some((a) => a.toLowerCase() === who.toLowerCase());
+  let added = false;
+  const nextAuthors = has
+    ? authors.filter((a) => a.toLowerCase() !== who.toLowerCase())
+    : [...authors, who];
+  added = !has;
+  if (nextAuthors.length) bucket[mark] = nextAuthors;
+  else delete bucket[mark];
+  if (Object.keys(bucket).length) byMessage[messageId] = bucket;
+  else delete byMessage[messageId];
+  await ghPutFile(
+    `channels/${slug}/reactions.json`,
+    JSON.stringify({ by_message: byMessage, updated_at: new Date().toISOString() }, null, 2) +
+      "\n",
+    `stack: reaction ${mark} on ${slug}`
+  );
+  return {
+    ok: true,
+    message_id: messageId,
+    emoji: mark,
+    author: who,
+    added,
+    reactions: ghReactionsForMessage(byMessage, messageId),
+  };
+}
+
 async function ghListMessages(slug, parentId = null) {
   const file = await ghGetFile(`channels/${slug}/messages.jsonl`);
+  const byMessage = await ghLoadReactions(slug);
   const rows = [];
   const all = [];
   for (const line of file.text.split("\n")) {
@@ -143,6 +194,9 @@ async function ghListMessages(slug, parentId = null) {
       if (row.parent_id) counts[row.parent_id] = (counts[row.parent_id] || 0) + 1;
     }
     for (const row of rows) row.reply_count = counts[row.id] || 0;
+  }
+  for (const row of rows) {
+    row.reactions = ghReactionsForMessage(byMessage, row.id);
   }
   return rows;
 }
@@ -404,6 +458,7 @@ async function ghRoute(path, options = {}) {
       cloud: true,
       dms: true,
       mentions: true,
+      reactions: true,
       messages: null,
       usable: true,
     };
@@ -447,6 +502,10 @@ async function ghRoute(path, options = {}) {
   if (msgMatch && method === "POST") {
     const slug = decodeURIComponent(msgMatch[1]);
     return ghAppendMessage(slug, body);
+  }
+  const reactMatch = p.match(/^\/api\/channels\/([^/]+)\/messages\/([^/]+)\/reactions$/);
+  if (reactMatch && method === "POST") {
+    return ghToggleReaction(decodeURIComponent(reactMatch[1]), decodeURIComponent(reactMatch[2]), body);
   }
   if (p === "/api/lists" && method === "GET") {
     return { lists: await ghListLists() };

@@ -132,6 +132,33 @@ body {
   font-weight: 600;
 }
 .home-mention { border-left: 3px solid var(--accent); }
+.react-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+}
+.react-chips, .react-picker { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.react-chip, .react-add {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 999px;
+  min-height: 1.75rem;
+  padding: 0.15rem 0.55rem;
+  font: inherit;
+  cursor: pointer;
+}
+.react-chip.mine {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+}
+.react-toggle {
+  min-width: 1.75rem;
+  min-height: 1.75rem;
+  padding: 0;
+}
 
 .new-channel, .new-row, .composer {
   display: flex;
