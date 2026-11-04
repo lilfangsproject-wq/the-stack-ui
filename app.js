@@ -14,7 +14,94 @@ const state = {
 };
 
 const READS_KEY = "stack-reads-v1";
+const LOOK_KEY = "stack-look-v1";
 const QUICK_REACTIONS = ["👍", "👀", "✅", "❤️", "🔥"];
+
+/** Phone-steerable accents — tap Look in the menu. Default is iOS blue (not green). */
+const LOOKS = {
+  blue: {
+    label: "Blue",
+    accent: "#007aff",
+    strong: "#0066d6",
+    soft: "rgba(0, 122, 255, 0.14)",
+  },
+  graphite: {
+    label: "Graphite",
+    accent: "#1c1c1e",
+    strong: "#000000",
+    soft: "rgba(28, 28, 30, 0.12)",
+  },
+  indigo: {
+    label: "Indigo",
+    accent: "#5856d6",
+    strong: "#3634a3",
+    soft: "rgba(88, 86, 214, 0.14)",
+  },
+  teal: {
+    label: "Teal",
+    accent: "#30b0c7",
+    strong: "#0a7f94",
+    soft: "rgba(48, 176, 199, 0.16)",
+  },
+  orange: {
+    label: "Orange",
+    accent: "#ff9500",
+    strong: "#c66f00",
+    soft: "rgba(255, 149, 0, 0.16)",
+  },
+  rose: {
+    label: "Rose",
+    accent: "#ff2d55",
+    strong: "#d70015",
+    soft: "rgba(255, 45, 85, 0.14)",
+  },
+};
+const LOOK_DEFAULT = "blue";
+
+function applyLook(id) {
+  const look = LOOKS[id] || LOOKS[LOOK_DEFAULT];
+  const root = document.documentElement;
+  root.style.setProperty("--accent", look.accent);
+  root.style.setProperty("--accent-strong", look.strong);
+  root.style.setProperty("--accent-soft", look.soft);
+  root.dataset.look = LOOKS[id] ? id : LOOK_DEFAULT;
+  try {
+    localStorage.setItem(LOOK_KEY, root.dataset.look);
+  } catch {
+    /* ignore */
+  }
+  const theme = document.querySelector('meta[name="theme-color"]');
+  if (theme) theme.setAttribute("content", "#f2f2f7");
+  document.querySelectorAll("#look-picker .look-swatch").forEach((btn) => {
+    const on = btn.dataset.look === root.dataset.look;
+    btn.setAttribute("aria-checked", on ? "true" : "false");
+  });
+}
+
+function initLookPicker() {
+  let saved = LOOK_DEFAULT;
+  try {
+    saved = localStorage.getItem(LOOK_KEY) || LOOK_DEFAULT;
+  } catch {
+    saved = LOOK_DEFAULT;
+  }
+  if (!LOOKS[saved]) saved = LOOK_DEFAULT;
+  const host = document.getElementById("look-picker");
+  if (host && !host.childElementCount) {
+    host.innerHTML = Object.entries(LOOKS)
+      .map(
+        ([id, look]) =>
+          `<button type="button" class="look-swatch" role="radio" data-look="${id}" aria-label="${look.label}" style="--swatch:${look.accent}" title="${look.label}"></button>`
+      )
+      .join("");
+    host.addEventListener("click", (e) => {
+      const btn = e.target.closest(".look-swatch");
+      if (!btn) return;
+      applyLook(btn.dataset.look);
+    });
+  }
+  applyLook(saved);
+}
 
 const POCKET_DB = "the-stack-pocket";
 const POCKET_STORE = "kv";
@@ -841,6 +928,7 @@ async function boot() {
 }
 
 document.getElementById("boot-retry").addEventListener("click", () => boot());
+initLookPicker();
 function bindMenuToggle(id) {
   const el = document.getElementById(id);
   if (!el) return;
