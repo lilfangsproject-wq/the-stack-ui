@@ -139,7 +139,7 @@ function showCloudConnect(errMsg) {
         <input name="repo" value="lilfangsproject-wq/ai-workspace" autocomplete="off" required />
       </label>
       <label>Branch
-        <input name="branch" value="main" autocomplete="off" required />
+        <input name="branch" value="cursor/the-stack-hub-github-sync" autocomplete="off" required />
       </label>
       <label>GitHub PAT (Contents R/W)
         <input name="token" type="password" autocomplete="off" required placeholder="github_pat_…" />

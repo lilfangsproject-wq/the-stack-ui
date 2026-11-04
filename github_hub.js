@@ -1,12 +1,14 @@
 /* The Stack — GitHub vault hub client (no Mac required). */
 const GH_DEFAULT_REPO = "lilfangsproject-wq/ai-workspace";
+// Hub SoT for the phone lives on this branch until PR #39 merges to main.
+const GH_DEFAULT_BRANCH = "cursor/the-stack-hub-github-sync";
 const GH_HUB_PREFIX = "Projects/The-Stack/hub";
 const GH_LS_KEY = "stack-github-hub-v1";
 
 const ghState = {
   token: "",
   repo: GH_DEFAULT_REPO,
-  branch: "main",
+  branch: GH_DEFAULT_BRANCH,
   enabled: false,
 };
 
@@ -17,7 +19,7 @@ function ghLoadCreds() {
     const data = JSON.parse(raw);
     ghState.token = data.token || "";
     ghState.repo = data.repo || GH_DEFAULT_REPO;
-    ghState.branch = data.branch || "main";
+    ghState.branch = data.branch || GH_DEFAULT_BRANCH;
     ghState.enabled = Boolean(ghState.token);
   } catch {
     /* ignore */
