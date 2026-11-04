@@ -78,6 +78,16 @@ function b64decode(str) {
   return decodeURIComponent(escape(atob(str.replace(/\n/g, ""))));
 }
 
+function ghIsConflict(err) {
+  const status = err && err.status;
+  const msg = String((err && err.message) || err || "").toLowerCase();
+  return status === 409 || msg.includes("conflict") || msg.includes("does not match");
+}
+
+function ghSleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function ghApi(path, options = {}) {
   const res = await fetch(`https://api.github.com${path}`, {
     ...options,
@@ -96,7 +106,12 @@ async function ghApi(path, options = {}) {
     data = { raw: text };
   }
   if (!res.ok) {
-    throw new Error(data.message || data.error || res.statusText || String(res.status));
+    const err = new Error(
+      data.message || data.error || res.statusText || String(res.status)
+    );
+    err.status = res.status;
+    err.data = data;
+    throw err;
   }
   return data;
 }
@@ -112,26 +127,45 @@ async function ghGetFile(relPath) {
       text: b64decode(data.content || ""),
     };
   } catch (err) {
-    if (String(err.message || err).includes("Not Found")) {
+    if (err.status === 404 || String(err.message || err).includes("Not Found")) {
       return { path, sha: null, text: "" };
     }
     throw err;
   }
 }
 
-async function ghPutFile(relPath, text, message) {
-  const existing = await ghGetFile(relPath);
-  const path = existing.path;
-  const body = {
-    message: message || `stack: update ${relPath}`,
-    content: b64encode(text),
-    branch: ghState.branch,
-  };
-  if (existing.sha) body.sha = existing.sha;
-  return ghApi(`/repos/${ghState.repo}/contents/${path}`, {
-    method: "PUT",
-    body: JSON.stringify(body),
-  });
+async function ghPutFile(relPath, textOrBuilder, message, { attempts = 4 } = {}) {
+  // textOrBuilder: string, or async (existingFile) => string for conflict-safe RMW/append.
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    const existing = await ghGetFile(relPath);
+    const path = existing.path;
+    const text =
+      typeof textOrBuilder === "function"
+        ? await textOrBuilder(existing)
+        : textOrBuilder;
+    const body = {
+      message: message || `stack: update ${relPath}`,
+      content: b64encode(text),
+      branch: ghState.branch,
+    };
+    if (existing.sha) body.sha = existing.sha;
+    try {
+      return await ghApi(`/repos/${ghState.repo}/contents/${path}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      lastErr = err;
+      // Phone + agent raced — re-read and rebuild payload, then retry.
+      if (ghIsConflict(err) && i < attempts - 1) {
+        await ghSleep(150 * (i + 1));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
 }
 
 async function ghReadJson(relPath, fallback) {
@@ -166,23 +200,39 @@ async function ghToggleReaction(slug, messageId, { emoji, author }) {
   const mark = String(emoji || "").trim();
   if (!mark) throw new Error("emoji_required");
   const who = (author || "Seth").trim() || "Seth";
-  const byMessage = await ghLoadReactions(slug);
-  const bucket = { ...(byMessage[messageId] || {}) };
-  const authors = [...(bucket[mark] || [])].map((a) => String(a));
-  const has = authors.some((a) => a.toLowerCase() === who.toLowerCase());
   let added = false;
-  const nextAuthors = has
-    ? authors.filter((a) => a.toLowerCase() !== who.toLowerCase())
-    : [...authors, who];
-  added = !has;
-  if (nextAuthors.length) bucket[mark] = nextAuthors;
-  else delete bucket[mark];
-  if (Object.keys(bucket).length) byMessage[messageId] = bucket;
-  else delete byMessage[messageId];
+  let finalByMessage = {};
   await ghPutFile(
     `channels/${slug}/reactions.json`,
-    JSON.stringify({ by_message: byMessage, updated_at: new Date().toISOString() }, null, 2) +
-      "\n",
+    async (existing) => {
+      let byMessage = {};
+      try {
+        byMessage = existing.text
+          ? JSON.parse(existing.text).by_message || {}
+          : {};
+      } catch {
+        byMessage = {};
+      }
+      const bucket = { ...(byMessage[messageId] || {}) };
+      const authors = [...(bucket[mark] || [])].map((a) => String(a));
+      const has = authors.some((a) => a.toLowerCase() === who.toLowerCase());
+      const nextAuthors = has
+        ? authors.filter((a) => a.toLowerCase() !== who.toLowerCase())
+        : [...authors, who];
+      added = !has;
+      if (nextAuthors.length) bucket[mark] = nextAuthors;
+      else delete bucket[mark];
+      if (Object.keys(bucket).length) byMessage[messageId] = bucket;
+      else delete byMessage[messageId];
+      finalByMessage = byMessage;
+      return (
+        JSON.stringify(
+          { by_message: byMessage, updated_at: new Date().toISOString() },
+          null,
+          2
+        ) + "\n"
+      );
+    },
     `stack: reaction ${mark} on ${slug}`
   );
   return {
@@ -191,7 +241,7 @@ async function ghToggleReaction(slug, messageId, { emoji, author }) {
     emoji: mark,
     author: who,
     added,
-    reactions: ghReactionsForMessage(byMessage, messageId),
+    reactions: ghReactionsForMessage(finalByMessage, messageId),
   };
 }
 
@@ -255,7 +305,6 @@ async function ghAppendMessage(slug, { body, author, parent_id }) {
   const channels = await ghListChannels();
   let ch = channels.find((c) => c.slug === slug);
   if (!ch) throw new Error("channel_not_found");
-  const file = await ghGetFile(`channels/${slug}/messages.jsonl`);
   const text = String(body || "").trim();
   const row = {
     id: crypto.randomUUID(),
@@ -267,26 +316,37 @@ async function ghAppendMessage(slug, { body, author, parent_id }) {
     mentions: ghExtractMentions(text),
     created_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
   };
-  const next = (file.text ? file.text.replace(/\s*$/, "\n") : "") + JSON.stringify(row) + "\n";
   const label = ch.kind === "dm" ? `dm ${slug}` : `#${slug}`;
-  await ghPutFile(`channels/${slug}/messages.jsonl`, next, `stack: message in ${label}`);
-  ch.updated_at = row.created_at;
-  const catalog = await ghReadJson("channels.json", { channels: [] });
-  const nextChannels = (catalog.channels || []).map((c) =>
-    c.slug === slug ? { ...c, ...ch } : c
+  // Rebuild append from latest file on each 409 so concurrent agent writes aren't clobbered.
+  await ghPutFile(
+    `channels/${slug}/messages.jsonl`,
+    async (existing) =>
+      (existing.text ? existing.text.replace(/\s*$/, "\n") : "") +
+      JSON.stringify(row) +
+      "\n",
+    `stack: message in ${label}`
   );
+  ch.updated_at = row.created_at;
   await ghPutFile(
     "channels.json",
-    JSON.stringify({ channels: nextChannels }, null, 2) + "\n",
+    async (existing) => {
+      let catalog = { channels: [] };
+      try {
+        catalog = existing.text ? JSON.parse(existing.text) : { channels: [] };
+      } catch {
+        catalog = { channels: [] };
+      }
+      const nextChannels = (catalog.channels || []).map((c) =>
+        c.slug === slug ? { ...c, ...ch } : c
+      );
+      return JSON.stringify({ channels: nextChannels }, null, 2) + "\n";
+    },
     `stack: activity ${label}`
   );
   return row;
 }
 
 async function ghCreateChannel({ slug, name, purpose, kind, members }) {
-  const data = await ghReadJson("channels.json", { channels: [] });
-  const channels = data.channels || [];
-  if (channels.some((c) => c.slug === slug)) throw new Error("slug_exists");
   const ch = {
     id: crypto.randomUUID(),
     slug,
@@ -297,14 +357,27 @@ async function ghCreateChannel({ slug, name, purpose, kind, members }) {
     created_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
     updated_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
   };
-  channels.push(ch);
-  channels.sort((a, b) => {
-    const ak = a.kind === "dm" ? 1 : 0;
-    const bk = b.kind === "dm" ? 1 : 0;
-    if (ak !== bk) return ak - bk;
-    return String(a.name).localeCompare(String(b.name));
-  });
-  await ghPutFile("channels.json", JSON.stringify({ channels }, null, 2) + "\n", `stack: channel #${slug}`);
+  await ghPutFile(
+    "channels.json",
+    async (existing) => {
+      let channels = [];
+      try {
+        channels = existing.text ? JSON.parse(existing.text).channels || [] : [];
+      } catch {
+        channels = [];
+      }
+      if (channels.some((c) => c.slug === slug)) throw new Error("slug_exists");
+      channels.push(ch);
+      channels.sort((a, b) => {
+        const ak = a.kind === "dm" ? 1 : 0;
+        const bk = b.kind === "dm" ? 1 : 0;
+        if (ak !== bk) return ak - bk;
+        return String(a.name).localeCompare(String(b.name));
+      });
+      return JSON.stringify({ channels }, null, 2) + "\n";
+    },
+    `stack: channel #${slug}`
+  );
   await ghPutFile(`channels/${slug}/messages.jsonl`, "", `stack: init #${slug}`);
   return ch;
 }
@@ -343,22 +416,33 @@ async function ghGetList(id) {
 }
 
 async function ghAddListRow(listId, cells) {
-  const data = await ghReadJson("lists.json", { lists: [] });
-  const lists = data.lists || [];
-  const lst = lists.find((l) => l.id === listId);
-  if (!lst) throw new Error("list_not_found");
-  const cols = lst.columns || [];
-  const trimmed = [...cells];
-  while (trimmed.length < cols.length) trimmed.push("");
-  const row = {
-    id: crypto.randomUUID(),
-    cells: trimmed.slice(0, cols.length),
-    created_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
-    updated_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
-  };
-  lst.rows = [...(lst.rows || []), row];
-  lst.updated_at = row.updated_at;
-  await ghPutFile("lists.json", JSON.stringify({ lists }, null, 2) + "\n", "stack: list row");
+  let row = null;
+  await ghPutFile(
+    "lists.json",
+    async (existing) => {
+      let lists = [];
+      try {
+        lists = existing.text ? JSON.parse(existing.text).lists || [] : [];
+      } catch {
+        lists = [];
+      }
+      const lst = lists.find((l) => l.id === listId);
+      if (!lst) throw new Error("list_not_found");
+      const cols = lst.columns || [];
+      const trimmed = [...(cells || [])];
+      while (trimmed.length < cols.length) trimmed.push("");
+      row = {
+        id: crypto.randomUUID(),
+        cells: trimmed.slice(0, cols.length),
+        created_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+        updated_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+      };
+      lst.rows = [...(lst.rows || []), row];
+      lst.updated_at = row.updated_at;
+      return JSON.stringify({ lists }, null, 2) + "\n";
+    },
+    "stack: list row"
+  );
   return row;
 }
 
