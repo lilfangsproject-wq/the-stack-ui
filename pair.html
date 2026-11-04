@@ -7,10 +7,11 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="The Stack" />
   <title>The Stack — Install</title>
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="/icon-180.png" />
-  <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="/style.css" />
+  <!-- Relative assets: must work on GitHub Pages subpath /the-stack-ui/ (root /favicon.svg 404s). -->
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./icon-180.png" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="stylesheet" href="./style.css" />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
     .pair {
@@ -96,11 +97,11 @@
   <div class="pair">
     <div class="pair-card">
       <div class="pair-hero">
-        <span class="mark" aria-hidden="true"><img src="/favicon.svg" alt="" /></span>
+        <span class="mark" aria-hidden="true"><img src="./favicon.svg" alt="" /></span>
         <h1>The Stack</h1>
-        <p class="tag">our app · not Slack · zero spend</p>
+        <p class="tag">cloud hub · vault + GitHub · zero spend</p>
       </div>
-      <p class="lead">Same Wi‑Fi as the Mac. Add to Home Screen — that icon <em>is</em> The Stack.</p>
+      <p class="lead" id="pair-lead">Open the cloud hub (no Mac, no same Wi‑Fi). Add to Home Screen — that icon <em>is</em> The Stack.</p>
       <code class="pair-url" id="pair-url"></code>
       <div class="pair-actions">
         <button type="button" id="open-app">Open app</button>
@@ -110,13 +111,23 @@
       <ol class="pair-steps">
         <li><strong>iPhone:</strong> Safari → Share → <strong>Add to Home Screen</strong></li>
         <li><strong>Android:</strong> Chrome menu → <strong>Install app</strong> / Add to Home screen</li>
-        <li>At work, open the home-screen icon — pocket (offline) works without Tailscale</li>
+        <li>Paste a fine-grained GitHub PAT once (Contents R/W on private <code>ai-workspace</code> only)</li>
       </ol>
     </div>
   </div>
   <script>
-    const url = location.origin + "/";
+    // Resolve app URL relative to this page so GitHub Pages /the-stack-ui/ works
+    // (location.origin + "/" would hit lilfangsproject-wq.github.io/ and break).
+    const base = new URL("./", location.href);
+    const onPages = /github\.io$/i.test(location.hostname);
+    const url = onPages
+      ? new URL("./index.html?cloud=1", base).href
+      : new URL("./", base).href;
     document.getElementById("pair-url").textContent = url;
+    if (!onPages) {
+      document.getElementById("pair-lead").innerHTML =
+        "Same host as this page. Add to Home Screen — that icon <em>is</em> The Stack. For phone-from-anywhere use the GitHub Pages URL with <code>?cloud=1</code>.";
+    }
     document.getElementById("open-app").onclick = () => { location.href = url; };
     document.getElementById("copy-url").onclick = async () => {
       try {

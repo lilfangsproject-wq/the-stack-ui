@@ -116,7 +116,7 @@ function showCloudConnect(errMsg) {
         <input name="token" type="password" autocomplete="off" required placeholder="github_pat_…" />
       </label>
       <button type="submit">Open cloud hub</button>
-      <p class="cloud-help">Token stays in this browser only. Create a fine-grained PAT with Contents access to this private repo. Host the static UI on free Cloudflare Pages — see CLOUD.md.</p>
+      <p class="cloud-help">Token stays in this browser only. Create a fine-grained PAT with Contents Read/Write on private ai-workspace only. Phone URL: GitHub Pages (see CLOUD.md) — no Mac required.</p>
     `;
     document.querySelector(".boot-card").appendChild(form);
     form.addEventListener("submit", async (e) => {
@@ -778,7 +778,8 @@ window.addEventListener("beforeinstallprompt", (e) => {
 });
 
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("./sw.js").catch(() => {});
+  // Explicit relative scope so GitHub Pages /the-stack-ui/ is covered (not site root).
+  navigator.serviceWorker.register("./sw.js", { scope: "./" }).catch(() => {});
 }
 
 boot();

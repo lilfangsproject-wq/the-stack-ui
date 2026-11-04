@@ -1,14 +1,14 @@
 /* The Stack — shell cache for the installable cloud app.
- * Called by: static/app.js navigator.serviceWorker.register("sw.js") (or /sw.js).
- * Purpose: cache UI shell including github_hub.js (replaces v6 LAN-oriented shell).
+ * Called by: static/app.js navigator.serviceWorker.register("./sw.js", { scope: "./" }).
+ * Purpose: cache UI shell including github_hub.js under GitHub Pages subpath /the-stack-ui/.
  * Data: caches static assets only — no hub schema; hub via GitHub API in page JS.
- * User: "WE DINT WANT THE SAME WIFI THE IDEA IS TO NOT NEED THE MAC AND HAVE CLOUD ACCESS UI HUB FOR AGENTS"
+ * User: cloud access UI hub — no Mac / same Wi‑Fi required.
  */
-const CACHE = "the-stack-shell-v7-cloud";
+const CACHE = "the-stack-shell-v8-pages-subpath";
 const SHELL = [
-  "./",
   "./index.html",
   "./cloud.html",
+  "./phone.html",
   "./pair.html",
   "./app.js",
   "./github_hub.js",
@@ -17,11 +17,24 @@ const SHELL = [
   "./icon-512.png",
   "./icon-192.png",
   "./icon-180.png",
+  "./icon-maskable-512.png",
   "./manifest.webmanifest",
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
+  // Per-URL add: cache.addAll fails the whole install if one URL errors/redirects.
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(CACHE);
+      for (const url of SHELL) {
+        try {
+          await cache.add(url);
+        } catch {
+          /* skip missing/redirect-odd asset; shell still usable */
+        }
+      }
+    })()
+  );
   self.skipWaiting();
 });
 
@@ -37,15 +50,18 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
+  // Never cache GitHub API or local /api — cloud mode uses api.github.com (other origin).
   if (url.pathname.includes("/api/")) return;
 
   event.respondWith(
     fetch(event.request)
       .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+        if (res.ok && event.request.method === "GET") {
+          const copy = res.clone();
+          caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+        }
         return res;
       })
-      .catch(() => caches.match(event.request))
+      .catch(() => caches.match(event.request).then((hit) => hit || caches.match("./index.html")))
   );
 });
