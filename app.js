@@ -13,6 +13,47 @@ const state = {
   unreads: {},
 };
 
+// Older iOS Safari: avoid raw TypeError: x is not a function.
+if (!String.prototype.replaceAll) {
+  String.prototype.replaceAll = function replaceAll(search, replacement) {
+    return String(this).split(search).join(replacement);
+  };
+}
+if (typeof crypto !== "undefined" && typeof crypto.randomUUID !== "function") {
+  crypto.randomUUID = function randomUUID() {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  };
+}
+
+/** Never show raw "TypeError: …" on the phone — map network/Safari failures. */
+function friendlyError(err) {
+  const raw = err && typeof err === "object" ? err.message || String(err) : String(err || "");
+  const msg = String(raw || "Something went wrong");
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes("load failed") ||
+    lower.includes("failed to fetch") ||
+    lower.includes("networkerror") ||
+    lower.includes("network request failed") ||
+    (err && err.name === "TypeError" && (lower === "typeerror" || lower.includes("fetch")))
+  ) {
+    return "Could not reach GitHub from this phone (network). Check signal/Wi‑Fi, then tap Open cloud hub again.";
+  }
+  if (lower.includes("bad credentials") || lower.includes("requires authentication") || lower.includes("401")) {
+    return "GitHub token rejected — paste a fresh fine-grained PAT (Contents Read/Write on ai-workspace).";
+  }
+  if (lower.includes("not found") && lower.includes("404")) {
+    return "Hub file not found on this branch — use Branch main.";
+  }
+  // Strip "TypeError: " / "Error: " prefixes so the card stays readable.
+  return msg.replace(/^(TypeError|Error|SyntaxError|ReferenceError):\s*/i, "");
+}
+
 const READS_KEY = "stack-reads-v1";
 const LOOK_KEY = "stack-look-v1";
 const QUICK_REACTIONS = ["👍", "👀", "✅", "❤️", "🔥"];
@@ -296,8 +337,8 @@ async function bootCloud() {
     return true;
   } catch (err) {
     // Keep cloudMode true so the poll never hits Pages /api/*.
-    showCloudConnect(String(err.message || err));
-    setLive(false, String(err));
+    showCloudConnect(friendlyError(err));
+    setLive(false, friendlyError(err));
     return false;
   }
 }
@@ -497,7 +538,23 @@ function showView(view) {
     chat.classList.add("hidden");
     if (homeNav) homeNav.classList.add("active");
     document.querySelectorAll("#channel-list button").forEach((b) => b.classList.remove("active"));
-    loadHome().catch(() => {});
+    loadHome().catch((err) => {
+      const body = document.getElementById("home-body");
+      const headline = document.getElementById("home-headline");
+      if (headline) headline.textContent = "Couldn’t load hub";
+      if (body) {
+        body.innerHTML = `<section class="home-section home-offline">
+          <h2>Home</h2>
+          <p>${esc(friendlyError(err))}</p>
+          <button type="button" id="home-reconnect" class="primary-btn">Reconnect</button>
+        </section>`;
+        document.getElementById("home-reconnect")?.addEventListener("click", () => {
+          document.getElementById("shell")?.classList.add("hidden");
+          document.getElementById("boot")?.classList.remove("hidden");
+          showCloudConnect(friendlyError(err));
+        });
+      }
+    });
   } else {
     home.classList.add("hidden");
     chat.classList.remove("hidden");
@@ -1042,7 +1099,9 @@ document.getElementById("composer").addEventListener("submit", async (e) => {
 document.getElementById("body").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
-    document.getElementById("composer").requestSubmit();
+    const form = document.getElementById("composer");
+    if (typeof form.requestSubmit === "function") form.requestSubmit();
+    else form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
   }
 });
 document.getElementById("body").addEventListener("input", (e) => autosize(e.target));

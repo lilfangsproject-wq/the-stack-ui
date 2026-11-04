@@ -89,15 +89,26 @@ function ghSleep(ms) {
 }
 
 async function ghApi(path, options = {}) {
-  const res = await fetch(`https://api.github.com${path}`, {
-    ...options,
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${ghState.token}`,
-      "X-GitHub-Api-Version": "2022-11-28",
-      ...(options.headers || {}),
-    },
-  });
+  let res;
+  try {
+    res = await fetch(`https://api.github.com${path}`, {
+      ...options,
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${ghState.token}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+        ...(options.headers || {}),
+      },
+    });
+  } catch (err) {
+    // Safari often surfaces offline/CORS blips as TypeError: Load failed.
+    const wrapped = new Error(
+      "Could not reach GitHub from this phone (network). Check signal/Wi‑Fi and try again."
+    );
+    wrapped.cause = err;
+    wrapped.status = 0;
+    throw wrapped;
+  }
   const text = await res.text();
   let data = {};
   try {
