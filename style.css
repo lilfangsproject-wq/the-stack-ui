@@ -864,3 +864,25 @@ button:active, .ghost:active, .icon-btn:active {
   font-weight: 500;
   line-height: 1.35;
 }
+
+
+.rail-more {
+  margin: 1rem 0.35rem 0.5rem;
+  border-radius: var(--radius);
+  background: var(--grouped);
+  box-shadow: var(--shadow);
+  padding: 0 0.15rem 0.35rem;
+}
+.rail-more > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0.75rem 0.85rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.rail-more > summary::-webkit-details-marker { display: none; }
+.rail-more .look-picker { box-shadow: none; margin: 0 0.35rem 0.25rem; }
+.rail-more .look-hint, .rail-more .token-hint { margin-top: 0.15rem; }
+.token-hint:empty, .phone-hint:empty { display: none; }
+.install-banner[hidden] { display: none !important; }
