@@ -253,9 +253,9 @@ function showCloudConnect(errMsg) {
   const retry = document.getElementById("boot-retry");
   retry.classList.add("hidden");
   status.innerHTML = `
-    <strong>Cloud hub</strong> — no Mac, no same Wi‑Fi.<br/>
-    Connect with a GitHub token that can read/write the vault hub files.
-    ${errMsg ? `<br/><span class="boot-err">${esc(errMsg)}</span>` : ""}
+    <strong>Sign in</strong>
+    <span class="boot-sub">Paste your GitHub token to open the vault hub.</span>
+    ${errMsg ? `<span class="boot-err">${esc(errMsg)}</span>` : ""}
   `;
   let form = document.getElementById("cloud-connect");
   if (!form) {
@@ -263,17 +263,20 @@ function showCloudConnect(errMsg) {
     form.id = "cloud-connect";
     form.className = "cloud-connect";
     form.innerHTML = `
-      <label>Repo
-        <input name="repo" value="lilfangsproject-wq/ai-workspace" autocomplete="off" required />
+      <label class="token-label">GitHub token
+        <input name="token" type="password" autocomplete="off" required placeholder="Paste token" />
       </label>
-      <label>Branch
-        <input name="branch" value="main" autocomplete="off" required />
-      </label>
-      <label>GitHub PAT (Contents R/W)
-        <input name="token" type="password" autocomplete="off" required placeholder="github_pat_…" />
-      </label>
-      <button type="submit">Open cloud hub</button>
-      <p class="cloud-help">Token stays in this browser only. Create a fine-grained PAT with Contents Read/Write on private ai-workspace only. Phone URL: GitHub Pages (see CLOUD.md) — no Mac required.</p>
+      <button type="submit">Continue</button>
+      <details class="cloud-advanced">
+        <summary>Advanced</summary>
+        <label>Repo
+          <input name="repo" value="lilfangsproject-wq/ai-workspace" autocomplete="off" required />
+        </label>
+        <label>Branch
+          <input name="branch" value="main" autocomplete="off" required />
+        </label>
+      </details>
+      <p class="cloud-help">Stays on this phone only. Needs Contents access on the vault repo.</p>
     `;
     document.querySelector(".boot-card").appendChild(form);
     form.addEventListener("submit", async (e) => {
