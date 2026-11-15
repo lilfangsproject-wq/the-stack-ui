@@ -96,11 +96,34 @@ function ghSanitizeToken(raw) {
     .trim();
 }
 
+async function ghFetchOnce(url, init) {
+  return fetch(url, {
+    ...init,
+    cache: "no-store",
+    credentials: "omit",
+    mode: "cors",
+  });
+}
+
+async function ghFetch(url, init, retries = 1) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await ghFetchOnce(url, init);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, 350 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 async function ghProbeGithub() {
   // Split "phone can't reach GitHub at all" from "token/auth problem".
   try {
-    const res = await fetch("https://api.github.com/zen", {
-      cache: "no-store",
+    const res = await ghFetch("https://api.github.com/zen", {
       headers: { Accept: "application/vnd.github+json" },
     });
     if (!res.ok) throw new Error(`zen_${res.status}`);
@@ -117,11 +140,22 @@ async function ghProbeGithub() {
 async function ghApi(path, options = {}) {
   const token = ghSanitizeToken(ghState.token);
   if (token && token !== ghState.token) ghState.token = token;
+  if (!token) {
+    const err = new Error("Paste a GitHub fine-grained PAT first (Contents Read/Write on ai-workspace).");
+    err.status = 401;
+    throw err;
+  }
+  if (!/^[\x21-\x7E]+$/.test(token)) {
+    const err = new Error(
+      "GitHub token has invalid characters after paste — clear the field and paste again from GitHub (no spaces/quotes)."
+    );
+    err.status = 401;
+    throw err;
+  }
   let res;
   try {
-    res = await fetch(`https://api.github.com${path}`, {
+    res = await ghFetch(`https://api.github.com${path}`, {
       ...options,
-      cache: "no-store",
       headers: {
         Accept: "application/vnd.github+json",
         Authorization: `Bearer ${token}`,
@@ -131,8 +165,11 @@ async function ghApi(path, options = {}) {
     });
   } catch (err) {
     // Safari often surfaces offline/CORS blips as TypeError: Load failed.
+    const detail = err && err.message ? String(err.message) : "";
     const wrapped = new Error(
-      "Could not reach GitHub from this phone (network). Check signal/Wi‑Fi, disable content blockers for this site, try cellular ↔ Wi‑Fi, then try again."
+      detail && /load failed|failed to fetch|network/i.test(detail)
+        ? "Could not reach GitHub from this phone (network). In Safari open https://api.github.com/zen — if that fails, switch Wi‑Fi/cellular or disable content blockers for github.com + github.io, then open ?cloud=1&reset=1."
+        : "Could not reach GitHub from this phone (network). Check signal/Wi‑Fi, disable content blockers for this site, try cellular ↔ Wi‑Fi, then try again."
     );
     wrapped.cause = err;
     wrapped.status = 0;
