@@ -1,6 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="The Stack">
-  <rect width="64" height="64" rx="14" fill="#1a2117"/>
-  <rect x="12" y="38" width="40" height="10" rx="3" fill="#7cb518"/>
-  <rect x="18" y="27" width="28" height="9" rx="3" fill="#93c93a"/>
-  <rect x="24" y="16" width="16" height="9" rx="3" fill="#c6e87a"/>
+  <defs>
+    <linearGradient id="bg" x1="8%" y1="0%" x2="92%" y2="100%">
+      <stop offset="0%" stop-color="#22152a"/>
+      <stop offset="55%" stop-color="#0d0e12"/>
+      <stop offset="100%" stop-color="#0a1218"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0%" y1="50%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#f3b8e6"/>
+      <stop offset="35%" stop-color="#cdbdff"/>
+      <stop offset="70%" stop-color="#a9dcff"/>
+      <stop offset="100%" stop-color="#b9f5dc"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="1.35" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <rect width="64" height="64" rx="14" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+  <g filter="url(#glow)">
+    <rect x="20" y="15" width="24" height="9" rx="4.5" fill="url(#bar)" opacity="0.98"/>
+    <rect x="14" y="27.5" width="36" height="9" rx="4.5" fill="url(#bar)" opacity="0.95"/>
+    <rect x="8" y="40" width="48" height="9" rx="4.5" fill="url(#bar)" opacity="0.92"/>
+  </g>
 </svg>
