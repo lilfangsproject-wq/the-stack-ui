@@ -58,44 +58,14 @@ const READS_KEY = "stack-reads-v1";
 const LOOK_KEY = "stack-look-v1";
 const QUICK_REACTIONS = ["👍", "👀", "✅", "❤️", "🔥"];
 
-/** Phone-steerable accents — tap Look in the menu. Default is iOS blue (not green). */
+/** Phone-steerable accents (iOS system colours) on the glass shell — tap Look in the menu. */
 const LOOKS = {
-  blue: {
-    label: "Blue",
-    accent: "#007aff",
-    strong: "#0066d6",
-    soft: "rgba(0, 122, 255, 0.14)",
-  },
-  graphite: {
-    label: "Graphite",
-    accent: "#1c1c1e",
-    strong: "#000000",
-    soft: "rgba(28, 28, 30, 0.12)",
-  },
-  indigo: {
-    label: "Indigo",
-    accent: "#5856d6",
-    strong: "#3634a3",
-    soft: "rgba(88, 86, 214, 0.14)",
-  },
-  teal: {
-    label: "Teal",
-    accent: "#30b0c7",
-    strong: "#0a7f94",
-    soft: "rgba(48, 176, 199, 0.16)",
-  },
-  orange: {
-    label: "Orange",
-    accent: "#ff9500",
-    strong: "#c66f00",
-    soft: "rgba(255, 149, 0, 0.16)",
-  },
-  rose: {
-    label: "Rose",
-    accent: "#ff2d55",
-    strong: "#d70015",
-    soft: "rgba(255, 45, 85, 0.14)",
-  },
+  blue: { label: "Blue", accent: "#0a84ff", strong: "#0060df", soft: "rgba(10, 132, 255, 0.15)" },
+  indigo: { label: "Indigo", accent: "#5e5ce6", strong: "#4240c4", soft: "rgba(94, 92, 230, 0.16)" },
+  teal: { label: "Teal", accent: "#30b0c7", strong: "#1a8ea3", soft: "rgba(48, 176, 199, 0.16)" },
+  green: { label: "Green", accent: "#30d158", strong: "#24a846", soft: "rgba(48, 209, 88, 0.16)" },
+  orange: { label: "Orange", accent: "#ff9f0a", strong: "#d98200", soft: "rgba(255, 159, 10, 0.16)" },
+  pink: { label: "Pink", accent: "#ff375f", strong: "#e0244b", soft: "rgba(255, 55, 95, 0.15)" },
 };
 const LOOK_DEFAULT = "blue";
 
@@ -105,6 +75,7 @@ function applyLook(id) {
   root.style.setProperty("--accent", look.accent);
   root.style.setProperty("--accent-strong", look.strong);
   root.style.setProperty("--accent-soft", look.soft);
+  root.style.setProperty("--accent-glow", look.soft.replace(/0\.1\d\)/, "0.35)"));
   root.dataset.look = LOOKS[id] ? id : LOOK_DEFAULT;
   try {
     localStorage.setItem(LOOK_KEY, root.dataset.look);
@@ -112,7 +83,7 @@ function applyLook(id) {
     /* ignore */
   }
   const theme = document.querySelector('meta[name="theme-color"]');
-  if (theme) theme.setAttribute("content", "#f2f2f7");
+  /* theme-color comes from the light/dark meta tags in index.html */
   document.querySelectorAll("#look-picker .look-swatch").forEach((btn) => {
     const on = btn.dataset.look === root.dataset.look;
     btn.setAttribute("aria-checked", on ? "true" : "false");
@@ -421,11 +392,34 @@ function navButtonHtml(ch, viewer) {
 }
 
 function fmtTime(iso) {
+  // "just now", "5m", "3h", "Yesterday", then a short date — readable on a phone.
+  const d = new Date(iso);
+  if (!iso || Number.isNaN(d.getTime())) return iso || "";
+  const sec = Math.round((Date.now() - d.getTime()) / 1000);
+  if (sec < 45) return "just now";
+  if (sec < 3600) return `${Math.max(1, Math.round(sec / 60))}m ago`;
+  if (sec < 86400) return `${Math.round(sec / 3600)}h ago`;
+  if (sec < 172800) return "Yesterday";
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(undefined, sameYear ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" });
+}
+
+function fmtTimeFull(iso) {
   try {
     return new Date(iso).toLocaleString();
   } catch {
-    return iso;
+    return iso || "";
   }
+}
+
+function initialOf(name) {
+  return esc(String(name || "?").trim().charAt(0).toUpperCase() || "?");
+}
+
+function channelLabel(slug, kind) {
+  const ch = (state.channels || []).find((c) => c.slug === slug);
+  if (ch) return ch.kind === "dm" ? `DM · ${dmLabel(ch, currentViewer())}` : `#${ch.slug}`;
+  return kind === "dm" ? "DM" : `#${slug}`;
 }
 
 function setLive(ok, detail = "") {
@@ -447,6 +441,10 @@ function setRailOpen(open) {
   const backdrop = document.getElementById("rail-backdrop");
   if (open) backdrop.removeAttribute("hidden");
   else backdrop.setAttribute("hidden", "");
+  if (!open && typeof setActiveTab === "function" && !document.getElementById("lists-pane").classList.contains("open")) {
+    const ch = (state.channels || []).find((c) => c.slug === state.channelSlug);
+    setActiveTab(state.view === "home" ? "home" : ch && ch.kind === "dm" ? "agents" : "chats");
+  }
 }
 
 function closeOverlays() {
@@ -483,7 +481,7 @@ function showInstallBanner() {
     btn.hidden = false;
     btn.textContent = "Install";
   } else {
-    copy.textContent = "Install The Stack: browser menu → Install app / Add to Home Screen";
+    copy.textContent = "Tip: Add to Home Screen for the full-screen app";
     btn.hidden = true;
   }
   banner.hidden = false;
@@ -545,6 +543,10 @@ async function loadChannels() {
 
 function showView(view) {
   state.view = view;
+  if (typeof setActiveTab === "function") {
+    const ch = (state.channels || []).find((c) => c.slug === state.channelSlug);
+    setActiveTab(view === "home" ? "home" : ch && ch.kind === "dm" ? "agents" : "chats");
+  }
   const home = document.getElementById("home-pane");
   const chat = document.getElementById("chat-pane");
   const homeNav = document.getElementById("home-nav");
@@ -578,6 +580,368 @@ function showView(view) {
   }
 }
 
+/* ---- Command centre (v23): agents running, model pickers, git-main feed ---- */
+const AGENT_ROSTER = [
+  { name: "Claude", role: "Reviews, research, copy", aliases: ["claude"] },
+  { name: "Cursor", role: "Builds on the Mac", aliases: ["cursor"] },
+  { name: "Cursor-Cloud", role: "Cloud coordinator", aliases: ["cursor-cloud", "cursor cloud"] },
+  { name: "ChatGPT", role: "Backup dispatch, research", aliases: ["chatgpt"] },
+  { name: "Nori", role: "Primary dispatch (Grok)", aliases: ["nori"] },
+  { name: "Hermes", role: "Windows host agent", aliases: ["hermes", "windows-migration"] },
+];
+const MODEL_OPTIONS = {
+  Claude: ["Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Haiku 5.5", "Claude Fable 5.2"],
+  Cursor: ["Auto", "Claude Opus 5.5", "Claude Sonnet 5.5", "GPT (latest)", "Gemini (latest)"],
+  "Cursor-Cloud": ["Auto", "Claude Opus 5.5", "Claude Sonnet 5.5", "GPT (latest)"],
+  ChatGPT: ["Default", "Fast", "Deep reasoning"],
+  Nori: ["Grok (latest)", "Grok fast"],
+  Hermes: ["Local (Ollama)", "FreeLLM gateway", "Claude Sonnet 5.5"],
+};
+const AGENT_ACTIVE_MS = 2 * 3600 * 1000;
+const AGENT_RECENT_MS = 24 * 3600 * 1000;
+
+function canonicalAgent(raw) {
+  const low = String(raw || "").trim().toLowerCase();
+  const hit = AGENT_ROSTER.find((a) => a.aliases.includes(low));
+  return hit ? hit.name : null;
+}
+
+function agentStatus(iso) {
+  const t = iso ? new Date(iso).getTime() : NaN;
+  if (Number.isNaN(t)) return { key: "idle", label: "No activity logged" };
+  const age = Date.now() - t;
+  if (age < AGENT_ACTIVE_MS) return { key: "active", label: "Running" };
+  if (age < AGENT_RECENT_MS) return { key: "recent", label: "Recent" };
+  return { key: "idle", label: "Idle" };
+}
+
+function clip(text, n) {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t;
+}
+
+function dmSlugFor(agent) {
+  const viewer = currentViewer().toLowerCase();
+  const ch = (state.channels || []).find(
+    (c) =>
+      c.kind === "dm" &&
+      (c.members || []).some((m) => String(m).toLowerCase() === agent.toLowerCase()) &&
+      (c.members || []).some((m) => String(m).toLowerCase() === viewer)
+  );
+  return ch ? ch.slug : "";
+}
+
+async function loadCommandCentre() {
+  const out = { agents: [], agentsHtml: "", feedHtml: "", agentsSource: "", feedSource: "" };
+  const cloud = state.cloudMode && typeof ghSharedMemory === "function" && ghState && ghState.token;
+  let events = [];
+  let commits = [];
+  let prefs = { agents: {} };
+  let pulls = null;
+  if (cloud) {
+    const [mem, com, pref, prs] = await Promise.allSettled([
+      ghSharedMemory(),
+      ghRecentCommits(20),
+      ghLoadAgentPrefs(),
+      ghRecentPulls(15),
+    ]);
+    if (prs.status === "fulfilled") pulls = prs.value;
+    out.pullsSource = prs.status === "fulfilled" ? "pull requests" : "merge commits";
+    if (mem.status === "fulfilled") events = mem.value;
+    if (com.status === "fulfilled") commits = com.value;
+    if (pref.status === "fulfilled") prefs = pref.value;
+    state.ccErrors = [mem, com].filter((r) => r.status === "rejected").map((r) => friendlyError(r.reason));
+  }
+  state.agentPrefs = prefs.agents || {};
+
+  // Latest shared-memory event per agent = "what it's doing".
+  const latest = {};
+  for (const ev of events) {
+    const name = canonicalAgent(ev.agent);
+    if (!name) continue;
+    if (!latest[name] || String(ev.at) > String(latest[name].at)) latest[name] = ev;
+  }
+  out.agents = AGENT_ROSTER.map((a) => {
+    const ev = latest[a.name];
+    return { ...a, ev, ...{ status: agentStatus(ev && ev.at).key, statusLabel: agentStatus(ev && ev.at).label } };
+  }).sort((x, y) => {
+    const rank = { active: 0, recent: 1, idle: 2 };
+    return rank[x.status] - rank[y.status] || String((y.ev && y.ev.at) || "").localeCompare(String((x.ev && x.ev.at) || ""));
+  });
+  out.agentsSource = cloud ? `shared memory · ${ghState.branch}` : "connect cloud hub for live status";
+
+  out.agentsHtml = `<div class="agent-list">${out.agents
+    .map((a) => {
+      const pref = state.agentPrefs[a.name] || {};
+      const opts = MODEL_OPTIONS[a.name] || ["Default"];
+      const current = pref.model || "";
+      const optionHtml = [
+        `<option value="" ${current ? "" : "selected"}>Model: not set</option>`,
+        ...opts.map((m) => `<option ${m === current ? "selected" : ""}>${esc(m)}</option>`),
+        current && !opts.includes(current) ? `<option selected>${esc(current)}</option>` : "",
+        `<option value="__custom">Other…</option>`,
+      ].join("");
+      const dm = dmSlugFor(a.name);
+      const unread = dm ? state.unreads[dm] || 0 : 0;
+      return `
+      <article class="agent-window status-${a.status}" data-agent="${esc(a.name)}">
+        <div class="aw-top">
+          <span class="agent-avatar" aria-hidden="true">${initialOf(a.name)}</span>
+          <div class="aw-id">
+            <strong>${esc(a.name)}</strong>
+            <span class="aw-role">${esc(a.role)}</span>
+          </div>
+          <span class="aw-pill"><span class="dot"></span>${esc(a.statusLabel)}</span>
+        </div>
+        ${sparkline(events, a.name)}
+        <p class="aw-now">${
+          a.ev
+            ? `${esc(clip(a.ev.text, 150))}`
+            : `<span class="muted">Nothing in shared memory yet.</span>`
+        }</p>
+        <div class="aw-foot">
+          <label class="model-pick">
+            <span class="sr-only">Preferred model for ${esc(a.name)}</span>
+            <select data-agent="${esc(a.name)}" ${cloud ? "" : "disabled"}>${optionHtml}</select>
+          </label>
+          <time title="${esc(a.ev ? fmtTimeFull(a.ev.at) : "")}">${a.ev ? esc(fmtTime(a.ev.at)) : ""}</time>
+          ${
+            dm
+              ? `<button type="button" class="aw-open home-open-channel" data-slug="${esc(dm)}">Chat${
+                  unread ? ` <span class="unread-badge">${unread}</span>` : ""
+                }</button>`
+              : ""
+          }
+        </div>
+      </article>`;
+    })
+    .join("")}</div>`;
+
+  ({ html: out.jobsHtml, needs: out.needsCount } = buildJobs({ events, commits, pulls, agents: out.agents, cloud }));
+  // Feed: shared memory + commits on main, newest first.
+  const feed = [
+    ...events.map((ev) => ({
+      kind: ev.kind === "result" ? "Result" : ev.kind === "note" ? "Note" : "Update",
+      who: canonicalAgent(ev.agent) || ev.agent || "Agent",
+      at: ev.at,
+      title: clip(String(ev.id || "").replace(/-\d{8}$/, "").replace(/[-_]+/g, " "), 60),
+      text: ev.text || "",
+    })),
+    ...commits
+      .filter((c) => !/^(Shared memory:|stack:)/i.test(c.message))
+      .map((c) => {
+        const [first, ...rest] = String(c.message).split("\n");
+        return {
+          kind: /^Merge pull request/i.test(first) ? "Merged" : "Commit",
+          who: c.author || "git",
+          at: c.at,
+          title: clip(first.replace(/^Merge pull request (#\d+) from [^/]+\//i, "PR $1 · "), 80),
+          text: rest.join(" ").replace(/Co-authored-by:.*$/gim, "").trim(),
+          url: c.url,
+        };
+      }),
+  ]
+    .filter((f) => f.at)
+    .sort((x, y) => String(y.at).localeCompare(String(x.at)))
+    .slice(0, 14);
+  out.feedSource = cloud ? `git ${ghState.branch} · ${feed.length} latest` : "connect cloud hub";
+  out.feedHtml = feed.length
+    ? `<ol class="feed">${feed
+        .map(
+          (f) => `
+      <li class="feed-item kind-${esc(f.kind.toLowerCase())}">
+        <details>
+          <summary>
+            <span class="feed-kind">${esc(f.kind)}</span>
+            <span class="feed-title">${esc(f.title || clip(f.text, 70))}</span>
+            <span class="feed-meta">${esc(f.who)} · <time title="${esc(fmtTimeFull(f.at))}">${esc(fmtTime(f.at))}</time></span>
+          </summary>
+          ${f.text ? `<p>${esc(f.text)}</p>` : ""}
+          ${f.url ? `<a href="${esc(f.url)}" target="_blank" rel="noopener">Open on GitHub ↗</a>` : ""}
+        </details>
+      </li>`
+        )
+        .join("")}</ol>`
+    : `<p class="home-empty">${
+        cloud
+          ? (state.ccErrors || []).join(" ") || "Nothing on main yet."
+          : "Connect the cloud hub to see git main activity."
+      }</p>`;
+  return out;
+}
+
+
+/* Vercel-style 24h activity: one bar per hour from shared-memory events. */
+function sparkline(events, agent) {
+  const now = Date.now();
+  const bins = new Array(24).fill(0);
+  for (const ev of events || []) {
+    if (canonicalAgent(ev.agent) !== agent) continue;
+    const age = now - new Date(ev.at).getTime();
+    if (!(age >= 0 && age < 86400000)) continue;
+    bins[23 - Math.floor(age / 3600000)] += 1;
+  }
+  const total = bins.reduce((x, y) => x + y, 0);
+  const max = Math.max(1, ...bins);
+  const bars = bins
+    .map((v, i) => {
+      const h = v ? Math.max(3, Math.round((v / max) * 18)) : 1.5;
+      return `<rect x="${i * 5}" y="${20 - h}" width="3.4" height="${h}" rx="1" class="${v ? "on" : "off"}"/>`;
+    })
+    .join("");
+  return `<div class="aw-spark" title="${total} update${total === 1 ? "" : "s"} in the last 24h">
+    <svg viewBox="0 0 120 20" preserveAspectRatio="none" aria-hidden="true">${bars}</svg>
+    <span>${total} in 24h</span>
+  </div>`;
+}
+
+/* Linear-style triage + Codex-style job cards. */
+// Agents shout BLOCKED in caps for real blockers; the rest are explicit asks of Seth.
+const NEEDS_SETH_RE = /\bBLOCKED\b|\b[Ss]eth (still )?needs\b|\bneeds [Ss]eth\b|\bwaiting on [Ss]eth\b|\b[Ss]eth must\b|\b[Ss]eth: (tap|type|open|paste|run|approve|add)/;
+
+function jobCard(j) {
+  const pill = {
+    open: ["Open", "pill-open"],
+    draft: ["Draft", "pill-draft"],
+    merged: ["Merged", "pill-merged"],
+    closed: ["Closed", "pill-closed"],
+    blocked: ["Needs you", "pill-blocked"],
+    running: ["Running", "pill-running"],
+    done: ["Done", "pill-merged"],
+  }[j.status] || ["Update", "pill-draft"];
+  return `
+    <article class="job-card">
+      <div class="job-top">
+        <span class="job-pill ${pill[1]}">${pill[0]}</span>
+        ${j.number ? `<span class="job-num">#${j.number}</span>` : ""}
+        <time title="${esc(fmtTimeFull(j.at))}">${esc(fmtTime(j.at))}</time>
+      </div>
+      <strong class="job-title">${esc(clip(j.title, 90))}</strong>
+      ${j.text ? `<p class="job-text">${esc(clip(j.text, 170))}</p>` : ""}
+      <div class="job-foot">
+        <span class="job-who">${esc(j.who || "")}${j.branch ? ` · <code>${esc(clip(j.branch, 34))}</code>` : ""}</span>
+        ${j.url ? `<a href="${esc(j.url)}" target="_blank" rel="noopener">${j.number ? "View PR" : "Open"} ↗</a>` : ""}
+      </div>
+    </article>`;
+}
+
+function buildJobs({ events, commits, pulls, agents, cloud }) {
+  const now = Date.now();
+  const within = (iso, ms) => iso && now - new Date(iso).getTime() < ms;
+  const needs = [];
+  const running = [];
+  const done = [];
+  const seenBlockedAgent = new Set();
+  // Newest first so only each agent's latest blocker shows.
+  const evs = [...(events || [])].sort((x, y) => String(y.at).localeCompare(String(x.at)));
+  for (const ev of evs) {
+    const who = canonicalAgent(ev.agent) || ev.agent;
+    const title = String(ev.id || "").replace(/-\d{8}$/, "").replace(/[-_]+/g, " ");
+    if (within(ev.at, 72 * 3600000) && NEEDS_SETH_RE.test(ev.text || "") && !seenBlockedAgent.has(who)) {
+      seenBlockedAgent.add(who);
+      needs.push({ status: "blocked", title, text: ev.text, who, at: ev.at });
+    } else if (ev.kind === "result" && within(ev.at, 24 * 3600000)) {
+      done.push({ status: "done", title, text: ev.text, who, at: ev.at });
+    }
+  }
+  if (Array.isArray(pulls)) {
+    for (const p of pulls) {
+      const job = { status: p.draft ? "draft" : p.state, number: p.number, title: p.title, who: p.author, branch: p.branch, at: p.at, url: p.url };
+      if (p.state === "open") needs.unshift({ ...job, text: p.draft ? "Draft PR" : "Waiting for review / merge" });
+      else if (p.state === "merged" && within(p.at, 48 * 3600000)) done.push(job);
+    }
+  } else {
+    for (const c of commits || []) {
+      const m = /^Merge pull request #(\d+) from [^/]+\/(\S+)/.exec(c.message || "");
+      if (m && within(c.at, 48 * 3600000)) {
+        const title = String(c.message).split("\n").slice(1).join(" ").trim() || m[2];
+        done.push({ status: "merged", number: Number(m[1]), title, who: c.author, branch: m[2], at: c.at, url: c.url });
+      }
+    }
+  }
+  for (const a of agents || []) {
+    if (a.status === "active" && a.ev) {
+      running.push({ status: "running", title: a.name, text: a.ev.text, who: a.role, at: a.ev.at });
+    }
+  }
+  done.sort((x, y) => String(y.at).localeCompare(String(x.at)));
+  const tabs = [
+    ["needs", "Needs you", needs],
+    ["running", "Running", running],
+    ["done", "Done", done.slice(0, 10)],
+  ];
+  const empty = {
+    needs: cloud ? "Nothing waiting on you." : "Connect the cloud hub to see jobs.",
+    running: "No agent has logged work in the last 2 hours.",
+    done: "Nothing finished in the last day.",
+  };
+  const first = needs.length ? "needs" : running.length ? "running" : "done";
+  return { needs: needs.length, html: `
+    <div class="seg" role="tablist">
+      ${tabs
+        .map(
+          ([id, label, list]) =>
+            `<button type="button" role="tab" data-seg="${id}" class="${id === first ? "active" : ""}${
+              id === "needs" && list.length ? " alert" : ""
+            }" aria-selected="${id === first}">${label}<span class="seg-n">${list.length}</span></button>`
+        )
+        .join("")}
+    </div>
+    ${tabs
+      .map(
+        ([id, , list]) =>
+          `<div class="job-list" data-seg-panel="${id}" ${id === first ? "" : "hidden"}>${
+            list.length ? list.map(jobCard).join("") : `<p class="home-empty">${empty[id]}</p>`
+          }</div>`
+      )
+      .join("")}` };
+}
+
+document.getElementById("home-body")?.addEventListener("click", (e) => {
+  const tab = e.target.closest(".seg button[data-seg]");
+  if (!tab) return;
+  const host = tab.closest(".cc-panel");
+  host.querySelectorAll(".seg button").forEach((b) => {
+    const on = b === tab;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", String(on));
+  });
+  host.querySelectorAll("[data-seg-panel]").forEach((p) => {
+    p.hidden = p.dataset.segPanel !== tab.dataset.seg;
+  });
+});
+
+document.getElementById("home-body")?.addEventListener("change", async (e) => {
+  const sel = e.target.closest(".model-pick select");
+  if (!sel) return;
+  const agent = sel.dataset.agent;
+  let model = sel.value;
+  if (model === "__custom") {
+    model = (window.prompt(`Preferred model for ${agent}:`, "") || "").trim();
+    if (!model) {
+      sel.value = (state.agentPrefs[agent] || {}).model || "";
+      return;
+    }
+  }
+  if (!model) return;
+  const card = sel.closest(".agent-window");
+  card?.classList.add("saving");
+  try {
+    await ghSaveAgentModel(agent, model, currentViewer());
+    state.agentPrefs[agent] = { model };
+    card?.classList.remove("saving");
+    card?.classList.add("saved");
+    setTimeout(() => card?.classList.remove("saved"), 1600);
+    if (model && ![...sel.options].some((o) => o.value === model || o.text === model)) {
+      sel.insertAdjacentHTML("beforeend", `<option selected>${esc(model)}</option>`);
+    }
+  } catch (err) {
+    card?.classList.remove("saving");
+    window.alert(`Couldn’t save model: ${friendlyError(err)}`);
+    sel.value = (state.agentPrefs[agent] || {}).model || "";
+  }
+});
+
 async function loadHome() {
   let data;
   try {
@@ -604,8 +968,9 @@ async function loadHome() {
     state.cloudMode && typeof ghState !== "undefined"
       ? `${ghState.repo}@${ghState.branch}`
       : state.hostLabel;
-  document.getElementById("home-headline").textContent =
-    data.summary?.headline || "Agent hub";
+  document.getElementById("home-headline").textContent = state.cloudMode
+    ? `Live from ${typeof ghState !== "undefined" ? ghState.branch : "main"} · ${channelCount - dmCount} channels · ${dmCount} DMs`
+    : data.summary?.headline || "Agent hub";
   const body = document.getElementById("home-body");
   const todos = data.todos || [];
   const reports = data.reports || [];
@@ -664,8 +1029,8 @@ async function loadHome() {
       <button type="button" class="home-card home-mention home-open-channel" data-slug="${esc(r.channel)}">
         <div class="meta">
           <strong>${esc(r.author)}</strong>
-          <span class="ch">${r.kind === "dm" ? "DM" : "#"}${esc(r.channel)}</span>
-          <time>${esc(fmtTime(r.created_at))}</time>
+          <span class="ch">${esc(channelLabel(r.channel, r.kind))}</span>
+          <time title="${esc(fmtTimeFull(r.created_at))}">${esc(fmtTime(r.created_at))}</time>
         </div>
         <div class="preview">${esc(r.preview || r.body || "")}</div>
       </button>`
@@ -679,26 +1044,53 @@ async function loadHome() {
       <button type="button" class="home-card home-open-channel" data-slug="${esc(r.channel)}">
         <div class="meta">
           <strong>${esc(r.author)}</strong>
-          <span class="ch">#${esc(r.channel)}</span>
-          <time>${esc(fmtTime(r.created_at))}</time>
+          <span class="ch">${esc(channelLabel(r.channel, "channel"))}</span>
+          <time title="${esc(fmtTimeFull(r.created_at))}">${esc(fmtTime(r.created_at))}</time>
         </div>
         <div class="preview">${esc(r.preview || r.body || "")}</div>
       </button>`
         )
         .join("")}</div>`
     : `<p class="home-empty">No reports yet. Agents post into #the-digest.</p>`;
+  const cc = await loadCommandCentre();
+  const running = cc.agents.filter((x) => x.status === "active").length;
+  const stats = [
+    ["Needs you", cc.needsCount || 0, "jobs", (cc.needsCount || 0) > 0 ? "alert" : ""],
+    ["Running now", running, "agents", running ? "live" : ""],
+    ["To-dos", todos.length, "todos", ""],
+  ]
+    .map(([k, v, id, cls]) => `<a class="stat ${cls}" href="#cc-${id}"><strong>${v}</strong><span>${k}</span></a>`)
+    .join("");
   body.innerHTML = `
     ${emptyBanner}
-    <section class="home-section">
+    <label class="jump">
+      <span class="jump-icon" aria-hidden="true">⌕</span>
+      <input id="jump-input" type="search" placeholder="Search channels &amp; agents" autocomplete="off" enterkeyhint="go" />
+    </label>
+    <div id="jump-results" class="jump-results" hidden></div>
+    <div class="stat-row">${stats}</div>
+    <section class="home-section cc-panel" id="cc-jobs">
+      <div class="cc-head"><h2>Jobs</h2><span class="cc-src">${esc(cc.pullsSource ? `shared memory + ${cc.pullsSource}` : "")}</span></div>
+      ${cc.jobsHtml}
+    </section>
+    <section class="home-section cc-panel" id="cc-agents">
+      <div class="cc-head"><h2>Agents running</h2><span class="cc-src">${esc(cc.agentsSource)}</span></div>
+      ${cc.agentsHtml}
+    </section>
+    <section class="home-section cc-panel" id="cc-todos">
+      <div class="cc-head"><h2>To-dos</h2><span class="cc-src">${todos.length} open</span></div>
+      <div class="home-cards">${todoHtml}</div>
+    </section>
+    <section class="home-section cc-panel" id="cc-feed">
+      <div class="cc-head"><h2>What’s going on</h2><span class="cc-src">${esc(cc.feedSource)}</span></div>
+      ${cc.feedHtml}
+    </section>
+    <section class="home-section" id="cc-mentions">
       <h2>Mentions</h2>
       ${mentionHtml}
     </section>
     <section class="home-section">
-      <h2>Open todos</h2>
-      <div class="home-cards">${todoHtml}</div>
-    </section>
-    <section class="home-section">
-      <h2>What’s going on</h2>
+      <h2>Digest</h2>
       ${reportHtml}
     </section>`;
   document.getElementById("home-reconnect")?.addEventListener("click", () => {
@@ -733,8 +1125,8 @@ function renderMessages(data) {
     ch.purpose || (ch.kind === "dm" ? "Direct messages" : "");
   document.getElementById("body").placeholder =
     ch.kind === "dm"
-      ? `Message ${dmLabel(ch, viewer)} · @Name to mention`
-      : `Message #${ch.slug} · @Name to mention`;
+      ? `Ask ${dmLabel(ch, viewer)} anything…`
+      : `Message #${ch.slug} · @Name to ping an agent`;
   const box = document.getElementById("messages");
   const stick = nearBottom(box) || box.dataset.empty === "1";
   if (!data.messages.length) {
@@ -771,11 +1163,13 @@ function renderMessages(data) {
             e
           )}" aria-label="React ${esc(e)}">${esc(e)}</button>`
       ).join("");
+      const isMine = String(m.author || "").toLowerCase() === viewer.toLowerCase();
       return `
-      <article class="msg" data-id="${esc(m.id)}">
-        <div class="meta"><strong>${esc(m.author)}</strong><time>${esc(
-          fmtTime(m.created_at)
-        )}</time></div>
+      <article class="msg${isMine ? " mine" : " agent"}" data-id="${esc(m.id)}">
+        <span class="msg-avatar" aria-hidden="true">${initialOf(m.author)}</span>
+        <div class="meta"><strong>${esc(m.author)}</strong><time title="${esc(
+          fmtTimeFull(m.created_at)
+        )}">${esc(fmtTime(m.created_at))}</time></div>
         <div class="body">${formatBodyHtml(m.body)}</div>
         <div class="react-row">
           <div class="react-chips">${chips}</div>
@@ -1034,6 +1428,78 @@ document.getElementById("home-body")?.addEventListener("click", (e) => {
   }
 });
 document.getElementById("rail-backdrop").addEventListener("click", () => setRailOpen(false));
+
+/* Bottom tab bar (phone): Home · Chats · Agents · Lists. Desktop keeps the rail. */
+function setActiveTab(tab) {
+  document.querySelectorAll("#tabbar button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tab === tab);
+  });
+}
+document.getElementById("tabbar")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-tab]");
+  if (!btn) return;
+  const tab = btn.dataset.tab;
+  document.getElementById("lists-pane").classList.remove("open");
+  if (tab === "home") {
+    setRailOpen(false);
+    showView("home");
+  } else if (tab === "chats" || tab === "agents") {
+    setRailOpen(true);
+    const target = document.getElementById(tab === "agents" ? "dm-label" : "channel-list");
+    const rail = document.getElementById("rail");
+    if (target && rail) rail.scrollTo({ top: Math.max(0, target.offsetTop - 72), behavior: "smooth" });
+  } else if (tab === "lists") {
+    setRailOpen(false);
+    document.getElementById("lists-pane").classList.add("open");
+    loadLists()
+      .then(() => loadListDetail())
+      .catch(() => {});
+  }
+  setActiveTab(tab);
+});
+
+/* Home jump search: filter channels + agent DMs, tap or Enter to open. */
+function jumpMatches(q) {
+  const viewer = currentViewer();
+  const needle = q.trim().toLowerCase();
+  if (!needle) return [];
+  return (state.channels || [])
+    .map((c) => ({ c, label: c.kind === "dm" ? dmLabel(c, viewer) : `#${c.slug}` }))
+    .filter(({ c, label }) =>
+      [label, c.slug, c.purpose || ""].some((v) => String(v).toLowerCase().includes(needle))
+    )
+    .slice(0, 8);
+}
+document.getElementById("home-body")?.addEventListener("input", (e) => {
+  if (e.target.id !== "jump-input") return;
+  const box = document.getElementById("jump-results");
+  const hits = jumpMatches(e.target.value);
+  if (!e.target.value.trim()) {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+  box.innerHTML = hits.length
+    ? hits
+        .map(
+          ({ c, label }) =>
+            `<button type="button" class="jump-hit home-open-channel" data-slug="${esc(c.slug)}"><span class="jump-kind">${
+              c.kind === "dm" ? "Agent" : "Channel"
+            }</span>${esc(label)}</button>`
+        )
+        .join("")
+    : `<p class="home-empty">No channel or agent matches “${esc(e.target.value.trim())}”.</p>`;
+  box.hidden = false;
+});
+document.getElementById("home-body")?.addEventListener("keydown", (e) => {
+  if (e.target.id !== "jump-input" || e.key !== "Enter") return;
+  e.preventDefault();
+  const first = jumpMatches(e.target.value)[0];
+  if (first) {
+    state.channelSlug = first.c.slug;
+    showView("channel");
+  }
+});
 
 async function toggleReaction(messageId, emoji) {
   if (!messageId || !emoji) return;

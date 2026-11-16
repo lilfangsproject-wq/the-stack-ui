@@ -251,6 +251,75 @@ async function ghReadJson(relPath, fallback) {
   return JSON.parse(file.text);
 }
 
+/* ---- Command centre feeds (v23): repo-wide reads on main, hub agent prefs ---- */
+const GH_MEMORY_PATH = "Cloud/memory/state.json";
+
+async function ghReadRepoJson(repoPath) {
+  // Raw media type: no base64, works for files up to GitHub's 100 MB raw limit.
+  const url = `/repos/${ghState.repo}/contents/${repoPath}?ref=${encodeURIComponent(ghState.branch)}`;
+  return ghApi(url, { headers: { Accept: "application/vnd.github.raw+json" } });
+}
+
+async function ghSharedMemory() {
+  const data = await ghReadRepoJson(GH_MEMORY_PATH);
+  return Array.isArray(data.events) ? data.events : [];
+}
+
+async function ghRecentCommits(limit = 12) {
+  const rows = await ghApi(
+    `/repos/${ghState.repo}/commits?sha=${encodeURIComponent(ghState.branch)}&per_page=${limit}`
+  );
+  return (Array.isArray(rows) ? rows : []).map((c) => ({
+    sha: c.sha,
+    message: (c.commit && c.commit.message) || "",
+    author: (c.commit && c.commit.author && c.commit.author.name) || (c.author && c.author.login) || "",
+    at: (c.commit && c.commit.author && c.commit.author.date) || "",
+    url: c.html_url || "",
+  }));
+}
+
+async function ghRecentPulls(limit = 15) {
+  // Needs "Pull requests: Read" on a fine-grained PAT; callers fall back to merge commits.
+  const rows = await ghApi(
+    `/repos/${ghState.repo}/pulls?state=all&sort=updated&direction=desc&per_page=${limit}`
+  );
+  return (Array.isArray(rows) ? rows : []).map((p) => ({
+    number: p.number,
+    title: p.title || "",
+    state: p.merged_at ? "merged" : p.state,
+    draft: Boolean(p.draft),
+    author: (p.user && p.user.login) || "",
+    branch: (p.head && p.head.ref) || "",
+    at: p.merged_at || p.closed_at || p.updated_at || p.created_at || "",
+    url: p.html_url || "",
+  }));
+}
+
+async function ghLoadAgentPrefs() {
+  const data = await ghReadJson("agents.json", { agents: {} });
+  return data && data.agents ? data : { agents: {} };
+}
+
+async function ghSaveAgentModel(agent, model, by = "Seth") {
+  return ghPutFile(
+    "agents.json",
+    async (existing) => {
+      let data = { version: 1, agents: {} };
+      try {
+        if (existing.text) data = JSON.parse(existing.text);
+      } catch {
+        /* rebuild */
+      }
+      data.agents = data.agents || {};
+      data.note =
+        "Preferred model per agent, set from The Stack phone hub. Agents read this at job start; it is a preference, not a remote switch.";
+      data.agents[agent] = { ...(data.agents[agent] || {}), model, set_by: by, set_at: new Date().toISOString() };
+      return JSON.stringify(data, null, 2) + "\n";
+    },
+    `stack: ${agent} preferred model → ${model}`
+  );
+}
+
 async function ghListChannels() {
   const data = await ghReadJson("channels.json", { channels: [] });
   return data.channels || [];

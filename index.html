@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#f2f2f7" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#eef1f7" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#05060a" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="The Stack" />
@@ -44,7 +45,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>vault hub</small>
+          <small>agent command centre</small>
         </div>
       </div>
       <div class="live-pill" id="live-pill" title="Hub connection">
@@ -61,7 +62,7 @@
         <input name="slug" placeholder="new-channel" required autocomplete="off" />
         <button type="submit" aria-label="Add channel">+</button>
       </form>
-      <div class="section-label">Direct messages</div>
+      <div class="section-label" id="dm-label">Agents · direct messages</div>
       <nav id="dm-list" class="channel-list"></nav>
       <form id="new-dm" class="new-channel">
         <input name="member" placeholder="Agent name" required autocomplete="off" />
@@ -70,9 +71,9 @@
       <div class="section-label">Lists</div>
       <nav id="list-nav" class="channel-list"></nav>
       <details class="rail-more">
-        <summary>Look &amp; tips</summary>
+        <summary>Look &amp; connection</summary>
         <div id="look-picker" class="look-picker" role="radiogroup" aria-label="Accent colour"></div>
-        <p class="look-hint">Accent stays on this phone.</p>
+        <p class="look-hint">Accent colour stays on this phone.</p>
         <p id="token-hint" class="token-hint"></p>
         <p id="phone-hint" class="token-hint phone-hint" hidden></p>
       </details>
@@ -82,7 +83,7 @@
       <header class="main-head">
         <button type="button" id="menu-toggle-home" class="icon-btn" aria-label="Open menu">☰</button>
         <div class="main-head-text">
-          <h1>Home</h1>
+          <h1>Command centre</h1>
           <p class="purpose" id="home-headline">Loading hub…</p>
         </div>
         <button type="button" id="home-refresh" class="ghost">Refresh</button>
@@ -133,6 +134,12 @@
         <button type="submit">Add row</button>
       </form>
     </aside>
+    <nav class="tabbar" id="tabbar" aria-label="Sections">
+      <button type="button" data-tab="home" class="active"><span class="tab-ico" aria-hidden="true">⌂</span><span>Home</span></button>
+      <button type="button" data-tab="chats"><span class="tab-ico" aria-hidden="true">#</span><span>Chats</span></button>
+      <button type="button" data-tab="agents"><span class="tab-ico" aria-hidden="true">◎</span><span>Agents</span></button>
+      <button type="button" data-tab="lists"><span class="tab-ico" aria-hidden="true">☰</span><span>Lists</span></button>
+    </nav>
   </div>
   <script src="github_hub.js"></script>
   <script src="app.js"></script>

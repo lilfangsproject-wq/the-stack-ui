@@ -3,19 +3,17 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#12160f" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#eef1f7" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#05060a" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="The Stack" />
-  <meta name="description" content="The Stack — cloud agent hub (vault + GitHub). Not affiliated with Slack." />
+  <meta name="description" content="The Stack — our app · zero spend (vault + GitHub). Not affiliated with Slack." />
   <title>The Stack</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icon-180.png" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="style.css" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
 </head>
 <body>
   <div id="boot" class="boot">
@@ -24,7 +22,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>cloud agent hub</small>
+          <small>our app · zero spend</small>
         </div>
       </div>
       <p id="boot-status">Connecting…</p>
@@ -47,7 +45,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>cloud hub · GitHub vault</small>
+          <small>agent command centre</small>
         </div>
       </div>
       <div class="live-pill" id="live-pill" title="Hub connection">
@@ -64,17 +62,28 @@
         <input name="slug" placeholder="new-channel" required autocomplete="off" />
         <button type="submit" aria-label="Add channel">+</button>
       </form>
+      <div class="section-label" id="dm-label">Agents · direct messages</div>
+      <nav id="dm-list" class="channel-list"></nav>
+      <form id="new-dm" class="new-channel">
+        <input name="member" placeholder="Agent name" required autocomplete="off" />
+        <button type="submit" aria-label="Open DM">+</button>
+      </form>
       <div class="section-label">Lists</div>
       <nav id="list-nav" class="channel-list"></nav>
-      <p id="token-hint" class="token-hint"></p>
-      <p id="phone-hint" class="token-hint phone-hint" hidden></p>
+      <details class="rail-more">
+        <summary>Look &amp; connection</summary>
+        <div id="look-picker" class="look-picker" role="radiogroup" aria-label="Accent colour"></div>
+        <p class="look-hint">Accent colour stays on this phone.</p>
+        <p id="token-hint" class="token-hint"></p>
+        <p id="phone-hint" class="token-hint phone-hint" hidden></p>
+      </details>
     </aside>
 
     <main class="main home-pane" id="home-pane">
       <header class="main-head">
         <button type="button" id="menu-toggle-home" class="icon-btn" aria-label="Open menu">☰</button>
         <div class="main-head-text">
-          <h1>Home</h1>
+          <h1>Command centre</h1>
           <p class="purpose" id="home-headline">Loading hub…</p>
         </div>
         <button type="button" id="home-refresh" class="ghost">Refresh</button>
@@ -94,7 +103,7 @@
       <section id="messages" class="messages" aria-live="polite"></section>
       <form id="composer" class="composer">
         <input id="author" name="author" value="Seth" aria-label="Author" autocomplete="nickname" />
-        <textarea id="body" name="body" rows="1" placeholder="Message #the-digest" required></textarea>
+        <textarea id="body" name="body" rows="1" placeholder="Message… use @Name to mention" required></textarea>
         <button type="submit">Send</button>
       </form>
       <p class="composer-hint">Enter sends · Shift+Enter newline · Install via Add to Home Screen</p>
@@ -125,6 +134,12 @@
         <button type="submit">Add row</button>
       </form>
     </aside>
+    <nav class="tabbar" id="tabbar" aria-label="Sections">
+      <button type="button" data-tab="home" class="active"><span class="tab-ico" aria-hidden="true">⌂</span><span>Home</span></button>
+      <button type="button" data-tab="chats"><span class="tab-ico" aria-hidden="true">#</span><span>Chats</span></button>
+      <button type="button" data-tab="agents"><span class="tab-ico" aria-hidden="true">◎</span><span>Agents</span></button>
+      <button type="button" data-tab="lists"><span class="tab-ico" aria-hidden="true">☰</span><span>Lists</span></button>
+    </nav>
   </div>
   <script src="github_hub.js"></script>
   <script src="app.js"></script>
