@@ -93,6 +93,15 @@ if (/chat-sheet-open\s+\.tabbar\s*\{[^}]*pointer-events:\s*none/s.test(css) === 
   // keep prior tab bar checks; no-op here
 }
 
+
+// v32: Computers sheet can open agent chats; host heartbeat feeds presence
+if (!app.includes('data-host-act="chat"') || !app.includes("Host online")) {
+  fail("missing host→agent chat / Host online presence");
+} else ok("host sheet chats + heartbeat presence");
+if (!app.includes("tap for actions · heartbeat")) {
+  fail("Computers strip should stay on Home (not only under details)");
+} else ok("Computers stay on Home");
+
 // Required shell assets
 for (const f of ["favicon.svg", "icon-180.png", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "manifest.webmanifest"]) {
   if (!fs.existsSync(path.join(root, f))) fail(`missing ${f}`);
