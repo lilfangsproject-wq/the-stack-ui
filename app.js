@@ -294,9 +294,46 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v31.0";
+const STACK_VERSION = "v31.1";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
+}
+
+/* Auto-update: when Pages deploys a new shell, pull the new SW and reload once. */
+function setupAutoUpdate() {
+  if (!("serviceWorker" in navigator)) return;
+  const RELOAD_KEY = "stack-sw-reloaded";
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    try {
+      if (sessionStorage.getItem(RELOAD_KEY) === STACK_VERSION) return;
+      sessionStorage.setItem(RELOAD_KEY, STACK_VERSION);
+    } catch {
+      /* ignore */
+    }
+    toast(`Updated to ${STACK_VERSION} — refreshing…`);
+    setTimeout(() => location.reload(), 400);
+  });
+  navigator.serviceWorker
+    .register("./sw.js", { scope: "./" })
+    .then((reg) => {
+      const poke = () => {
+        if (document.visibilityState === "visible") reg.update().catch(() => {});
+      };
+      poke();
+      setInterval(poke, 5 * 60 * 1000);
+      document.addEventListener("visibilitychange", poke);
+      window.addEventListener("online", poke);
+      reg.addEventListener("updatefound", () => {
+        const sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener("statechange", () => {
+          if (sw.state === "installed" && navigator.serviceWorker.controller) {
+            toast(`New Stack ${STACK_VERSION} ready…`);
+          }
+        });
+      });
+    })
+    .catch(() => {});
 }
 async function bootCloud() {
   const bootEl = document.getElementById("boot");
@@ -1287,9 +1324,14 @@ function jobActions(j) {
     </div>`;
   }
   if (j.status === "blocked") {
+    const resolveBtn =
+      j.kind === "needs_seth" || j.kind === "handover"
+        ? `<button type="button" class="act" data-act="resolve" data-key="${esc(j.key)}">Resolve</button>`
+        : "";
     return `<div class="job-actions">
       <button type="button" class="act act-primary" data-act="approve" data-key="${esc(j.key)}">Approve</button>
       <button type="button" class="act" data-act="reply" data-key="${esc(j.key)}">Reply</button>
+      ${resolveBtn}
       <button type="button" class="act" data-act="snooze" data-key="${esc(j.key)}">Snooze</button>
     </div>`;
   }
@@ -1385,7 +1427,7 @@ async function onJobsClick(e) {
   const j = (state.jobIndex || {})[btn.dataset.key];
   if (!j) return;
   const act = btn.dataset.act;
-  const card = btn.closest(".job-card");
+  const card = btn.closest(".job-card, .task");
   if (act === "snooze") {
     const map = loadSnoozes();
     map[j.key] = Date.now() + 24 * 3600 * 1000;
@@ -1401,7 +1443,19 @@ async function onJobsClick(e) {
   }
   btn.disabled = true;
   try {
-    if (act === "approve") {
+    if (act === "resolve") {
+      try {
+        if (typeof ghResolveNeedsSeth === "function" && (j.kind === "needs_seth" || String(j.key || "").startsWith("ho-"))) {
+          await ghResolveNeedsSeth(j.key, { action: "resolved", by: currentViewer() });
+        }
+        await ghDismissJob(j.key, { action: "resolved", title: j.title, agent: agentForJob(j), by: currentViewer() });
+      } catch (err) {
+        toast(`Couldn't save resolve: ${friendlyError(err)}`, "err");
+        btn.disabled = false;
+        return;
+      }
+      toast("Resolved");
+    } else if (act === "approve") {
       const agent = agentForJob(j);
       let slug = dmSlugFor(agent);
       if (!slug) {
@@ -1418,6 +1472,9 @@ async function onJobsClick(e) {
       saveSnoozes(map);
       try {
         await ghDismissJob(j.key, { action: "approved", title: j.title, agent, by: currentViewer() });
+        if (typeof ghResolveNeedsSeth === "function" && (j.kind === "needs_seth" || String(j.key || "").startsWith("ho-"))) {
+          await ghResolveNeedsSeth(j.key, { action: "approved", by: currentViewer() });
+        }
       } catch (err) {
         // Message went through; only the cross-device record failed. Say so instead of failing silently.
         toast(`Approved, but couldn't save it for your other devices: ${friendlyError(err)}`, "err");
@@ -3001,10 +3058,7 @@ window.addEventListener("beforeinstallprompt", (e) => {
   showInstallBanner();
 });
 
-if ("serviceWorker" in navigator) {
-  // Explicit relative scope so GitHub Pages /the-stack-ui/ is covered (not site root).
-  navigator.serviceWorker.register("./sw.js", { scope: "./" }).catch(() => {});
-}
+setupAutoUpdate();
 
 (async function bootEntry() {
   // Nuclear clear for stuck empty phone sessions.
