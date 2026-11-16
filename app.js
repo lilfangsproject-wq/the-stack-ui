@@ -294,7 +294,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v31.2";
+const STACK_VERSION = "v31.3";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
@@ -534,8 +534,15 @@ function setRailOpen(open) {
   if (open) backdrop.removeAttribute("hidden");
   else backdrop.setAttribute("hidden", "");
   if (!open && typeof setActiveTab === "function" && !document.getElementById("lists-pane").classList.contains("open")) {
-    const ch = (state.channels || []).find((c) => c.slug === state.channelSlug);
-    setActiveTab(state.view === "home" ? "home" : state.view === "agents" ? "agents" : state.view === "notes" ? "notes" : "chats");
+    setActiveTab(
+      state.view === "home"
+        ? "home"
+        : state.view === "agents"
+          ? "agents"
+          : state.view === "notes"
+            ? "notes"
+            : "chats"
+    );
   }
 }
 
@@ -618,6 +625,7 @@ function paintChannelNav() {
   bindChannelNav(nav);
   bindChannelNav(dmNav);
   paintSessionStrip();
+  paintChatsInbox();
 }
 
 /* v26: session strip on the chat screen — agents first (Claude on top), then channels. */
@@ -699,15 +707,233 @@ async function loadChannels() {
   paintChannelNav();
 }
 
+function isPhoneShell() {
+  return window.matchMedia("(max-width: 720px)").matches;
+}
+
+function hideAllMains() {
+  ["home-pane", "chats-pane", "chat-pane", "agents-pane", "notes-pane"].forEach((id) => {
+    document.getElementById(id)?.classList.add("hidden");
+  });
+  document.getElementById("lists-pane")?.classList.remove("open");
+}
+
+function paintChatsInbox() {
+  const inbox = document.getElementById("chats-inbox");
+  if (!inbox) return;
+  const viewer = currentViewer();
+  refreshUnreadBadges();
+  const rows = sessionList();
+  if (!rows.length) {
+    inbox.innerHTML = `<p class="home-empty">No chats yet. Open an agent DM from Home or Agents.</p>`;
+    return;
+  }
+  inbox.innerHTML = rows
+    .map((c) => {
+      const dm = c.kind === "dm";
+      const label = dm ? dmLabel(c, viewer) : `#${c.slug}`;
+      const preview = c.purpose || (dm ? "Direct messages" : "Channel");
+      const unread = state.unreads[c.slug]
+        ? `<span class="chat-inbox-unread" aria-label="unread"></span>`
+        : "";
+      return `<button type="button" class="chat-inbox-row" data-slug="${esc(c.slug)}">
+        <span class="chat-inbox-av" aria-hidden="true">${esc(initialOf(label))}</span>
+        <span class="chat-inbox-main">
+          <strong>${esc(label)}</strong>
+          <span>${esc(preview)}</span>
+        </span>
+        ${unread}
+      </button>`;
+    })
+    .join("");
+}
+
+function showChatsInbox() {
+  hideAllMains();
+  const pane = document.getElementById("chats-pane");
+  if (pane) pane.classList.remove("hidden");
+  document.getElementById("shell")?.classList.remove("chat-sheet-open");
+  const chat = document.getElementById("chat-pane");
+  chat?.classList.remove("sheet-open", "sheet-dragging", "sheet-exiting");
+  chat?.style.removeProperty("transform");
+  paintChatsInbox();
+  if (typeof setActiveTab === "function") setActiveTab("chats");
+}
+
+function openChatSheet() {
+  const chat = document.getElementById("chat-pane");
+  if (!chat) return;
+  if (isPhoneShell()) {
+    // Keep inbox underneath so dismiss reveals it (iOS Messages feel).
+    document.getElementById("chats-pane")?.classList.remove("hidden");
+    document.getElementById("home-pane")?.classList.add("hidden");
+    document.getElementById("agents-pane")?.classList.add("hidden");
+    document.getElementById("notes-pane")?.classList.add("hidden");
+    const already = chat.classList.contains("sheet-open") && !chat.classList.contains("hidden");
+    chat.classList.remove("hidden", "sheet-exiting", "sheet-dragging");
+    chat.style.removeProperty("transform");
+    if (!already) {
+      // Start off-screen, then spring up on the next frame.
+      chat.classList.remove("sheet-open");
+      void chat.offsetWidth;
+      requestAnimationFrame(() => chat.classList.add("sheet-open"));
+    } else {
+      chat.classList.add("sheet-open");
+    }
+    document.getElementById("shell")?.classList.add("chat-sheet-open");
+  } else {
+    chat.classList.remove("hidden", "sheet-exiting", "sheet-dragging", "sheet-open");
+    chat.style.removeProperty("transform");
+    document.getElementById("chats-pane")?.classList.add("hidden");
+    document.getElementById("shell")?.classList.remove("chat-sheet-open");
+  }
+}
+
+function closeChatSheet({ to = "chats" } = {}) {
+  const chat = document.getElementById("chat-pane");
+  if (!chat) return;
+  state.threadParentId = null;
+  document.getElementById("thread")?.classList.add("hidden");
+
+  if (!isPhoneShell() || !chat.classList.contains("sheet-open")) {
+    chat.classList.remove("sheet-open", "sheet-dragging", "sheet-exiting");
+    chat.style.removeProperty("transform");
+    document.getElementById("shell")?.classList.remove("chat-sheet-open");
+    showView(to === "channel" ? "chats" : to);
+    return;
+  }
+
+  if (chat.classList.contains("sheet-exiting")) return;
+  chat.classList.add("sheet-exiting");
+  chat.classList.remove("sheet-open", "sheet-dragging");
+  chat.style.removeProperty("transform");
+  // Freeze scroll so flings don't keep moving messages under the exit.
+  const box = document.getElementById("messages");
+  if (box) box.style.overflow = "hidden";
+
+  let settled = false;
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    chat.classList.add("hidden");
+    chat.classList.remove("sheet-exiting", "sheet-dragging");
+    chat.style.removeProperty("transform");
+    if (box) box.style.overflow = "";
+    document.getElementById("shell")?.classList.remove("chat-sheet-open");
+    state.view = to === "channel" ? "chats" : to;
+    if (to === "home") showView("home");
+    else if (to === "agents") showView("agents");
+    else if (to === "notes") showView("notes");
+    else showChatsInbox();
+  };
+  chat.addEventListener("transitionend", finish, { once: true });
+  setTimeout(finish, 420);
+}
+
+function setupChatSheetGestures() {
+  const chat = document.getElementById("chat-pane");
+  const box = document.getElementById("messages");
+  if (!chat || chat.dataset.sheetBound) return;
+  chat.dataset.sheetBound = "1";
+
+  let startY = 0;
+  let startX = 0;
+  let dragging = false;
+  let armed = false;
+  let dy = 0;
+
+  const onStart = (y, x, target) => {
+    if (!isPhoneShell() || !chat.classList.contains("sheet-open")) return false;
+    if (chat.classList.contains("sheet-exiting")) return false;
+    if (document.getElementById("thread") && !document.getElementById("thread").classList.contains("hidden")) {
+      return false;
+    }
+    const inGrab =
+      target.closest(".sheet-grabber") ||
+      target.closest(".main-head") ||
+      target.closest("#session-strip");
+    const atTop = box && box.scrollTop <= 1;
+    if (!inGrab && !atTop) return false;
+    startY = y;
+    startX = x;
+    dy = 0;
+    armed = true;
+    dragging = false;
+    return true;
+  };
+
+  const onMove = (y, x, ev) => {
+    if (!armed) return;
+    const rawY = y - startY;
+    const rawX = x - startX;
+    if (!dragging) {
+      if (Math.abs(rawX) > 12 && Math.abs(rawX) > Math.abs(rawY)) {
+        armed = false;
+        return;
+      }
+      if (rawY < 8) return;
+      // Only claim the gesture once it's clearly a downward pull.
+      if (box && box.scrollTop > 1) {
+        armed = false;
+        return;
+      }
+      dragging = true;
+      chat.classList.add("sheet-dragging");
+      if (box) box.style.overflow = "hidden";
+    }
+    dy = Math.max(0, rawY);
+    const resist = Math.min(dy, 420);
+    chat.style.transform = `translate3d(0, ${resist}px, 0)`;
+    if (ev && ev.cancelable) ev.preventDefault();
+  };
+
+  const onEnd = () => {
+    if (!armed && !dragging) return;
+    armed = false;
+    if (!dragging) return;
+    dragging = false;
+    chat.classList.remove("sheet-dragging");
+    if (box) box.style.overflow = "";
+    if (dy > 110) {
+      closeChatSheet({ to: "chats" });
+    } else {
+      chat.style.removeProperty("transform");
+    }
+    dy = 0;
+  };
+
+  chat.addEventListener(
+    "touchstart",
+    (e) => {
+      if (e.touches.length !== 1) return;
+      onStart(e.touches[0].clientY, e.touches[0].clientX, e.target);
+    },
+    { passive: true }
+  );
+  chat.addEventListener(
+    "touchmove",
+    (e) => {
+      if (!armed || e.touches.length !== 1) return;
+      onMove(e.touches[0].clientY, e.touches[0].clientX, e);
+    },
+    { passive: false }
+  );
+  chat.addEventListener("touchend", onEnd, { passive: true });
+  chat.addEventListener("touchcancel", onEnd, { passive: true });
+}
+
 function showView(view) {
   state.view = view;
   const agentsPane = document.getElementById("agents-pane");
-  if (agentsPane) agentsPane.classList.toggle("hidden", view !== "agents");
   const notesPane = document.getElementById("notes-pane");
+  const chatsPane = document.getElementById("chats-pane");
+  if (agentsPane) agentsPane.classList.toggle("hidden", view !== "agents");
   if (notesPane) notesPane.classList.toggle("hidden", view !== "notes");
+
   if (view === "notes") {
     document.getElementById("home-pane").classList.add("hidden");
-    document.getElementById("chat-pane").classList.add("hidden");
+    chatsPane?.classList.add("hidden");
+    closeChatSheetImmediate();
     document.getElementById("lists-pane").classList.remove("open");
     if (typeof setActiveTab === "function") setActiveTab("notes");
     loadNotes().catch((err) => {
@@ -717,7 +943,8 @@ function showView(view) {
   }
   if (view === "agents") {
     document.getElementById("home-pane").classList.add("hidden");
-    document.getElementById("chat-pane").classList.add("hidden");
+    chatsPane?.classList.add("hidden");
+    closeChatSheetImmediate();
     if (typeof setActiveTab === "function") setActiveTab("agents");
     loadAgentsView().catch((err) => {
       const b = document.getElementById("agents-body");
@@ -725,8 +952,13 @@ function showView(view) {
     });
     return;
   }
+  if (view === "chats") {
+    document.getElementById("home-pane").classList.add("hidden");
+    closeChatSheetImmediate();
+    showChatsInbox();
+    return;
+  }
   if (typeof setActiveTab === "function") {
-    const ch = (state.channels || []).find((c) => c.slug === state.channelSlug);
     setActiveTab(view === "home" ? "home" : view === "agents" ? "agents" : view === "notes" ? "notes" : "chats");
   }
   const home = document.getElementById("home-pane");
@@ -734,7 +966,8 @@ function showView(view) {
   const homeNav = document.getElementById("home-nav");
   if (view === "home") {
     home.classList.remove("hidden");
-    chat.classList.add("hidden");
+    chatsPane?.classList.add("hidden");
+    closeChatSheetImmediate();
     if (homeNav) homeNav.classList.add("active");
     document.querySelectorAll("#channel-list button").forEach((b) => b.classList.remove("active"));
     loadHome().catch((err) => {
@@ -755,17 +988,30 @@ function showView(view) {
       }
     });
   } else {
+    // channel
     try {
       localStorage.setItem(LAST_CHAT_KEY, state.channelSlug);
     } catch {
       /* ignore */
     }
     home.classList.add("hidden");
-    chat.classList.remove("hidden");
-    paintSessionStrip();
     if (homeNav) homeNav.classList.remove("active");
+    openChatSheet();
+    paintSessionStrip();
+    paintChatsInbox();
     refresh();
   }
+}
+
+function closeChatSheetImmediate() {
+  const chat = document.getElementById("chat-pane");
+  if (!chat) return;
+  chat.classList.add("hidden");
+  chat.classList.remove("sheet-open", "sheet-dragging", "sheet-exiting");
+  chat.style.removeProperty("transform");
+  document.getElementById("shell")?.classList.remove("chat-sheet-open");
+  const box = document.getElementById("messages");
+  if (box) box.style.overflow = "";
 }
 
 /* ---- Command centre (v23): agents running, model pickers, git-main feed ---- */
@@ -2572,6 +2818,7 @@ function bindMenuToggle(id) {
 }
 bindMenuToggle("menu-toggle");
 bindMenuToggle("menu-toggle-home");
+bindMenuToggle("menu-toggle-chats");
 
 document.getElementById("home-nav")?.addEventListener("click", () => {
   setRailOpen(false);
@@ -2607,24 +2854,55 @@ document.getElementById("tabbar")?.addEventListener("click", (e) => {
   if (!btn) return;
   const tab = btn.dataset.tab;
   document.getElementById("lists-pane").classList.remove("open");
+  setRailOpen(false);
   if (tab === "home") {
-    setRailOpen(false);
-    showView("home");
+    if (isPhoneShell() && document.getElementById("chat-pane")?.classList.contains("sheet-open")) {
+      closeChatSheet({ to: "home" });
+    } else {
+      showView("home");
+    }
   } else if (tab === "chats") {
-    setRailOpen(false);
-    state.channelSlug = defaultChatSlug();
     state.threadParentId = null;
-    document.getElementById("thread").classList.add("hidden");
-    showView("channel");
+    document.getElementById("thread")?.classList.add("hidden");
+    if (isPhoneShell()) {
+      if (document.getElementById("chat-pane")?.classList.contains("sheet-open")) {
+        closeChatSheet({ to: "chats" });
+      } else {
+        showView("chats");
+      }
+    } else {
+      state.channelSlug = defaultChatSlug();
+      showView("channel");
+    }
   } else if (tab === "agents") {
-    setRailOpen(false);
-    showView("agents");
+    if (isPhoneShell() && document.getElementById("chat-pane")?.classList.contains("sheet-open")) {
+      closeChatSheet({ to: "agents" });
+    } else {
+      showView("agents");
+    }
   } else if (tab === "notes") {
-    setRailOpen(false);
-    showView("notes");
+    if (isPhoneShell() && document.getElementById("chat-pane")?.classList.contains("sheet-open")) {
+      closeChatSheet({ to: "notes" });
+    } else {
+      showView("notes");
+    }
   }
   setActiveTab(tab);
 });
+
+document.getElementById("chats-inbox")?.addEventListener("click", (e) => {
+  const row = e.target.closest(".chat-inbox-row");
+  if (!row?.dataset.slug) return;
+  state.channelSlug = row.dataset.slug;
+  state.threadParentId = null;
+  document.getElementById("thread")?.classList.add("hidden");
+  showView("channel");
+});
+document.getElementById("chats-new")?.addEventListener("click", () => setRailOpen(true));
+document.getElementById("chat-back")?.addEventListener("click", () => {
+  closeChatSheet({ to: "chats" });
+});
+setupChatSheetGestures();
 
 /* Home jump search: channels, agents, and cross-chat message text. */
 function jumpChannelMatches(q) {
@@ -3116,6 +3394,8 @@ function pollOnce(force = false) {
       ? loadAgentsView()
       : state.view === "notes"
       ? loadNotes()
+      : state.view === "chats"
+      ? loadChannels().then(() => paintChatsInbox())
       : loadMessages().then(() => {
           if (state.threadParentId && !state.pocketMode) return openThread(state.threadParentId);
         });
