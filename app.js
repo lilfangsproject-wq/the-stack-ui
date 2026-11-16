@@ -457,7 +457,7 @@ function setRailOpen(open) {
   else backdrop.setAttribute("hidden", "");
   if (!open && typeof setActiveTab === "function" && !document.getElementById("lists-pane").classList.contains("open")) {
     const ch = (state.channels || []).find((c) => c.slug === state.channelSlug);
-    setActiveTab(state.view === "home" ? "home" : state.view === "agents" ? "agents" : "chats");
+    setActiveTab(state.view === "home" ? "home" : state.view === "agents" ? "agents" : state.view === "notes" ? "notes" : "chats");
   }
 }
 
@@ -619,6 +619,18 @@ function showView(view) {
   state.view = view;
   const agentsPane = document.getElementById("agents-pane");
   if (agentsPane) agentsPane.classList.toggle("hidden", view !== "agents");
+  const notesPane = document.getElementById("notes-pane");
+  if (notesPane) notesPane.classList.toggle("hidden", view !== "notes");
+  if (view === "notes") {
+    document.getElementById("home-pane").classList.add("hidden");
+    document.getElementById("chat-pane").classList.add("hidden");
+    document.getElementById("lists-pane").classList.remove("open");
+    if (typeof setActiveTab === "function") setActiveTab("notes");
+    loadNotes().catch((err) => {
+      document.getElementById("notes-list").innerHTML = `<p class="home-empty">${esc(friendlyError(err))}</p>`;
+    });
+    return;
+  }
   if (view === "agents") {
     document.getElementById("home-pane").classList.add("hidden");
     document.getElementById("chat-pane").classList.add("hidden");
@@ -631,7 +643,7 @@ function showView(view) {
   }
   if (typeof setActiveTab === "function") {
     const ch = (state.channels || []).find((c) => c.slug === state.channelSlug);
-    setActiveTab(view === "home" ? "home" : view === "agents" ? "agents" : "chats");
+    setActiveTab(view === "home" ? "home" : view === "agents" ? "agents" : view === "notes" ? "notes" : "chats");
   }
   const home = document.getElementById("home-pane");
   const chat = document.getElementById("chat-pane");
@@ -816,6 +828,25 @@ async function loadCommandCentre() {
 
   ({ html: out.jobsHtml, needs: out.needsCount, needsList: out.needsList, doneList: out.doneList } = buildJobs({ events, commits, pulls, agents: out.agents, cloud }));
   out.hostsHtml = buildHosts(heartbeats, events, cloud);
+  const nl = out.needsList || [];
+  out.needsHtml = nl.length
+    ? `<section class="home-section needs-mini" id="cc-needs">
+        <div class="cc-head"><h2>Needs you</h2><button type="button" class="link-btn" data-goto-agents="needs">Open Agents ›</button></div>
+        ${nl
+          .slice(0, 4)
+          .map(
+            (j) => `<button type="button" class="needs-row" data-goto-agents="needs" data-task="${esc(j.key)}">
+              <span class="task-ico">${STATUS_ICON[j.status] || STATUS_ICON.blocked}</span>
+              <span class="needs-main"><strong>${esc(clip(j.title, 60))}</strong><span>${esc(
+                [canonicalAgent(j.who) || j.who, j.number ? `PR #${j.number}` : ""].filter(Boolean).join(" · ")
+              )}</span></span>
+              <time>${esc(fmtTime(j.at))}</time>
+            </button>`
+          )
+          .join("")}
+        ${nl.length > 4 ? `<button type="button" class="link-btn" data-goto-agents="needs">+${nl.length - 4} more</button>` : ""}
+      </section>`
+    : "";
   out.digestHtml = buildDigest({ events, pulls, commits, needs: out.needsList || [], done: out.doneList || [] });
   // Feed: shared memory + commits on main, newest first.
   const feed = [
@@ -1175,6 +1206,14 @@ function refreshJobsView() {
   return (state.view === "agents" ? loadAgentsView() : loadHome()).catch(() => {});
 }
 async function onJobsClick(e) {
+  const go = e.target.closest("[data-goto-agents]");
+  if (go) {
+    state.agentsSeg = go.dataset.gotoAgents || "";
+    state.agentFilter = "";
+    state.openTask = go.dataset.task || "";
+    showView("agents");
+    return;
+  }
   const homeTick = e.target.closest(".home-todo .tick[data-row]");
   if (homeTick) {
     homeTick.disabled = true;
@@ -1427,6 +1466,168 @@ document.getElementById("agents-body")?.addEventListener("click", (e) => {
 });
 document.getElementById("agents-refresh")?.addEventListener("click", () => loadAgentsView().catch(() => {}));
 
+/* ---- v30 Notes tab: personal notes, saved from messages or typed ---- */
+const NOTES_LOCAL_KEY = "stack-notes-local-v1";
+function notesCloud() {
+  return state.cloudMode && typeof ghLoadNotes === "function" && ghState && ghState.token;
+}
+async function readNotes() {
+  if (notesCloud()) return ghLoadNotes();
+  try {
+    return JSON.parse(localStorage.getItem(NOTES_LOCAL_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+async function writeNotes(mutate, message) {
+  if (notesCloud()) {
+    await ghSaveNotes(mutate, message);
+    return;
+  }
+  const next = mutate(await readNotes());
+  localStorage.setItem(NOTES_LOCAL_KEY, JSON.stringify(next));
+}
+function noteId() {
+  return `n-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+}
+async function saveMessageToNotes(id, btn) {
+  const m = (state.lastMessages || []).find((x) => x.id === id);
+  if (!m) return;
+  const ch = state.lastChannel || {};
+  const where = ch.kind === "dm" ? `DM with ${dmLabel(ch, currentViewer())}` : `#${ch.slug || state.channelSlug}`;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Saving…";
+  }
+  try {
+    await writeNotes(
+      (list) => [
+        {
+          id: noteId(),
+          text: "",
+          quote: String(m.body || (m.attachments ? "📷 Photo" : "")).slice(0, 4000),
+          source: { channel: ch.slug || state.channelSlug, where, author: m.author, message_id: m.id, at: m.created_at },
+          pinned: false,
+          created_at: new Date().toISOString(),
+        },
+        ...list,
+      ],
+      `stack: note saved from ${ch.slug || state.channelSlug}`
+    );
+    if (btn) btn.textContent = "★ Saved";
+    toast("Saved to Notes");
+  } catch (err) {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "☆ Save";
+    }
+    toast(friendlyError(err), "err");
+  }
+}
+function noteCard(n) {
+  const src = n.source;
+  return `<article class="note${n.pinned ? " pinned" : ""}" data-note="${esc(n.id)}">
+    ${n.text ? `<p class="note-text">${formatBodyHtml(n.text)}</p>` : ""}
+    ${n.quote ? `<blockquote class="note-quote">${formatBodyHtml(n.quote)}</blockquote>` : ""}
+    <div class="note-foot">
+      ${
+        src
+          ? `<button type="button" class="note-src" data-open-chat="${esc(src.channel)}">${esc(src.author || "")} · ${esc(src.where || "")} · ${esc(fmtTime(src.at))}</button>`
+          : `<span class="note-src plain">${esc(fmtTime(n.created_at))}</span>`
+      }
+      <span class="note-actions">
+        <button type="button" data-note-pin="${esc(n.id)}" aria-label="${n.pinned ? "Unpin" : "Pin"}">${n.pinned ? "📌" : "Pin"}</button>
+        <button type="button" data-note-copy="${esc(n.id)}" aria-label="Copy">Copy</button>
+        <button type="button" data-note-del="${esc(n.id)}" aria-label="Delete">Delete</button>
+      </span>
+    </div>
+  </article>`;
+}
+function paintNotes() {
+  const list = document.getElementById("notes-list");
+  if (!list) return;
+  const q = (document.getElementById("note-search")?.value || "").trim().toLowerCase();
+  const notes = (state.notes || [])
+    .filter((n) => !q || [n.text, n.quote, n.source && n.source.author, n.source && n.source.where].some((v) => String(v || "").toLowerCase().includes(q)))
+    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || String(b.created_at).localeCompare(String(a.created_at)));
+  document.getElementById("notes-headline").textContent = `${(state.notes || []).length} note${(state.notes || []).length === 1 ? "" : "s"}${
+    notesCloud() ? " · synced to your vault" : " · on this device"
+  }`;
+  const html = notes.length
+    ? notes.map(noteCard).join("")
+    : `<p class="home-empty">${q ? "No notes match." : "No notes yet. Write one above, or tap any message in Chats → ☆ Save."}</p>`;
+  if (list.dataset.sig === html) return;
+  list.dataset.sig = html;
+  list.innerHTML = html;
+}
+async function loadNotes() {
+  state.notes = await readNotes();
+  paintNotes();
+}
+document.getElementById("note-form")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const ta = document.getElementById("note-text");
+  const text = ta.value.trim();
+  if (!text) return;
+  const btn = e.target.querySelector('button[type="submit"]');
+  btn.disabled = true;
+  const draft = { id: noteId(), text, quote: "", source: null, pinned: false, created_at: new Date().toISOString() };
+  state.notes = [draft, ...(state.notes || [])];
+  ta.value = "";
+  paintNotes();
+  try {
+    await writeNotes((list) => [draft, ...list.filter((n) => n.id !== draft.id)], "stack: note added");
+    toast("Note saved");
+  } catch (err) {
+    toast(friendlyError(err), "err");
+    ta.value = text;
+    state.notes = state.notes.filter((n) => n.id !== draft.id);
+    paintNotes();
+  } finally {
+    btn.disabled = false;
+  }
+});
+document.getElementById("note-search")?.addEventListener("input", () => paintNotes());
+document.getElementById("notes-list")?.addEventListener("click", async (e) => {
+  const open = e.target.closest("[data-open-chat]");
+  if (open) {
+    state.channelSlug = open.dataset.openChat;
+    showView("channel");
+    return;
+  }
+  const copy = e.target.closest("[data-note-copy]");
+  if (copy) {
+    const n = (state.notes || []).find((x) => x.id === copy.dataset.noteCopy);
+    try {
+      await navigator.clipboard.writeText([n.text, n.quote].filter(Boolean).join("\n\n"));
+      toast("Copied");
+    } catch {
+      toast("Couldn't copy on this browser", "err");
+    }
+    return;
+  }
+  const pin = e.target.closest("[data-note-pin]");
+  const del = e.target.closest("[data-note-del]");
+  if (!pin && !del) return;
+  const id = (pin || del).dataset.notePin || (pin || del).dataset.noteDel;
+  if (del && !window.confirm("Delete this note?")) return;
+  const before = state.notes;
+  state.notes = del
+    ? state.notes.filter((n) => n.id !== id)
+    : state.notes.map((n) => (n.id === id ? { ...n, pinned: !n.pinned } : n));
+  paintNotes();
+  try {
+    await writeNotes(
+      (list) => (del ? list.filter((n) => n.id !== id) : list.map((n) => (n.id === id ? { ...n, pinned: !n.pinned } : n))),
+      del ? "stack: note deleted" : "stack: note pinned"
+    );
+  } catch (err) {
+    state.notes = before;
+    paintNotes();
+    toast(friendlyError(err), "err");
+  }
+});
+
 /* Hosts: heartbeat branch first, shared memory as fallback. */
 const HOSTS = [
   { name: "Windows PC", role: "Always-on host", ids: ["desktop-kg22uf0", "windows", "win"], match: /DESKTOP-KG22UF0|\bWindows (PC|host|DC|box|machine)\b/i },
@@ -1484,8 +1685,8 @@ function buildHosts(heartbeats, events, cloud) {
   }`;
 }
 
-/* Digest: what changed since the last time Seth tapped "Got it". */
-function buildDigest({ events, pulls, needs, done }) {
+/* Digest v30: what changed since Seth last tapped "Got it", with a per-agent breakdown. */
+function buildDigest({ events, pulls, commits, needs, done }) {
   let since = state.digestSince;
   if (!since) {
     try {
@@ -1496,25 +1697,61 @@ function buildDigest({ events, pulls, needs, done }) {
     if (!since) since = new Date(Date.now() - 24 * 3600000).toISOString();
     state.digestSince = since;
   }
-  const after = (iso) => iso && String(new Date(iso).toISOString()) > since;
+  const sinceT = new Date(since).getTime();
+  const after = (iso) => iso && new Date(iso).getTime() > sinceT;
   const newEvents = (events || []).filter((e) => after(e.at));
   const finished = (done || []).filter((j) => after(j.at));
-  const merged = (pulls || []).filter((p) => p.state === "merged" && after(p.at));
-  const blocked = (needs || []).filter((j) => after(j.at));
-  const who = [...new Set(newEvents.map((e) => canonicalAgent(e.agent) || e.agent))].filter(Boolean);
-  if (!newEvents.length && !merged.length) return "";
+  const merged = Array.isArray(pulls)
+    ? pulls.filter((p) => p.state === "merged" && after(p.at)).map((p) => ({ n: p.number, title: p.title, at: p.at }))
+    : (commits || [])
+        .map((c) => ({ c, m: /^Merge pull request #(\d+) from [^/]+\/(?:[a-z]+\/)?(.+?)(?:-\d{8}.*)?$/i.exec(String(c.message).split("\n")[0]) }))
+        .filter(({ c, m }) => m && after(c.at))
+        .map(({ c, m }) => ({ n: Number(m[1]), title: String(c.message).split("\n").slice(1).join(" ").trim() || m[2].replace(/[-_]+/g, " "), at: c.at }));
+  const blocked = needs || [];
+  if (!newEvents.length && !merged.length && !blocked.length) return "";
+  // Per agent: count + latest headline.
+  const byAgent = {};
+  for (const e of newEvents) {
+    const who = canonicalAgent(e.agent) || e.agent || "Agent";
+    const row = (byAgent[who] = byAgent[who] || { n: 0, results: 0, latest: null });
+    row.n += 1;
+    if (e.kind === "result") row.results += 1;
+    if (!row.latest || String(e.at) > String(row.latest.at)) row.latest = e;
+  }
+  const agentRows = Object.entries(byAgent)
+    .sort((a, b) => b[1].n - a[1].n)
+    .map(([who, r]) => {
+      const head = String(r.latest.id || "").replace(/-\d{8}$/, "").replace(/[-_]+/g, " ");
+      return `<li><span class="dg-av" aria-hidden="true">${initialOf(who)}</span><span class="dg-main"><strong>${esc(who)}</strong> · ${r.n} update${
+        r.n === 1 ? "" : "s"
+      }${r.results ? `, ${r.results} finished` : ""}<span class="dg-sub">Latest: ${esc(clip(head || r.latest.text, 60))} · ${esc(fmtTime(r.latest.at))}</span></span></li>`;
+    })
+    .join("");
   const parts = [];
   if (finished.length) parts.push(`<strong>${finished.length}</strong> finished`);
   if (merged.length) parts.push(`<strong>${merged.length}</strong> PR${merged.length > 1 ? "s" : ""} merged`);
   if (blocked.length) parts.push(`<strong class="warn">${blocked.length}</strong> need${blocked.length > 1 ? "" : "s"} you`);
-  const top = finished.slice(0, 3).map((j) => clip(j.title, 40));
+  const agentsActive = Object.keys(byAgent).length;
+  const lead = `${parts.length ? parts.join(" · ") + ". " : ""}${agentsActive ? `${agentsActive} agent${agentsActive === 1 ? "" : "s"} logged ${newEvents.length} update${newEvents.length === 1 ? "" : "s"}.` : ""}`;
+  const mergedHtml = merged.length
+    ? `<h4>Merged</h4><ul class="dg-list">${merged
+        .slice(0, 5)
+        .map((m) => `<li><span class="task-ico st-merged">${STATUS_ICON.merged}</span><span class="dg-main">PR #${m.n} · ${esc(clip(m.title, 60))}<span class="dg-sub">${esc(fmtTime(m.at))}</span></span></li>`)
+        .join("")}</ul>`
+    : "";
+  const needsHtml = blocked.length
+    ? `<h4>Needs you</h4><ul class="dg-list">${blocked
+        .slice(0, 4)
+        .map((j) => `<li><span class="task-ico st-blocked">${STATUS_ICON.blocked}</span><span class="dg-main">${esc(clip(j.title, 60))}<span class="dg-sub">${esc(canonicalAgent(j.who) || j.who || "")} · ${esc(fmtTime(j.at))}</span></span></li>`)
+        .join("")}</ul>`
+    : "";
   return `<section class="digest" aria-label="Since you last looked">
     <div class="digest-head"><strong>Since you last looked</strong><span>${esc(fmtTime(since))}</span></div>
-    <p>${parts.length ? parts.join(" · ") + ". " : ""}${who.length ? `${esc(who.join(", "))} logged ${newEvents.length} update${newEvents.length === 1 ? "" : "s"}.` : ""}${
-      top.length ? ` Latest: ${top.map(esc).join("; ")}.` : ""
-    }</p>
+    <p>${lead}</p>
+    ${agentRows ? `<ul class="dg-list dg-agents">${agentRows}</ul>` : ""}
+    ${mergedHtml || needsHtml ? `<details class="dg-more"><summary>More detail</summary>${needsHtml}${mergedHtml}</details>` : ""}
     <div class="digest-actions">
-      ${blocked.length ? `<a class="act act-primary" href="#cc-jobs">See what needs you</a>` : ""}
+      ${blocked.length ? `<button type="button" class="act act-primary" data-goto-agents="needs">See what needs you</button>` : ""}
       <button type="button" class="act" data-digest-ok="1">Got it</button>
     </div>
   </section>`;
@@ -1578,7 +1815,7 @@ async function loadHome() {
       ? `${ghState.repo}@${ghState.branch}`
       : state.hostLabel;
   document.getElementById("home-headline").textContent = state.cloudMode
-    ? `Live from ${typeof ghState !== "undefined" ? ghState.branch : "main"} · ${channelCount - dmCount} channels · ${dmCount} DMs`
+    ? `Live · ${channelCount - dmCount} channels · ${dmCount} agents`
     : data.summary?.headline || "Agent hub";
   const body = document.getElementById("home-body");
   const todos = data.todos || [];
@@ -1664,11 +1901,15 @@ async function loadHome() {
   const cc = await loadCommandCentre();
   const running = cc.agents.filter((x) => x.status === "active").length;
   const stats = [
-    ["Needs you", cc.needsCount || 0, "jobs", (cc.needsCount || 0) > 0 ? "alert" : ""],
-    ["Running now", running, "agents", running ? "live" : ""],
-    ["To-dos", todos.length, "todos", ""],
+    ["Needs you", cc.needsCount || 0, "goto-agents", (cc.needsCount || 0) > 0 ? "alert" : ""],
+    ["Running now", running, "cc-agents", running ? "live" : ""],
+    ["To-dos", todos.length, "cc-todos", ""],
   ]
-    .map(([k, v, id, cls]) => `<a class="stat ${cls}" href="#cc-${id}"><strong>${v}</strong><span>${k}</span></a>`)
+    .map(([k, v, id, cls]) =>
+      id === "goto-agents"
+        ? `<button type="button" class="stat ${cls}" data-goto-agents="needs"><strong>${v}</strong><span>${k}</span></button>`
+        : `<a class="stat ${cls}" href="#${id}"><strong>${v}</strong><span>${k}</span></a>`
+    )
     .join("");
   const homeHtml = `
     ${emptyBanner}
@@ -1680,10 +1921,7 @@ async function loadHome() {
     ${cc.digestHtml || ""}
     ${state.cloudMode ? pushPromptHtml() : ""}
     <div class="stat-row">${stats}</div>
-    <section class="home-section cc-panel" id="cc-jobs">
-      <div class="cc-head"><h2>Jobs</h2><span class="cc-src">${esc(cc.pullsSource ? `shared memory + ${cc.pullsSource}` : "")}</span></div>
-      ${cc.jobsHtml}
-    </section>
+    ${cc.needsHtml}
     <section class="home-section cc-panel" id="cc-hosts">
       <div class="cc-head"><h2>Computers</h2><span class="cc-src">heartbeat · shared memory</span></div>
       ${cc.hostsHtml || ""}
@@ -1747,6 +1985,8 @@ function nearBottom(el) {
 
 function renderMessages(data) {
   const ch = data.channel || {};
+  state.lastMessages = data.messages || [];
+  state.lastChannel = ch;
   const viewer = currentViewer();
   const title =
     ch.kind === "dm" ? dmLabel(ch, viewer) : `#${ch.slug || state.channelSlug}`;
@@ -1770,8 +2010,28 @@ function renderMessages(data) {
     return;
   }
   box.dataset.empty = "0";
+  // v30: day separators + group consecutive messages from one author (within 5 min).
+  const dayKey = (iso) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? "" : d.toDateString();
+  };
+  const dayLabel = (iso) => {
+    const b = dayBucket(iso);
+    if (b !== "Earlier") return b;
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  };
+  let prev = null;
   const nextHtml = data.messages
     .map((m) => {
+      const newDay = !prev || dayKey(prev.created_at) !== dayKey(m.created_at);
+      const cont =
+        prev &&
+        !newDay &&
+        String(prev.author).toLowerCase() === String(m.author).toLowerCase() &&
+        new Date(m.created_at) - new Date(prev.created_at) < 5 * 60000;
+      prev = m;
+      const sep = newDay ? `<div class="day-sep" role="separator"><span>${esc(dayLabel(m.created_at))}</span></div>` : "";
       const mine = new Set(
         (m.reactions || [])
           .filter((r) => (r.authors || []).some((a) => String(a).toLowerCase() === viewer.toLowerCase()))
@@ -1794,8 +2054,8 @@ function renderMessages(data) {
           )}" aria-label="React ${esc(e)}">${esc(e)}</button>`
       ).join("");
       const isMine = String(m.author || "").toLowerCase() === viewer.toLowerCase();
-      return `
-      <article class="msg${isMine ? " mine" : " agent"}" data-id="${esc(m.id)}">
+      return `${sep}
+      <article class="msg${isMine ? " mine" : " agent"}${cont ? " cont" : ""}${m.pending ? " pending" : ""}" data-id="${esc(m.id)}">
         <span class="msg-avatar" aria-hidden="true">${initialOf(m.author)}</span>
         <div class="meta"><strong>${esc(m.author)}</strong><time title="${esc(
           fmtTimeFull(m.created_at)
@@ -1817,18 +2077,35 @@ function renderMessages(data) {
           <button type="button" class="ghost react-toggle" data-id="${esc(
             m.id
           )}" aria-label="Add reaction">+</button>
-          <button type="button" class="thread-link" data-parent="${esc(m.id)}">
-            ${m.reply_count ? `${m.reply_count} replies` : "Reply in thread"}
+          <button type="button" class="save-note" data-save-note="${esc(m.id)}" aria-label="Save to notes">☆ Save</button>
+          <button type="button" class="thread-link${m.reply_count ? " has-replies" : ""}" data-parent="${esc(m.id)}">
+            ${m.reply_count ? `${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}` : "Reply in thread"}
           </button>
         </div>
       </article>`;
     })
     .join("");
   if (box.dataset.sig === nextHtml) return;
+  const slug = ch.slug || state.channelSlug;
+  const firstPaint = box.dataset.slug !== slug;
+  const seen = new Set([...box.querySelectorAll(".msg[data-id]")].map((el) => el.dataset.id));
+  const openId = box.querySelector(".msg.open")?.dataset.id;
   box.dataset.sig = nextHtml;
+  box.dataset.slug = slug;
   box.innerHTML = nextHtml;
   hydratePhotos(box);
-  if (stick) box.scrollTop = box.scrollHeight;
+  if (openId) box.querySelector(`.msg[data-id="${CSS.escape(openId)}"]`)?.classList.add("open");
+  if (firstPaint) {
+    box.classList.remove("switching");
+    void box.offsetWidth;
+    box.classList.add("switching");
+    box.scrollTop = box.scrollHeight;
+  } else {
+    box.querySelectorAll(".msg[data-id]").forEach((el) => {
+      if (!seen.has(el.dataset.id) && !String(el.dataset.id).startsWith("local-")) el.classList.add("enter");
+    });
+    if (stick) box.scrollTo({ top: box.scrollHeight, behavior: "smooth" });
+  }
   const last = data.messages[data.messages.length - 1];
   if (last?.created_at) markChannelRead(ch.slug || state.channelSlug, last.created_at);
   state.unreads[ch.slug || state.channelSlug] = 0;
@@ -2129,12 +2406,9 @@ document.getElementById("tabbar")?.addEventListener("click", (e) => {
   } else if (tab === "agents") {
     setRailOpen(false);
     showView("agents");
-  } else if (tab === "lists") {
+  } else if (tab === "notes") {
     setRailOpen(false);
-    document.getElementById("lists-pane").classList.add("open");
-    loadLists()
-      .then(() => loadListDetail())
-      .catch(() => {});
+    showView("notes");
   }
   setActiveTab(tab);
 });
@@ -2211,10 +2485,26 @@ document.getElementById("messages").addEventListener("click", (e) => {
     toggleReaction(react.dataset.id, react.dataset.emoji).catch(() => {});
     return;
   }
+  const saveBtn = e.target.closest("[data-save-note]");
+  if (saveBtn) {
+    e.preventDefault();
+    saveMessageToNotes(saveBtn.dataset.saveNote, saveBtn);
+    return;
+  }
   const btn = e.target.closest(".thread-link");
-  if (!btn) return;
-  e.preventDefault();
-  openThread(btn.dataset.parent);
+  if (btn) {
+    e.preventDefault();
+    openThread(btn.dataset.parent);
+    return;
+  }
+  // v30: tap a message to reveal its actions (react, reply); tap again or another to hide.
+  if (e.target.closest("a, button, .photo, .mention")) return;
+  const msg = e.target.closest(".msg[data-id]");
+  if (!msg || msg.classList.contains("pending")) return;
+  const box = e.currentTarget;
+  const wasOpen = msg.classList.contains("open");
+  box.querySelectorAll(".msg.open").forEach((m) => m.classList.remove("open"));
+  if (!wasOpen) msg.classList.add("open");
 });
 
 
@@ -2311,6 +2601,19 @@ document.getElementById("composer").addEventListener("submit", async (e) => {
   if (btn) btn.disabled = true;
   const path = `/api/channels/${encodeURIComponent(state.channelSlug)}/messages`;
   const payload = { author, body };
+  // v30 optimistic send: show the bubble immediately, greyed until GitHub confirms.
+  const boxEl = document.getElementById("messages");
+  const ghost = document.createElement("article");
+  ghost.className = "msg mine pending enter";
+  ghost.dataset.id = `local-${Date.now()}`;
+  ghost.innerHTML = `<span class="msg-avatar" aria-hidden="true">${initialOf(author)}</span><div class="meta"><strong>${esc(author)}</strong><time>Sending…</time></div>${
+    body ? `<div class="body">${formatBodyHtml(body)}</div>` : ""
+  }${pending.length ? `<div class="msg-photos"><span class="photo-loading">Uploading ${pending.length} photo${pending.length > 1 ? "s" : ""}…</span></div>` : ""}`;
+  boxEl.querySelector(".empty-state")?.remove();
+  boxEl.appendChild(ghost);
+  boxEl.scrollTo({ top: boxEl.scrollHeight, behavior: "smooth" });
+  document.getElementById("body").value = "";
+  autosize(document.getElementById("body"));
   try {
     if (pending.length) {
       if (!state.cloudMode) throw new Error("Photos need the cloud hub (open with ?cloud=1).");
@@ -2524,6 +2827,8 @@ function pollOnce(force = false) {
       ? loadHome()
       : state.view === "agents"
       ? loadAgentsView()
+      : state.view === "notes"
+      ? loadNotes()
       : loadMessages().then(() => {
           if (state.threadParentId && !state.pocketMode) return openThread(state.threadParentId);
         });

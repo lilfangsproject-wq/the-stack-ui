@@ -436,6 +436,29 @@ async function ghDismissJob(key, info) {
   );
 }
 
+/* v30 personal notes: hub/notes.json (private repo, synced across devices). */
+async function ghLoadNotes() {
+  const data = await ghReadJson("notes.json", { notes: [] });
+  return Array.isArray(data && data.notes) ? data.notes : [];
+}
+async function ghSaveNotes(mutate, message = "stack: notes") {
+  return ghPutFile(
+    "notes.json",
+    async (existing) => {
+      let data = { notes: [] };
+      try {
+        if (existing.text) data = JSON.parse(existing.text);
+      } catch {
+        /* rebuild */
+      }
+      data.note = "Seth's personal notes from The Stack (Notes tab). Private to Seth; agents read only if he asks.";
+      data.notes = mutate(Array.isArray(data.notes) ? data.notes : []);
+      return JSON.stringify(data, null, 2) + "\n";
+    },
+    message
+  );
+}
+
 async function ghLoadAgentPrefs() {
   const data = await ghReadJson("agents.json", { agents: {} });
   return data && data.agents ? data : { agents: {} };

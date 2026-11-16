@@ -102,6 +102,25 @@
       <section class="agents-body" id="agents-body"></section>
     </main>
 
+    <main class="main hidden notes-pane" id="notes-pane">
+      <header class="main-head">
+        <div class="main-head-text">
+          <h1>Notes</h1>
+          <p class="purpose" id="notes-headline">Things you want to remember</p>
+        </div>
+      </header>
+      <section class="notes-body" id="notes-body">
+        <form id="note-form" class="note-compose">
+          <textarea id="note-text" rows="2" placeholder="Write a note…" aria-label="New note"></textarea>
+          <div class="note-compose-row">
+            <input id="note-search" type="search" placeholder="Search notes" aria-label="Search notes" />
+            <button type="submit" class="act act-primary">Save</button>
+          </div>
+        </form>
+        <div id="notes-list" class="notes-list"></div>
+      </section>
+    </main>
+
     <main class="main hidden" id="chat-pane">
       <header class="main-head">
         <button type="button" id="menu-toggle" class="icon-btn" aria-label="Open channels">☰</button>
@@ -155,7 +174,7 @@
       <button type="button" data-tab="home" class="active"><span class="tab-ico" aria-hidden="true">⌂</span><span>Home</span></button>
       <button type="button" data-tab="chats"><span class="tab-ico" aria-hidden="true">#</span><span>Chats</span></button>
       <button type="button" data-tab="agents"><span class="tab-ico" aria-hidden="true">◎</span><span>Agents</span></button>
-      <button type="button" data-tab="lists"><span class="tab-ico" aria-hidden="true">☰</span><span>Lists</span></button>
+      <button type="button" data-tab="notes"><span class="tab-ico" aria-hidden="true">✎</span><span>Notes</span></button>
     </nav>
   </div>
   <script src="github_hub.js"></script>
