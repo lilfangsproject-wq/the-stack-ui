@@ -696,7 +696,8 @@ button:active, .ghost:active, .icon-btn:active {
   }
 }
 
-@media (max-width: 720px) {
+/* Phone shell: portrait narrow OR landscape short (keep sheet mode when rotating). */
+@media (max-width: 720px), (max-height: 720px) and (orientation: landscape) {
   .shell {
     grid-template-columns: 1fr;
     border: 0;
@@ -1315,7 +1316,7 @@ button.primary-btn,
 
 /* Bottom tab bar: phone only -------------------------------------------- */
 .tabbar { display: none; }
-@media (max-width: 720px) {
+@media (max-width: 720px), (max-height: 720px) and (orientation: landscape) {
   .tabbar {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -1364,7 +1365,7 @@ button.primary-btn,
   .composer #author { display: none; }
 }
 /* Thread overlay covers the bar while replying. */
-@media (max-width: 720px) {
+@media (max-width: 720px), (max-height: 720px) and (orientation: landscape) {
   .shell:has(.thread:not(.hidden)) .tabbar { display: none; }
   .shell:has(.thread:not(.hidden)) #chat-pane .composer { margin-bottom: 0; }
 }
@@ -1702,6 +1703,21 @@ button.primary-btn, .composer button[type="submit"], .cloud-connect button[type=
   display: grid;
   gap: 0.35rem;
   align-content: start;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+  margin: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+button.host:active {
+  transform: scale(0.985);
+  background: color-mix(in srgb, var(--glass-strong) 88%, var(--accent));
+}
+button.host:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
 }
 .host-top { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
 .host-ico {
@@ -1896,7 +1912,7 @@ body, .main-head h1 { text-shadow: none; }
   backdrop-filter: var(--blur);
 }
 .composer { box-shadow: inset 0 1px 0 var(--separator); }
-@media (max-width: 720px) {
+@media (max-width: 720px), (max-height: 720px) and (orientation: landscape) {
   .rail { background: var(--chrome-strong); }
   .tabbar {
     background: linear-gradient(160deg, rgba(40, 42, 46, 0.72), rgba(20, 21, 24, 0.72));
@@ -2067,7 +2083,7 @@ body {
 .session-chip.active .chip-dot { background: var(--on-accent); box-shadow: none; }
 .session-chip.more { padding: 0.35rem 0.85rem; color: var(--muted); }
 #chat-pane .main-head { padding-bottom: 0.55rem; }
-@media (max-width: 720px) {
+@media (max-width: 720px), (max-height: 720px) and (orientation: landscape) {
   #menu-toggle { display: none; }
 }
 
@@ -2403,11 +2419,11 @@ button.stat { font: inherit; text-align: left; border: 0; color: var(--text); cu
 .note-actions button:active { transform: scale(0.96); }
 .save-note { font: inherit; font-size: 0.78rem; font-weight: 600; color: var(--accent); background: var(--fill); border: 0; border-radius: 999px; padding: 0.3rem 0.7rem; min-height: 0; }
 .msg:not(.open) .save-note { display: none; }
-@media (max-width: 720px) { #toggle-lists { display: none; } }
+@media (max-width: 720px), (max-height: 720px) and (orientation: landscape) { #toggle-lists { display: none; } }
 
 /* v31.2 — composer + tabbar polish (phone chat dock).
  * Fixes: uneven + / field / Send heights, cramped gap above tabbar, heavy Send glow. */
-@media (max-width: 720px) {
+@media (max-width: 720px), (max-height: 720px) and (orientation: landscape) {
   :root { --composer-control-h: 2.55rem; }
 
   #chat-pane {
@@ -2623,7 +2639,7 @@ html, body {
   .sheet-grabber { display: none !important; }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 720px), (max-height: 720px) and (orientation: landscape) {
   #menu-toggle { display: none; }
   .chat-back {
     display: grid;
@@ -2670,6 +2686,11 @@ html, body {
     transform: translate3d(0, 0, 0);
     pointer-events: auto;
   }
+  #chat-pane.sheet-open .chat-back {
+    position: relative;
+    z-index: 5;
+    pointer-events: auto;
+  }
   #chat-pane.sheet-dragging {
     transition: none;
   }
@@ -2712,10 +2733,105 @@ html, body {
   }
 }
 
+/* Host action sheet (Computers → status / Copy IP / Refresh / Wake / Chat) */
+.host-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  pointer-events: none;
+}
+.host-sheet.hidden { display: none; }
+.host-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transition: opacity 0.22s ease;
+  pointer-events: auto;
+}
+.host-sheet-panel {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 28rem);
+  max-height: min(88dvh, 36rem);
+  overflow: auto;
+  margin: 0;
+  padding: 0.35rem 1rem calc(1rem + var(--safe-bottom, 0px));
+  border-radius: 18px 18px 0 0;
+  background: var(--bg);
+  border: 0.5px solid var(--line);
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.45);
+  transform: translate3d(0, 110%, 0);
+  transition: transform 0.38s cubic-bezier(0.32, 0.72, 0, 1);
+  pointer-events: auto;
+  display: grid;
+  gap: 0.75rem;
+}
+.host-sheet.host-sheet-open .host-sheet-backdrop { opacity: 1; }
+.host-sheet.host-sheet-open .host-sheet-panel { transform: translate3d(0, 0, 0); }
+.host-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.host-sheet-id {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+.host-sheet-id h2 { margin: 0; font-size: 1.15rem; }
+.host-sheet-facts {
+  margin: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+.host-sheet-facts > div {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.45rem 0.55rem;
+  border-radius: 12px;
+  background: var(--glass-strong);
+  border: 0.5px solid var(--line);
+}
+.host-sheet-facts dt {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+.host-sheet-facts dd {
+  margin: 0;
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+  font-family: var(--mono, ui-monospace, Menlo, monospace);
+}
+.host-sheet-note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.host-sheet-actions {
+  display: grid;
+  gap: 0.45rem;
+}
+.host-sheet-actions .act { justify-content: center; min-height: 2.6rem; }
+@media (prefers-reduced-motion: reduce) {
+  .host-sheet-backdrop, .host-sheet-panel { transition: none !important; }
+}
+
 /* v31.5 — home taps only where the destination is obvious */
 .home-tap,
 .agent-window[data-open-agent],
 .home-todo[data-open-list],
+button.host[data-open-host],
 button.dg-row,
 a.dg-row {
   cursor: pointer;

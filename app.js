@@ -13,7 +13,14 @@ const state = {
   deferredInstall: null,
   channels: [],
   unreads: {},
+  /** Latest Computers rows for the host action sheet. */
+  hostIndex: {},
 };
+
+/** Portrait narrow OR landscape short — keep sheet mode when rotating a phone. */
+const PHONE_SHELL_MQ = "(max-width: 720px), (max-height: 720px) and (orientation: landscape)";
+/** Bumped to cancel an in-flight sheet close when we re-open mid-exit. */
+let sheetCloseGen = 0;
 
 // Older iOS Safari: avoid raw TypeError: x is not a function.
 if (!String.prototype.replaceAll) {
@@ -296,7 +303,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v31.6";
+const STACK_VERSION = "v31.7";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
@@ -710,7 +717,7 @@ async function loadChannels() {
 }
 
 function isPhoneShell() {
-  return window.matchMedia("(max-width: 720px)").matches;
+  return window.matchMedia(PHONE_SHELL_MQ).matches;
 }
 
 function hideAllMains() {
@@ -770,6 +777,8 @@ function rememberChatReturn() {
 function openChatSheet() {
   const chat = document.getElementById("chat-pane");
   if (!chat) return;
+  // Cancel any in-flight close so its finish() can't hide a re-opened sheet.
+  sheetCloseGen += 1;
   if (isPhoneShell()) {
     // Underlay matches where Back should land (Home stays under if you opened from Home).
     const under = state.chatReturnTo || "chats";
@@ -804,6 +813,7 @@ function closeChatSheet({ to } = {}) {
   document.getElementById("thread")?.classList.add("hidden");
 
   if (!isPhoneShell() || !chat.classList.contains("sheet-open")) {
+    sheetCloseGen += 1;
     chat.classList.remove("sheet-open", "sheet-dragging", "sheet-exiting");
     chat.style.removeProperty("transform");
     document.getElementById("shell")?.classList.remove("chat-sheet-open");
@@ -812,6 +822,7 @@ function closeChatSheet({ to } = {}) {
   }
 
   if (chat.classList.contains("sheet-exiting")) return;
+  const gen = ++sheetCloseGen;
   chat.classList.add("sheet-exiting");
   chat.classList.remove("sheet-open", "sheet-dragging");
   chat.style.removeProperty("transform");
@@ -820,10 +831,10 @@ function closeChatSheet({ to } = {}) {
 
   let settled = false;
   const finish = () => {
-    if (settled) return;
+    if (settled || gen !== sheetCloseGen) return;
     settled = true;
     chat.classList.add("hidden");
-    chat.classList.remove("sheet-exiting", "sheet-dragging");
+    chat.classList.remove("sheet-exiting", "sheet-dragging", "sheet-open");
     chat.style.removeProperty("transform");
     if (box) box.style.overflow = "";
     document.getElementById("shell")?.classList.remove("chat-sheet-open");
@@ -834,6 +845,18 @@ function closeChatSheet({ to } = {}) {
   };
   chat.addEventListener("transitionend", finish, { once: true });
   setTimeout(finish, 420);
+}
+
+function closeChatSheetImmediate() {
+  sheetCloseGen += 1;
+  const chat = document.getElementById("chat-pane");
+  if (!chat) return;
+  chat.classList.add("hidden");
+  chat.classList.remove("sheet-open", "sheet-dragging", "sheet-exiting");
+  chat.style.removeProperty("transform");
+  document.getElementById("shell")?.classList.remove("chat-sheet-open");
+  const box = document.getElementById("messages");
+  if (box) box.style.overflow = "";
 }
 
 function setupChatSheetGestures() {
@@ -1003,17 +1026,6 @@ function showView(view) {
     paintChatsInbox();
     refresh();
   }
-}
-
-function closeChatSheetImmediate() {
-  const chat = document.getElementById("chat-pane");
-  if (!chat) return;
-  chat.classList.add("hidden");
-  chat.classList.remove("sheet-open", "sheet-dragging", "sheet-exiting");
-  chat.style.removeProperty("transform");
-  document.getElementById("shell")?.classList.remove("chat-sheet-open");
-  const box = document.getElementById("messages");
-  if (box) box.style.overflow = "";
 }
 
 /* ---- Command centre (v23): agents running, model pickers, git-main feed ---- */
@@ -1643,6 +1655,13 @@ async function onJobsClick(e) {
     return;
   }
 
+  const openHost = e.target.closest("[data-open-host]");
+  if (openHost && !e.target.closest("[data-stop-nav]")) {
+    e.preventDefault();
+    openHostSheet(openHost.dataset.openHost);
+    return;
+  }
+
   const openUrl = e.target.closest("[data-open-url]");
   if (openUrl && !e.target.closest("[data-stop-nav]")) {
     e.preventDefault();
@@ -2162,7 +2181,19 @@ function buildHosts(heartbeats, events, cloud) {
       const key = age < 15 * 60000 ? "online" : age < 2 * 3600000 ? "stale" : "offline";
       const label = { online: "Online", stale: "Quiet", offline: "Offline" }[key];
       const bits = [hb.tailscale ? `Tailscale ${hb.tailscale}` : "", hb.uptime ? `up ${hb.uptime}` : "", hb.battery || ""].filter(Boolean).join(" · ");
-      return { ...h, key, label, at: hb.at, detail: bits || "Heartbeat received", source: "heartbeat" };
+      return {
+        ...h,
+        key,
+        label,
+        at: hb.at,
+        detail: bits || "Heartbeat received",
+        source: "heartbeat",
+        tailscale: hb.tailscale || "",
+        uptime: hb.uptime || "",
+        battery: hb.battery || "",
+        os: hb.os || "",
+        hostId: hb.host || String(hb.file || "").replace(/\.json$/, ""),
+      };
     }
     const ev = [...(events || [])]
       .filter((x) => h.match.test(x.text || ""))
@@ -2174,12 +2205,18 @@ function buildHosts(heartbeats, events, cloud) {
       at: ev ? ev.at : "",
       detail: ev ? hostClause(ev, h.match) : "Nothing reported yet.",
       source: "memory",
+      tailscale: "",
+      uptime: "",
+      battery: "",
+      os: "",
+      hostId: "",
     };
   });
+  state.hostIndex = Object.fromEntries(rows.map((r) => [r.name, r]));
   return `<div class="host-row">${rows
     .map(
       (h) => `
-    <article class="host host-${h.key}" aria-label="${esc(h.name)} · ${esc(h.label)}">
+    <button type="button" class="host host-${h.key} home-tap" data-open-host="${esc(h.name)}" aria-label="${esc(h.name)} · ${esc(h.label)}. Open details.">
       <div class="host-top">
         <span class="host-ico" aria-hidden="true">${h.name === "Mac" ? "⌘" : "⊞"}</span>
         <div class="host-id"><strong>${esc(h.name)}</strong><span>${esc(h.role)}</span></div>
@@ -2187,13 +2224,161 @@ function buildHosts(heartbeats, events, cloud) {
       </div>
       <p class="host-detail">${esc(h.detail)}</p>
       ${h.at ? `<time title="${esc(fmtTimeFull(h.at))}">${h.source === "heartbeat" ? "Heartbeat" : "Seen"} ${esc(fmtTime(h.at))}</time>` : ""}
-    </article>`
+    </button>`
     )
     .join("")}</div>${
     cloud && !(heartbeats || []).length
       ? `<p class="home-empty small">Heartbeats start once each PC runs <code>Projects/The-Stack/heartbeat</code> (handed to Cursor).</p>`
       : ""
   }`;
+}
+
+function ensureHostSheet() {
+  let el = document.getElementById("host-sheet");
+  if (el) return el;
+  el = document.createElement("div");
+  el.id = "host-sheet";
+  el.className = "host-sheet hidden";
+  el.setAttribute("hidden", "");
+  el.innerHTML = `
+    <div class="host-sheet-backdrop" data-host-sheet-close="1"></div>
+    <div class="host-sheet-panel" role="dialog" aria-modal="true" aria-labelledby="host-sheet-title">
+      <div class="sheet-grabber" aria-hidden="true"><span></span></div>
+      <header class="host-sheet-head">
+        <div class="host-sheet-id">
+          <span class="host-ico" id="host-sheet-ico" aria-hidden="true">⊞</span>
+          <div>
+            <h2 id="host-sheet-title">Computer</h2>
+            <p class="purpose" id="host-sheet-role"></p>
+          </div>
+        </div>
+        <button type="button" class="ghost" data-host-sheet-close="1">Close</button>
+      </header>
+      <div id="host-sheet-body" class="host-sheet-body"></div>
+      <div class="host-sheet-actions" id="host-sheet-actions"></div>
+    </div>`;
+  document.getElementById("shell")?.appendChild(el);
+  el.addEventListener("click", onHostSheetClick);
+  return el;
+}
+
+function closeHostSheet() {
+  const el = document.getElementById("host-sheet");
+  if (!el) return;
+  el.classList.add("hidden");
+  el.setAttribute("hidden", "");
+  el.classList.remove("host-sheet-open");
+  document.getElementById("shell")?.classList.remove("host-sheet-open");
+}
+
+function openHostSheet(name) {
+  const row = state.hostIndex?.[name];
+  if (!row) {
+    toast("Host details unavailable — pull to refresh Home", "err");
+    return;
+  }
+  const el = ensureHostSheet();
+  const ico = document.getElementById("host-sheet-ico");
+  const title = document.getElementById("host-sheet-title");
+  const role = document.getElementById("host-sheet-role");
+  const body = document.getElementById("host-sheet-body");
+  const actions = document.getElementById("host-sheet-actions");
+  if (ico) ico.textContent = row.name === "Mac" ? "⌘" : "⊞";
+  if (title) title.textContent = row.name;
+  if (role) role.textContent = row.role;
+  const facts = [
+    ["Status", row.label],
+    ["Source", row.source === "heartbeat" ? "Heartbeat branch" : "Shared memory"],
+    row.at ? ["Last beat", fmtTimeFull(row.at)] : null,
+    row.tailscale ? ["Tailscale", row.tailscale] : null,
+    row.uptime ? ["Uptime", row.uptime] : null,
+    row.battery ? ["Battery", row.battery] : null,
+    row.os ? ["OS", row.os] : null,
+    row.hostId ? ["Host id", row.hostId] : null,
+  ].filter(Boolean);
+  if (body) {
+    body.innerHTML = `<dl class="host-sheet-facts">${facts
+      .map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`)
+      .join("")}</dl>${
+      row.detail && !row.tailscale
+        ? `<p class="host-sheet-note">${esc(row.detail)}</p>`
+        : ""
+    }`;
+  }
+  if (actions) {
+    const canCopy = Boolean(row.tailscale);
+    const isMac = row.name === "Mac";
+    actions.innerHTML = `
+      <button type="button" class="act act-primary" data-host-act="copy-ip" ${canCopy ? "" : "disabled"}>${
+        canCopy ? "Copy Tailscale IP" : "No IP yet"
+      }</button>
+      <button type="button" class="act" data-host-act="refresh">Refresh status</button>
+      <button type="button" class="act" data-host-act="wake">${isMac ? "Ask Cursor to wake Mac" : "Wake (always-on PC)"}</button>
+      <button type="button" class="act" data-host-act="chat">Chat about this PC</button>`;
+  }
+  el.dataset.hostName = row.name;
+  el.classList.remove("hidden");
+  el.removeAttribute("hidden");
+  requestAnimationFrame(() => el.classList.add("host-sheet-open"));
+  document.getElementById("shell")?.classList.add("host-sheet-open");
+}
+
+async function onHostSheetClick(e) {
+  if (e.target.closest("[data-host-sheet-close]")) {
+    closeHostSheet();
+    return;
+  }
+  const btn = e.target.closest("[data-host-act]");
+  if (!btn || btn.disabled) return;
+  const name = document.getElementById("host-sheet")?.dataset?.hostName;
+  const row = state.hostIndex?.[name];
+  if (!row) return;
+  const act = btn.dataset.hostAct;
+  if (act === "copy-ip") {
+    if (!row.tailscale) {
+      toast("No Tailscale IP on the last heartbeat", "err");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(String(row.tailscale).trim());
+      toast(`Copied ${row.tailscale}`);
+    } catch {
+      toast("Couldn’t copy — long-press the IP instead", "err");
+    }
+    return;
+  }
+  if (act === "refresh") {
+    btn.disabled = true;
+    try {
+      await loadHome();
+      openHostSheet(name);
+      toast("Status refreshed");
+    } catch (err) {
+      toast(friendlyError(err), "err");
+    } finally {
+      btn.disabled = false;
+    }
+    return;
+  }
+  if (act === "wake") {
+    closeHostSheet();
+    if (row.name === "Mac") {
+      openAgentDm(
+        "Cursor",
+        `@Cursor — Seth from phone: please wake the Mac if it's asleep (host sheet). `
+      ).catch((err) => toast(friendlyError(err), "err"));
+    } else {
+      toast("Windows is the always-on host — nothing to wake.");
+    }
+    return;
+  }
+  if (act === "chat") {
+    closeHostSheet();
+    openAgentDm(
+      "Cursor",
+      `@Cursor — about ${row.name}${row.tailscale ? ` (${row.tailscale})` : ""}: `
+    ).catch((err) => toast(friendlyError(err), "err"));
+  }
 }
 
 /* Digest v30: what changed since Seth last tapped "Got it", with a per-agent breakdown. */
@@ -2914,7 +3099,9 @@ document.getElementById("home-body")?.addEventListener("click", (e) => {
 });
 document.getElementById("home-body")?.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" && e.key !== " ") return;
-  const tap = e.target.closest("[data-open-agent], [data-open-channel], [data-open-list], [data-goto-agents], [data-scroll-to]");
+  const tap = e.target.closest(
+    "[data-open-agent], [data-open-channel], [data-open-list], [data-goto-agents], [data-scroll-to], [data-open-host]"
+  );
   if (!tap || e.target.closest("input, textarea, select, button.tick")) return;
   e.preventDefault();
   tap.click();
@@ -2971,6 +3158,12 @@ document.getElementById("tabbar")?.addEventListener("click", (e) => {
 document.getElementById("chats-inbox")?.addEventListener("click", (e) => {
   const row = e.target.closest(".chat-inbox-row");
   if (!row?.dataset.slug) return;
+  const chat = document.getElementById("chat-pane");
+  // Don't fight an in-flight dismiss — abort close via openChatSheet's gen bump.
+  if (chat?.classList.contains("sheet-exiting")) {
+    sheetCloseGen += 1;
+    chat.classList.remove("sheet-exiting");
+  }
   state.channelSlug = row.dataset.slug;
   state.threadParentId = null;
   document.getElementById("thread")?.classList.add("hidden");
@@ -2981,6 +3174,20 @@ document.getElementById("chat-back")?.addEventListener("click", () => {
   closeChatSheet(); // returns to wherever you opened the chat from
 });
 setupChatSheetGestures();
+
+/* Keep sheet layout when rotating in/out of the phone media query. */
+(function bindPhoneShellResize() {
+  const mq = window.matchMedia(PHONE_SHELL_MQ);
+  const sync = () => {
+    if (state.view !== "channel") return;
+    const chat = document.getElementById("chat-pane");
+    if (!chat || chat.classList.contains("hidden")) return;
+    openChatSheet();
+  };
+  if (typeof mq.addEventListener === "function") mq.addEventListener("change", sync);
+  else if (typeof mq.addListener === "function") mq.addListener(sync);
+  window.addEventListener("orientationchange", () => setTimeout(sync, 50));
+})();
 
 /* Home jump search: channels, agents, and cross-chat message text. */
 function jumpChannelMatches(q) {
