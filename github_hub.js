@@ -96,13 +96,36 @@ function ghSanitizeToken(raw) {
     .trim();
 }
 
+const ghEtags = new Map(); // url+accept -> { etag, status, body, headers }
+const ghRate = { remaining: null, reset: 0 };
 async function ghFetchOnce(url, init) {
-  return fetch(url, {
-    ...init,
-    cache: "no-store",
-    credentials: "omit",
-    mode: "cors",
-  });
+  const method = String((init && init.method) || "GET").toUpperCase();
+  const headers = { ...((init && init.headers) || {}) };
+  const key = `${url}|${headers.Accept || ""}`;
+  const cached = method === "GET" ? ghEtags.get(key) : null;
+  if (cached && cached.etag) headers["If-None-Match"] = cached.etag;
+  const res = await fetch(url, { ...init, headers, cache: "no-store", credentials: "omit", mode: "cors" });
+  const rem = res.headers.get("x-ratelimit-remaining");
+  if (rem !== null) {
+    ghRate.remaining = Number(rem);
+    ghRate.reset = Number(res.headers.get("x-ratelimit-reset") || 0) * 1000;
+  }
+  if (res.status === 304 && cached) {
+    // Unchanged: replay the cached body (free — no rate-limit cost).
+    return new Response(cached.body, { status: cached.status, headers: { "content-type": cached.type || "application/json" } });
+  }
+  if (method === "GET" && res.ok) {
+    const etag = res.headers.get("etag");
+    if (etag) {
+      const body = await res.clone().arrayBuffer();
+      if (body.byteLength < 2_000_000) {
+        ghEtags.set(key, { etag, status: res.status, body, type: res.headers.get("content-type") });
+      }
+    }
+  } else if (method !== "GET") {
+    ghEtags.clear(); // a write may change anything we cached
+  }
+  return res;
 }
 
 async function ghFetch(url, init, retries = 1) {
@@ -183,6 +206,13 @@ async function ghApi(path, options = {}) {
     data = { raw: text };
   }
   if (!res.ok) {
+    if ((res.status === 403 || res.status === 429) && /rate limit/i.test(String(data.message || ""))) {
+      const at = ghRate.reset ? new Date(ghRate.reset).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "soon";
+      const err = new Error(`GitHub's hourly limit is used up. The Stack will pause and resume at ${at}.`);
+      err.status = 429;
+      err.rateLimited = true;
+      throw err;
+    }
     const err = new Error(
       data.message || data.error || res.statusText || String(res.status)
     );

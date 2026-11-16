@@ -2106,3 +2106,77 @@ body {
 }
 .home-todo.ticked { opacity: 0.45; }
 .home-todo.ticked .tick { background: var(--accent); border-color: var(--accent); }
+
+/* v28 Agents screen — Linear triage + Codex task list (theme tokens only) */
+.agents-pane { grid-template-rows: auto minmax(0, 1fr); background: transparent; }
+.agents-body {
+  overflow: auto;
+  overflow-x: hidden;
+  padding: 0.75rem 1rem calc(var(--tabbar-h) + 1.6rem + var(--safe-bottom));
+  display: grid;
+  gap: 0.85rem;
+  align-content: start;
+  -webkit-overflow-scrolling: touch;
+}
+.agent-strip { display: flex; gap: 0.5rem; overflow-x: auto; scrollbar-width: none; margin: 0 -1rem; padding: 0.1rem 1rem 0.2rem; }
+.agent-strip::-webkit-scrollbar { display: none; }
+.agent-pill {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 0.55rem;
+  padding: 0.45rem 0.85rem 0.45rem 0.45rem; min-height: 0;
+  border-radius: 16px; border: 0; font: inherit; color: var(--text); text-align: left;
+  background: var(--glass-strong); box-shadow: var(--rim);
+}
+.agent-pill.on { box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 18px color-mix(in srgb, var(--accent) 22%, transparent); }
+.agent-avatar.sm { width: 2rem; height: 2rem; border-radius: 10px; font-size: 0.85rem; position: relative; }
+.agent-avatar .sdot {
+  position: absolute; right: -2px; bottom: -2px; width: 0.62rem; height: 0.62rem; border-radius: 50%;
+  background: var(--muted); box-shadow: 0 0 0 2px var(--bg);
+}
+.agent-pill.st-active .sdot { background: var(--accent); }
+.agent-pill.st-recent .sdot { background: var(--warn); }
+.ap-text { display: grid; line-height: 1.15; }
+.ap-text strong { font-size: 0.86rem; }
+.ap-text span { font-size: 0.68rem; color: var(--muted); }
+.linear-seg { margin-bottom: 0; }
+.clear-filter { margin-top: -0.4rem; }
+
+.task-list { display: grid; gap: 0.1rem; }
+.task-day {
+  margin: 0.7rem 0.2rem 0.3rem; font-size: 0.7rem; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+}
+.task-day:first-child { margin-top: 0; }
+.task {
+  border-radius: 14px;
+  transition: background 0.15s ease;
+}
+.task + .task { box-shadow: inset 0 1px 0 var(--separator); }
+.task.open { background: var(--glass-strong); box-shadow: var(--rim); }
+.task-head {
+  width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.7rem; align-items: center;
+  padding: 0.75rem 0.6rem; min-height: 0; border: 0; background: transparent; color: var(--text);
+  font: inherit; text-align: left; border-radius: 14px;
+}
+.task-head:active { background: var(--fill); }
+.task-ico { width: 1.15rem; height: 1.15rem; display: grid; place-items: center; color: var(--muted); }
+.task-ico svg { width: 100%; height: 100%; }
+.st-blocked .task-ico { color: var(--warn); }
+.st-running .task-ico { color: var(--accent); }
+.st-done .task-ico { color: var(--accent); }
+.st-merged .task-ico { color: var(--violet); }
+.st-open .task-ico, .st-draft .task-ico { color: var(--violet); }
+.st-closed .task-ico { color: var(--danger); }
+.task-main { display: grid; gap: 0.15rem; min-width: 0; }
+.task-title { font-size: 0.92rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-title::first-letter { text-transform: uppercase; }
+.task.open .task-title { white-space: normal; }
+.task-meta { font-size: 0.72rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-time { font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
+.task-detail { padding: 0 0.75rem 0.85rem 2.45rem; display: grid; gap: 0.6rem; }
+.task-detail p { margin: 0; font-size: 0.84rem; line-height: 1.45; color: color-mix(in srgb, var(--text) 85%, transparent); overflow-wrap: anywhere; }
+.task-actions-host { background: none !important; box-shadow: none !important; padding: 0; border-radius: 0; }
+.task-link { font-size: 0.8rem; font-weight: 700; color: var(--accent); text-decoration: none; }
+/* v28 task row dividers: straight inset lines */
+.task + .task { box-shadow: none; position: relative; }
+.task + .task::before { content: ""; position: absolute; left: 2.45rem; right: 0.6rem; top: 0; height: 1px; background: var(--separator); }
+.task.open + .task::before, .task + .task.open::before { display: none; }

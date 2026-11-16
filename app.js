@@ -44,6 +44,7 @@ function friendlyError(err) {
   ) {
     return "Could not reach GitHub from this phone (network). Check signal/Wi‑Fi, then tap Open cloud hub again.";
   }
+  if (err && err.rateLimited) return msg;
   if (lower.includes("bad credentials") || lower.includes("requires authentication") || lower.includes("401")) {
     return "GitHub token rejected — paste a fresh fine-grained PAT (Contents Read/Write on ai-workspace).";
   }
@@ -444,7 +445,7 @@ function setRailOpen(open) {
   else backdrop.setAttribute("hidden", "");
   if (!open && typeof setActiveTab === "function" && !document.getElementById("lists-pane").classList.contains("open")) {
     const ch = (state.channels || []).find((c) => c.slug === state.channelSlug);
-    setActiveTab(state.view === "home" ? "home" : "chats");
+    setActiveTab(state.view === "home" ? "home" : state.view === "agents" ? "agents" : "chats");
   }
 }
 
@@ -604,9 +605,21 @@ async function loadChannels() {
 
 function showView(view) {
   state.view = view;
+  const agentsPane = document.getElementById("agents-pane");
+  if (agentsPane) agentsPane.classList.toggle("hidden", view !== "agents");
+  if (view === "agents") {
+    document.getElementById("home-pane").classList.add("hidden");
+    document.getElementById("chat-pane").classList.add("hidden");
+    if (typeof setActiveTab === "function") setActiveTab("agents");
+    loadAgentsView().catch((err) => {
+      const b = document.getElementById("agents-body");
+      if (b) b.innerHTML = `<p class="home-empty">${esc(friendlyError(err))}</p>`;
+    });
+    return;
+  }
   if (typeof setActiveTab === "function") {
     const ch = (state.channels || []).find((c) => c.slug === state.channelSlug);
-    setActiveTab(view === "home" ? "home" : "chats");
+    setActiveTab(view === "home" ? "home" : view === "agents" ? "agents" : "chats");
   }
   const home = document.getElementById("home-pane");
   const chat = document.getElementById("chat-pane");
@@ -973,6 +986,7 @@ function buildJobs({ events, commits, pulls, agents, cloud }) {
     done: "Nothing finished in the last day.",
   };
   const first = needs.length ? "needs" : running.length ? "running" : "done";
+  state.lastJobs = { needs, running, done };
   return { needs: needs.length, needsList: needs, doneList: done, html: `
     <div class="seg" role="tablist">
       ${tabs
@@ -1145,7 +1159,10 @@ function toast(msg, kind = "") {
   el._t = setTimeout(() => el.classList.remove("show"), 2600);
 }
 
-document.getElementById("home-body")?.addEventListener("click", async (e) => {
+function refreshJobsView() {
+  return (state.view === "agents" ? loadAgentsView() : loadHome()).catch(() => {});
+}
+async function onJobsClick(e) {
   const homeTick = e.target.closest(".home-todo .tick[data-row]");
   if (homeTick) {
     homeTick.disabled = true;
@@ -1153,7 +1170,7 @@ document.getElementById("home-body")?.addEventListener("click", async (e) => {
     try {
       await ghSetRowStatus(homeTick.dataset.list, homeTick.dataset.row, "done");
       toast("Ticked off");
-      setTimeout(() => loadHome().catch(() => {}), 350);
+      setTimeout(() => refreshJobsView(), 350);
     } catch (err) {
       homeTick.disabled = false;
       homeTick.closest(".home-todo")?.classList.remove("ticked");
@@ -1163,7 +1180,7 @@ document.getElementById("home-body")?.addEventListener("click", async (e) => {
   }
   if (e.target.closest("[data-unsnooze]")) {
     saveSnoozes({});
-    loadHome().catch(() => {});
+    refreshJobsView();
     return;
   }
   if (e.target.closest("[data-digest-ok]")) {
@@ -1192,7 +1209,7 @@ document.getElementById("home-body")?.addEventListener("click", async (e) => {
     saveSnoozes(map);
     card?.classList.add("leaving");
     toast("Snoozed for 24 hours");
-    setTimeout(() => loadHome().catch(() => {}), 250);
+    setTimeout(() => refreshJobsView(), 250);
     return;
   }
   if (act === "reply") {
@@ -1231,7 +1248,7 @@ document.getElementById("home-body")?.addEventListener("click", async (e) => {
       toast(`PR #${j.number} merged`);
     }
     card?.classList.add("leaving");
-    setTimeout(() => loadHome().catch(() => {}), 300);
+    setTimeout(() => refreshJobsView(), 300);
   } catch (err) {
     btn.disabled = false;
     const status = err && err.status;
@@ -1243,7 +1260,157 @@ document.getElementById("home-body")?.addEventListener("click", async (e) => {
       toast(friendlyError(err), "err");
     }
   }
+}
+document.getElementById("home-body")?.addEventListener("click", onJobsClick);
+document.getElementById("agents-body")?.addEventListener("click", onJobsClick);
+
+/* ---- v28 Agents screen: Linear-style triage + Codex-style task list ---- */
+state.agentFilter = "";
+state.agentsSeg = "";
+state.openTask = "";
+function dayBucket(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "Earlier";
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  if (d >= start) return "Today";
+  if (d >= new Date(start.getTime() - 86400000)) return "Yesterday";
+  return "Earlier";
+}
+const STATUS_ICON = {
+  blocked: `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 4.6v4.2M8 10.9v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+  open: `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2.6 2"/></svg>`,
+  draft: `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2.6 2"/></svg>`,
+  running: `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 1.5a6.5 6.5 0 0 1 0 13z" fill="currentColor"/></svg>`,
+  done: `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7.2" fill="currentColor"/><path d="M4.8 8.2l2.1 2.1 4.3-4.5" fill="none" stroke="var(--bg)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  merged: `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7.2" fill="currentColor"/><path d="M4.8 8.2l2.1 2.1 4.3-4.5" fill="none" stroke="var(--bg)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  closed: `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`,
+};
+
+function taskRow(j) {
+  const open = state.openTask === j.key;
+  const who = canonicalAgent(j.who) || j.who || "";
+  const meta = [who, j.number ? `PR #${j.number}` : "", j.branch ? clip(j.branch, 28) : ""].filter(Boolean);
+  return `<article class="task st-${esc(j.status)}${open ? " open" : ""}" data-task="${esc(j.key)}">
+    <button type="button" class="task-head" data-toggle-task="${esc(j.key)}" aria-expanded="${open}">
+      <span class="task-ico">${STATUS_ICON[j.status] || STATUS_ICON.open}</span>
+      <span class="task-main">
+        <span class="task-title">${esc(clip(j.title, 90))}</span>
+        <span class="task-meta">${meta.map(esc).join(" · ")}</span>
+      </span>
+      <time class="task-time" title="${esc(fmtTimeFull(j.at))}">${esc(fmtTime(j.at))}</time>
+    </button>
+    ${
+      open
+        ? `<div class="task-detail">
+            ${j.text ? `<p>${esc(j.text)}</p>` : ""}
+            <div class="job-card task-actions-host">${jobActions(j)}</div>
+            ${j.url ? `<a class="task-link" href="${esc(j.url)}" target="_blank" rel="noopener">${j.number ? "View PR" : "Open"} ↗</a>` : ""}
+          </div>`
+        : ""
+    }
+  </article>`;
+}
+
+function paintAgentsView() {
+  const body = document.getElementById("agents-body");
+  const cc = state.agentsCC;
+  if (!body || !cc) return;
+  const jobs = state.lastJobs || { needs: [], running: [], done: [] };
+  const f = state.agentFilter;
+  const match = (j) => !f || (canonicalAgent(j.who) || j.who) === f || (j.title === f && j.status === "running");
+  const lists = {
+    needs: jobs.needs.filter(match),
+    running: jobs.running.filter((j) => !f || j.title === f),
+    done: jobs.done.filter(match),
+  };
+  if (!state.agentsSeg) state.agentsSeg = lists.needs.length ? "needs" : lists.running.length ? "running" : "done";
+  const seg = state.agentsSeg;
+  const running = cc.agents.filter((a) => a.status === "active").length;
+  document.getElementById("agents-headline").textContent = `${running} running · ${lists.needs.length} need you`;
+
+  const strip = cc.agents
+    .map((a) => {
+      const model = (state.agentPrefs[a.name] || {}).model || "";
+      const on = f === a.name;
+      return `<button type="button" class="agent-pill st-${a.status}${on ? " on" : ""}" data-agent-filter="${esc(a.name)}" aria-pressed="${on}">
+        <span class="agent-avatar sm" aria-hidden="true">${initialOf(a.name)}<i class="sdot"></i></span>
+        <span class="ap-text"><strong>${esc(a.name)}</strong><span>${esc(model || a.statusLabel)}</span></span>
+      </button>`;
+    })
+    .join("");
+
+  const rows = lists[seg];
+  // Codex-style day groups.
+  const groups = {};
+  for (const j of rows) (groups[dayBucket(j.at)] = groups[dayBucket(j.at)] || []).push(j);
+  const order = ["Today", "Yesterday", "Earlier"].filter((g) => groups[g]);
+  const empty = {
+    needs: "Nothing waiting on you.",
+    running: f ? `${f} hasn't logged work in the last 2 hours.` : "No agent has logged work in the last 2 hours.",
+    done: "Nothing finished in the last day.",
+  }[seg];
+  const agentsHtml = `
+    <div class="agent-strip">${strip}</div>
+    <div class="seg linear-seg" role="tablist">
+      ${[
+        ["needs", "Needs you"],
+        ["running", "Running"],
+        ["done", "Done"],
+      ]
+        .map(
+          ([id, label]) =>
+            `<button type="button" role="tab" data-agents-seg="${id}" class="${id === seg ? "active" : ""}${
+              id === "needs" && lists.needs.length ? " alert" : ""
+            }" aria-selected="${id === seg}">${label}<span class="seg-n">${lists[id].length}</span></button>`
+        )
+        .join("")}
+    </div>
+    ${f ? `<button type="button" class="link-btn clear-filter" data-agent-filter="">Showing ${esc(f)} only · Show all</button>` : ""}
+    <div class="task-list">
+      ${
+        order.length
+          ? order.map((g) => `<h3 class="task-day">${g}</h3>${groups[g].map(taskRow).join("")}`).join("")
+          : `<p class="home-empty">${esc(empty)}</p>`
+      }
+    </div>`;
+  if (body.dataset.sig === agentsHtml) return;
+  const sc = body.scrollTop;
+  body.dataset.sig = agentsHtml;
+  body.innerHTML = agentsHtml;
+  body.scrollTop = sc;
+}
+
+async function loadAgentsView() {
+  const body = document.getElementById("agents-body");
+  if (body && !state.agentsCC) body.innerHTML = `<p class="home-empty">Loading agents…</p>`;
+  state.agentsCC = await loadCommandCentre();
+  paintAgentsView();
+}
+
+document.getElementById("agents-body")?.addEventListener("click", (e) => {
+  const fb = e.target.closest("[data-agent-filter]");
+  if (fb) {
+    state.agentFilter = state.agentFilter === fb.dataset.agentFilter ? "" : fb.dataset.agentFilter;
+    state.agentsSeg = "";
+    state.openTask = "";
+    paintAgentsView();
+    return;
+  }
+  const sb = e.target.closest("[data-agents-seg]");
+  if (sb) {
+    state.agentsSeg = sb.dataset.agentsSeg;
+    state.openTask = "";
+    paintAgentsView();
+    return;
+  }
+  const tb = e.target.closest("[data-toggle-task]");
+  if (tb) {
+    state.openTask = state.openTask === tb.dataset.toggleTask ? "" : tb.dataset.toggleTask;
+    paintAgentsView();
+  }
 });
+document.getElementById("agents-refresh")?.addEventListener("click", () => loadAgentsView().catch(() => {}));
 
 /* Hosts: heartbeat branch first, shared memory as fallback. */
 const HOSTS = [
@@ -1488,7 +1655,7 @@ async function loadHome() {
   ]
     .map(([k, v, id, cls]) => `<a class="stat ${cls}" href="#cc-${id}"><strong>${v}</strong><span>${k}</span></a>`)
     .join("");
-  body.innerHTML = `
+  const homeHtml = `
     ${emptyBanner}
     <label class="jump">
       <span class="jump-icon" aria-hidden="true">⌕</span>
@@ -1526,6 +1693,21 @@ async function loadHome() {
       <h2>Digest</h2>
       ${reportHtml}
     </section>`;
+  if (body.dataset.sig === homeHtml) return;
+  const jumpVal = document.getElementById("jump-input")?.value || "";
+  const openFeed = [...body.querySelectorAll(".feed details[open] .feed-title")].map((x) => x.textContent);
+  const scroll = body.scrollTop;
+  body.dataset.sig = homeHtml;
+  body.innerHTML = homeHtml;
+  body.scrollTop = scroll;
+  if (jumpVal) {
+    const ji = document.getElementById("jump-input");
+    ji.value = jumpVal;
+    ji.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  body.querySelectorAll(".feed details").forEach((d) => {
+    if (openFeed.includes(d.querySelector(".feed-title")?.textContent)) d.open = true;
+  });
   document.getElementById("home-reconnect")?.addEventListener("click", () => {
     if (typeof ghState !== "undefined") {
       ghState.branch =
@@ -1931,11 +2113,7 @@ document.getElementById("tabbar")?.addEventListener("click", (e) => {
     showView("channel");
   } else if (tab === "agents") {
     setRailOpen(false);
-    const go = () => document.getElementById("cc-agents")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    if (state.view !== "home") {
-      showView("home");
-      setTimeout(go, 900);
-    } else go();
+    showView("agents");
   } else if (tab === "lists") {
     setRailOpen(false);
     document.getElementById("lists-pane").classList.add("open");
@@ -2305,26 +2483,71 @@ if ("serviceWorker" in navigator) {
   }
   boot();
 })();
-state.pollTimer = setInterval(() => {
-  // Do not poll while the boot/connect card is showing (Pages has no /api).
+/* v28 reliable polling: only while visible; chat 15 s, Home/Agents 60 s; ETags make unchanged polls free;
+   exponential backoff on errors (max 5 min); full pause while GitHub's rate limit resets; offline-aware. */
+state.pollFails = 0;
+state.nextPollAt = 0;
+function pollDelay() {
+  const base = state.view === "channel" ? 15000 : 60000;
+  return state.pollFails ? Math.min(300000, base * 2 ** state.pollFails) : base;
+}
+function pollOnce(force = false) {
   if (!shellReady()) return;
   if (state.pocketMode && !state.cloudMode) return;
   if (state.cloudMode && !ghState?.token) return;
-  // Cloud polls slower to respect GitHub API limits
-  if (state.cloudMode && state._cloudTick && Date.now() - state._cloudTick < 18000) return;
-  if (state.cloudMode) state._cloudTick = Date.now();
+  if (document.visibilityState === "hidden") return;
+  if (!navigator.onLine) {
+    setLive(false, "offline");
+    return;
+  }
+  const now = Date.now();
+  if (!force && now < state.nextPollAt) return;
+  if (state.pausedUntil && now < state.pausedUntil) return;
+  state.nextPollAt = now + pollDelay();
   const tick =
     state.view === "home"
       ? loadHome()
+      : state.view === "agents"
+      ? loadAgentsView()
       : loadMessages().then(() => {
-          if (state.threadParentId && !state.pocketMode) {
-            return openThread(state.threadParentId);
-          }
+          if (state.threadParentId && !state.pocketMode) return openThread(state.threadParentId);
         });
   tick
     .then(() => {
+      // Views fall back to cached data on errors, so check GitHub's own counter too.
+      if (typeof ghRate !== "undefined" && ghRate.remaining === 0 && ghRate.reset > Date.now()) {
+        const err = new Error(
+          `GitHub's hourly limit is used up. The Stack will pause and resume at ${new Date(ghRate.reset).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`
+        );
+        err.rateLimited = true;
+        throw err;
+      }
+      state.pollFails = 0;
+      state.nextPollAt = Date.now() + pollDelay();
       if (!state.pocketMode) setLive(true);
       return pocketFlushOutbox();
     })
-    .catch(() => setLive(false));
-}, 4000);
+    .catch((err) => {
+      state.pollFails = Math.min(state.pollFails + 1, 6);
+      state.nextPollAt = Date.now() + pollDelay();
+      if (err && err.rateLimited) {
+        const until = (typeof ghRate !== "undefined" && ghRate.reset) || Date.now() + 15 * 60000;
+        if (!state.pausedUntil || state.pausedUntil < Date.now()) toast(friendlyError(err), "err");
+        state.pausedUntil = until;
+      }
+      setLive(false, friendlyError(err));
+    });
+}
+state.pollTimer = setInterval(() => pollOnce(false), 5000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") pollOnce(true);
+});
+window.addEventListener("online", () => {
+  toast("Back online");
+  state.pollFails = 0;
+  pollOnce(true);
+});
+window.addEventListener("offline", () => {
+  setLive(false, "offline");
+  toast("No signal — showing what was last loaded", "err");
+});
