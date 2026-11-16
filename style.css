@@ -1087,6 +1087,20 @@ button.primary-btn,
   font: inherit;
   color: var(--text);
 }
+.jump-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+.jump-sub {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .jump-kind {
   font-size: 0.68rem;
   text-transform: uppercase;
