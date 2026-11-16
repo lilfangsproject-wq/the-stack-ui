@@ -444,7 +444,7 @@ function setRailOpen(open) {
   else backdrop.setAttribute("hidden", "");
   if (!open && typeof setActiveTab === "function" && !document.getElementById("lists-pane").classList.contains("open")) {
     const ch = (state.channels || []).find((c) => c.slug === state.channelSlug);
-    setActiveTab(state.view === "home" ? "home" : ch && ch.kind === "dm" ? "agents" : "chats");
+    setActiveTab(state.view === "home" ? "home" : "chats");
   }
 }
 
@@ -526,7 +526,67 @@ function paintChannelNav() {
   if (dmNav) dmNav.innerHTML = dms.map((c) => navButtonHtml(c, viewer)).join("");
   bindChannelNav(nav);
   bindChannelNav(dmNav);
+  paintSessionStrip();
 }
+
+/* v26: session strip on the chat screen — agents first (Claude on top), then channels. */
+const LAST_CHAT_KEY = "stack-last-chat-v1";
+const AGENT_ORDER = ["claude", "cursor", "chatgpt", "nori", "hermes"];
+function sessionList() {
+  const viewer = currentViewer();
+  const dms = (state.channels || []).filter((c) => c.kind === "dm");
+  const pubs = (state.channels || []).filter((c) => c.kind !== "dm");
+  const rank = (c) => {
+    const i = AGENT_ORDER.indexOf(String(dmLabel(c, viewer)).toLowerCase());
+    return i < 0 ? 99 : i;
+  };
+  dms.sort((a, b) => rank(a) - rank(b));
+  return [...dms, ...pubs];
+}
+function defaultChatSlug() {
+  let last = "";
+  try {
+    last = localStorage.getItem(LAST_CHAT_KEY) || "";
+  } catch {
+    last = "";
+  }
+  const list = sessionList();
+  if (last && list.some((c) => c.slug === last)) return last;
+  return (list[0] && list[0].slug) || state.channelSlug;
+}
+function paintSessionStrip() {
+  const strip = document.getElementById("session-strip");
+  if (!strip) return;
+  const viewer = currentViewer();
+  strip.innerHTML =
+    sessionList()
+      .map((c) => {
+        const dm = c.kind === "dm";
+        const label = dm ? dmLabel(c, viewer) : `#${c.slug}`;
+        const active = c.slug === state.channelSlug && state.view === "channel";
+        const unread = state.unreads[c.slug] ? '<span class="chip-dot" aria-label="unread"></span>' : "";
+        return `<button type="button" class="session-chip${dm ? "" : " channel"}${active ? " active" : ""}" data-slug="${esc(
+          c.slug
+        )}" role="tab" aria-selected="${active}">${dm ? `<span class="chip-av" aria-hidden="true">${initialOf(label)}</span>` : ""}${esc(
+          label
+        )}${unread}</button>`;
+      })
+      .join("") + `<button type="button" class="session-chip more" data-more="1" aria-label="More chats and new channel">＋</button>`;
+  const act = strip.querySelector(".session-chip.active");
+  if (act) act.scrollIntoView({ block: "nearest", inline: "center" });
+}
+document.getElementById("session-strip")?.addEventListener("click", (e) => {
+  const chip = e.target.closest(".session-chip");
+  if (!chip) return;
+  if (chip.dataset.more) {
+    setRailOpen(true);
+    return;
+  }
+  state.channelSlug = chip.dataset.slug;
+  state.threadParentId = null;
+  document.getElementById("thread").classList.add("hidden");
+  showView("channel");
+});
 
 async function loadChannels() {
   let channels;
@@ -546,7 +606,7 @@ function showView(view) {
   state.view = view;
   if (typeof setActiveTab === "function") {
     const ch = (state.channels || []).find((c) => c.slug === state.channelSlug);
-    setActiveTab(view === "home" ? "home" : ch && ch.kind === "dm" ? "agents" : "chats");
+    setActiveTab(view === "home" ? "home" : "chats");
   }
   const home = document.getElementById("home-pane");
   const chat = document.getElementById("chat-pane");
@@ -574,8 +634,14 @@ function showView(view) {
       }
     });
   } else {
+    try {
+      localStorage.setItem(LAST_CHAT_KEY, state.channelSlug);
+    } catch {
+      /* ignore */
+    }
     home.classList.add("hidden");
     chat.classList.remove("hidden");
+    paintSessionStrip();
     if (homeNav) homeNav.classList.remove("active");
     refresh();
   }
@@ -1615,19 +1681,55 @@ async function loadListDetail() {
     state.pocketMode = true;
   }
   document.getElementById("list-title").textContent = list.name;
-  const head = list.columns.map((c) => `<th>${esc(c)}</th>`).join("");
-  const rows = list.rows
-    .map(
-      (r) =>
-        `<tr>${r.cells.map((cell) => `<td>${esc(cell)}</td>`).join("")}</tr>`
-    )
-    .join("");
-  document.getElementById("list-table").innerHTML = `
-    <table>
-      <thead><tr>${head}</tr></thead>
-      <tbody>${rows || `<tr><td colspan="${list.columns.length}">No rows yet</td></tr>`}</tbody>
-    </table>`;
+  // v26: rows as phone cards — open first, tap the circle to tick off.
+  const cols = (list.columns || []).map((c) => String(c).toLowerCase());
+  const at = (name, fallback) => {
+    const i = cols.indexOf(name);
+    return i >= 0 ? i : fallback;
+  };
+  const iStatus = at("status", 0);
+  const iItem = at("item", 1);
+  const iOwner = at("owner", 2);
+  const iNotes = at("notes", 3);
+  const isDone = (r) => /^(done|closed|complete|completed|✅)$/i.test(String(r.cells[iStatus] || "").trim());
+  const rows = [...(list.rows || [])].sort((a, b) => Number(isDone(a)) - Number(isDone(b)));
+  const card = (r) => {
+    const done = isDone(r);
+    const status = String(r.cells[iStatus] || "open");
+    return `<article class="list-row${done ? " done" : ""}">
+      <button type="button" class="tick" data-row="${esc(r.id)}" data-next="${done ? "open" : "done"}" aria-label="${done ? "Mark open" : "Mark done"}">${done ? "✓" : ""}</button>
+      <div class="list-row-body">
+        <strong>${esc(r.cells[iItem] || "(untitled)")}</strong>
+        <span class="list-row-meta">${done ? "" : `<span class="job-pill pill-${/block/i.test(status) ? "blocked" : "draft"}">${esc(status)}</span>`}${
+          r.cells[iOwner] ? `<span>${esc(r.cells[iOwner])}</span>` : ""
+        }${r.cells[iNotes] ? `<span class="list-note">${esc(r.cells[iNotes])}</span>` : ""}</span>
+      </div>
+    </article>`;
+  };
+  const open = rows.filter((r) => !isDone(r));
+  const done = rows.filter(isDone);
+  document.getElementById("list-table").innerHTML = rows.length
+    ? `${open.map(card).join("") || `<p class="home-empty">All done 🎉</p>`}${
+        done.length ? `<details class="list-done"><summary>Done (${done.length})</summary>${done.map(card).join("")}</details>` : ""
+      }`
+    : `<p class="home-empty">No rows yet — add one below.</p>`;
 }
+
+document.getElementById("list-table")?.addEventListener("click", async (e) => {
+  const b = e.target.closest(".tick[data-row]");
+  if (!b || !state.listId) return;
+  b.disabled = true;
+  b.closest(".list-row")?.classList.toggle("done", b.dataset.next === "done");
+  try {
+    await ghSetRowStatus(state.listId, b.dataset.row, b.dataset.next);
+    await loadListDetail();
+    loadHome().catch(() => {});
+  } catch (err) {
+    toast(friendlyError(err), "err");
+    b.disabled = false;
+    loadListDetail().catch(() => {});
+  }
+});
 
 async function loadTokenHint() {
   try {
@@ -1780,11 +1882,19 @@ document.getElementById("tabbar")?.addEventListener("click", (e) => {
   if (tab === "home") {
     setRailOpen(false);
     showView("home");
-  } else if (tab === "chats" || tab === "agents") {
-    setRailOpen(true);
-    const target = document.getElementById(tab === "agents" ? "dm-label" : "channel-list");
-    const rail = document.getElementById("rail");
-    if (target && rail) rail.scrollTo({ top: Math.max(0, target.offsetTop - 72), behavior: "smooth" });
+  } else if (tab === "chats") {
+    setRailOpen(false);
+    state.channelSlug = defaultChatSlug();
+    state.threadParentId = null;
+    document.getElementById("thread").classList.add("hidden");
+    showView("channel");
+  } else if (tab === "agents") {
+    setRailOpen(false);
+    const go = () => document.getElementById("cc-agents")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (state.view !== "home") {
+      showView("home");
+      setTimeout(go, 900);
+    } else go();
   } else if (tab === "lists") {
     setRailOpen(false);
     document.getElementById("lists-pane").classList.add("open");

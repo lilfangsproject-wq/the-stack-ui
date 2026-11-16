@@ -649,6 +649,24 @@ async function ghGetList(id) {
   return (data.lists || []).find((l) => l.id === id) || null;
 }
 
+async function ghSetRowStatus(listId, rowId, status) {
+  return ghPutFile(
+    "lists.json",
+    async (existing) => {
+      const data = existing.text ? JSON.parse(existing.text) : { lists: [] };
+      const lst = (data.lists || []).find((l) => l.id === listId);
+      const row = lst && (lst.rows || []).find((r) => r.id === rowId);
+      if (!row) throw new Error("row_not_found");
+      const i = Math.max(0, (lst.columns || []).findIndex((c) => String(c).toLowerCase() === "status"));
+      row.cells[i] = status;
+      row.updated_at = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+      lst.updated_at = row.updated_at;
+      return JSON.stringify(data, null, 2) + "\n";
+    },
+    `stack: list row ${status}`
+  );
+}
+
 async function ghAddListRow(listId, cells) {
   let row = null;
   await ghPutFile(
