@@ -294,7 +294,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v31.4";
+const STACK_VERSION = "v31.5";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
@@ -1235,22 +1235,19 @@ async function loadCommandCentre() {
     ? `<ol class="feed">${feed
         .map((f) => {
           const agent = canonicalAgent(f.who);
-          const openAttr = f.url
-            ? ` data-open-url="${esc(f.url)}"`
-            : agent
-              ? ` data-open-agent="${esc(agent)}"`
-              : ` data-goto-agents="running"`;
           return `
       <li class="feed-item kind-${esc(f.kind.toLowerCase())}">
         <details>
-          <summary class="home-tap"${openAttr}>
+          <summary>
             <span class="feed-kind">${esc(f.kind)}</span>
             <span class="feed-title">${esc(f.title || clip(f.text, 70))}</span>
             <span class="feed-meta">${esc(f.who)} · <time title="${esc(fmtTimeFull(f.at))}">${esc(fmtTime(f.at))}</time></span>
           </summary>
           ${f.text ? `<p>${esc(f.text)}</p>` : ""}
-          ${f.url ? `<a href="${esc(f.url)}" target="_blank" rel="noopener" data-stop-nav="1">Open on GitHub ↗</a>` : ""}
-          ${agent ? `<button type="button" class="act" data-open-agent="${esc(agent)}" data-stop-nav="1">Chat with ${esc(agent)}</button>` : ""}
+          <div class="feed-actions">
+            ${f.url ? `<a class="act" href="${esc(f.url)}" target="_blank" rel="noopener">Open on GitHub ↗</a>` : ""}
+            ${agent ? `<button type="button" class="act" data-open-agent="${esc(agent)}">Chat with ${esc(agent)}</button>` : ""}
+          </div>
         </details>
       </li>`;
         })
@@ -2178,10 +2175,9 @@ function buildHosts(heartbeats, events, cloud) {
     };
   });
   return `<div class="host-row">${rows
-    .map((h) => {
-      const agent = h.name === "Mac" ? "Claude" : "Hermes";
-      return `
-    <button type="button" class="host host-${h.key} home-tap" data-open-agent="${esc(agent)}" aria-label="${esc(h.name)} · ${esc(h.label)} — chat with ${esc(agent)}">
+    .map(
+      (h) => `
+    <article class="host host-${h.key}" aria-label="${esc(h.name)} · ${esc(h.label)}">
       <div class="host-top">
         <span class="host-ico" aria-hidden="true">${h.name === "Mac" ? "⌘" : "⊞"}</span>
         <div class="host-id"><strong>${esc(h.name)}</strong><span>${esc(h.role)}</span></div>
@@ -2189,8 +2185,8 @@ function buildHosts(heartbeats, events, cloud) {
       </div>
       <p class="host-detail">${esc(h.detail)}</p>
       ${h.at ? `<time title="${esc(fmtTimeFull(h.at))}">${h.source === "heartbeat" ? "Heartbeat" : "Seen"} ${esc(fmtTime(h.at))}</time>` : ""}
-    </button>`;
-    })
+    </article>`
+    )
     .join("")}</div>${
     cloud && !(heartbeats || []).length
       ? `<p class="home-empty small">Heartbeats start once each PC runs <code>Projects/The-Stack/heartbeat</code> (handed to Cursor).</p>`
@@ -2214,12 +2210,25 @@ function buildDigest({ events, pulls, commits, needs, done }) {
   const after = (iso) => iso && new Date(iso).getTime() > sinceT;
   const newEvents = (events || []).filter((e) => after(e.at));
   const finished = (done || []).filter((j) => after(j.at));
+  const repo = state.cloudMode && typeof ghState !== "undefined" ? ghState.repo : "";
   const merged = Array.isArray(pulls)
-    ? pulls.filter((p) => p.state === "merged" && after(p.at)).map((p) => ({ n: p.number, title: p.title, at: p.at }))
+    ? pulls
+        .filter((p) => p.state === "merged" && after(p.at))
+        .map((p) => ({
+          n: p.number,
+          title: p.title,
+          at: p.at,
+          url: p.url || (repo ? `https://github.com/${repo}/pull/${p.number}` : ""),
+        }))
     : (commits || [])
         .map((c) => ({ c, m: /^Merge pull request #(\d+) from [^/]+\/(?:[a-z]+\/)?(.+?)(?:-\d{8}.*)?$/i.exec(String(c.message).split("\n")[0]) }))
         .filter(({ c, m }) => m && after(c.at))
-        .map(({ c, m }) => ({ n: Number(m[1]), title: String(c.message).split("\n").slice(1).join(" ").trim() || m[2].replace(/[-_]+/g, " "), at: c.at }));
+        .map(({ c, m }) => ({
+          n: Number(m[1]),
+          title: String(c.message).split("\n").slice(1).join(" ").trim() || m[2].replace(/[-_]+/g, " "),
+          at: c.at,
+          url: c.url || (repo ? `https://github.com/${repo}/pull/${m[1]}` : ""),
+        }));
   const blocked = needs || [];
   if (!newEvents.length && !merged.length && !blocked.length) return "";
   // Per agent: count + latest headline.
@@ -2249,7 +2258,11 @@ function buildDigest({ events, pulls, commits, needs, done }) {
   const mergedHtml = merged.length
     ? `<h4>Merged</h4><ul class="dg-list">${merged
         .slice(0, 5)
-        .map((m) => `<li><button type="button" class="dg-row home-tap" data-goto-agents="done"><span class="task-ico st-merged">${STATUS_ICON.merged}</span><span class="dg-main">PR #${m.n} · ${esc(clip(m.title, 60))}<span class="dg-sub">${esc(fmtTime(m.at))}</span></span></button></li>`)
+        .map((m) =>
+          m.url
+            ? `<li><a class="dg-row home-tap" href="${esc(m.url)}" target="_blank" rel="noopener"><span class="task-ico st-merged">${STATUS_ICON.merged}</span><span class="dg-main">PR #${m.n} · ${esc(clip(m.title, 60))}<span class="dg-sub">${esc(fmtTime(m.at))} · GitHub ↗</span></span></a></li>`
+            : `<li><span class="dg-row"><span class="task-ico st-merged">${STATUS_ICON.merged}</span><span class="dg-main">PR #${m.n} · ${esc(clip(m.title, 60))}<span class="dg-sub">${esc(fmtTime(m.at))}</span></span></span></li>`
+        )
         .join("")}</ul>`
     : "";
   const needsHtml = blocked.length
@@ -2413,15 +2426,16 @@ async function loadHome() {
     : `<p class="home-empty">No reports yet. Agents post into #the-digest.</p>`;
   const cc = await loadCommandCentre();
   const running = cc.agents.filter((x) => x.status === "active").length;
+  // Stats: Needs you → Agents inbox. Running / To-dos stay on Home and scroll to that section.
   const stats = [
-    ["Needs you", cc.needsCount || 0, "needs", (cc.needsCount || 0) > 0 ? "alert" : ""],
-    ["Running now", running, "running", running ? "live" : ""],
-    ["To-dos", todos.length, "todos", ""],
+    ["Needs you", cc.needsCount || 0, "goto-needs", (cc.needsCount || 0) > 0 ? "alert" : ""],
+    ["Running now", running, "cc-agents", running ? "live" : ""],
+    ["To-dos", todos.length, "cc-todos", ""],
   ]
     .map(([k, v, dest, cls]) =>
-      dest === "todos"
-        ? `<button type="button" class="stat ${cls} home-tap" data-scroll-to="cc-todos"><strong>${v}</strong><span>${k}</span></button>`
-        : `<button type="button" class="stat ${cls} home-tap" data-goto-agents="${esc(dest)}"><strong>${v}</strong><span>${k}</span></button>`
+      dest === "goto-needs"
+        ? `<button type="button" class="stat ${cls} home-tap" data-goto-agents="needs"><strong>${v}</strong><span>${k}</span></button>`
+        : `<button type="button" class="stat ${cls} home-tap" data-scroll-to="${esc(dest)}"><strong>${v}</strong><span>${k}</span></button>`
     )
     .join("");
   const homeHtml = `
@@ -2435,39 +2449,27 @@ async function loadHome() {
     ${state.cloudMode ? pushPromptHtml() : ""}
     <div class="stat-row">${stats}</div>
     <section class="home-section cc-panel" id="cc-hosts">
-      <button type="button" class="cc-head home-tap" data-goto-agents="running" aria-label="Open Agents">
-        <h2>Computers</h2><span class="cc-src">heartbeat · shared memory</span>
-      </button>
+      <div class="cc-head"><h2>Computers</h2><span class="cc-src">heartbeat · shared memory</span></div>
       ${cc.hostsHtml || ""}
     </section>
     <section class="home-section cc-panel" id="cc-agents">
-      <button type="button" class="cc-head home-tap" data-goto-agents="running" aria-label="Open Agents">
-        <h2>Agents running</h2><span class="cc-src">${esc(cc.agentsSource)}</span>
-      </button>
+      <div class="cc-head"><h2>Agents running</h2><span class="cc-src">${esc(cc.agentsSource)}</span></div>
       ${cc.agentsHtml}
     </section>
     <section class="home-section cc-panel" id="cc-todos">
-      <button type="button" class="cc-head home-tap" data-scroll-to="cc-todos" aria-label="Jump to to-dos">
-        <h2>To-dos</h2><span class="cc-src">${todos.length} open</span>
-      </button>
+      <div class="cc-head"><h2>To-dos</h2><span class="cc-src">${todos.length} open</span></div>
       <div class="home-cards">${todoHtml}</div>
     </section>
     <section class="home-section cc-panel" id="cc-feed">
-      <button type="button" class="cc-head home-tap" data-goto-agents="done" aria-label="Open Agents activity">
-        <h2>What’s going on</h2><span class="cc-src">${esc(cc.feedSource)}</span>
-      </button>
+      <div class="cc-head"><h2>What’s going on</h2><span class="cc-src">${esc(cc.feedSource)}</span></div>
       ${cc.feedHtml}
     </section>
     <section class="home-section" id="cc-mentions">
-      <button type="button" class="cc-head home-tap" data-open-channel="the-digest" aria-label="Open mentions in digest">
-        <h2>Mentions</h2><span class="cc-src">tap a card</span>
-      </button>
+      <div class="cc-head"><h2>Mentions</h2></div>
       ${mentionHtml}
     </section>
     <section class="home-section">
-      <button type="button" class="cc-head home-tap" data-open-channel="the-digest" aria-label="Open digest channel">
-        <h2>Digest</h2><span class="cc-src">#the-digest</span>
-      </button>
+      <div class="cc-head"><h2>Digest</h2></div>
       ${reportHtml}
     </section>`;
   if (body.dataset.sig === homeHtml) return;

@@ -2712,75 +2712,52 @@ html, body {
   }
 }
 
-/* v31.4 — home: everything tappable */
+/* v31.5 — home taps only where the destination is obvious */
 .home-tap,
-button.host,
-button.cc-head,
-button.dg-row,
 .agent-window[data-open-agent],
-.home-todo[data-open-list] {
+.home-todo[data-open-list],
+button.dg-row,
+a.dg-row {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-button.host,
-button.cc-head,
-button.dg-row {
+button.dg-row,
+a.dg-row {
   font: inherit;
   color: inherit;
   text-align: left;
   width: 100%;
   border: 0;
-  background: inherit;
-  padding: inherit;
-  margin: 0;
-  display: grid;
-  gap: inherit;
-}
-button.cc-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.6rem;
-  width: 100%;
-  padding: 0;
   background: transparent;
-  margin-bottom: 0.65rem;
-}
-button.cc-head h2 { margin: 0; }
-button.dg-row {
+  margin: 0;
+  padding: 0.45rem 0.35rem;
+  border-radius: 12px;
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 0.55rem;
   align-items: center;
-  width: 100%;
-  padding: 0.45rem 0.35rem;
-  border-radius: 12px;
-  background: transparent;
+  text-decoration: none;
 }
 button.dg-row:active,
+a.dg-row:active,
 .agent-window[data-open-agent]:active,
-button.host:active,
 .home-todo[data-open-list]:active,
 .stat.home-tap:active {
   transform: scale(0.985);
   background: rgba(255, 255, 255, 0.06);
 }
 .agent-window[data-open-agent]:focus-visible,
-button.host:focus-visible,
 button.dg-row:focus-visible,
+a.dg-row:focus-visible,
 .home-todo[data-open-list]:focus-visible,
-button.cc-head:focus-visible {
+.stat.home-tap:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   outline-offset: 2px;
 }
-.feed-item summary.home-tap { cursor: pointer; list-style: none; }
-.feed-item summary.home-tap::-webkit-details-marker { display: none; }
 .dg-list li:has(.dg-row) { display: block; padding: 0; }
-button.host {
-  padding: 0.6rem;
-  border-radius: 16px;
-  gap: 0.3rem;
-  align-content: start;
-  box-shadow: inherit;
-  background: var(--glass, rgba(255, 255, 255, 0.04));
+.feed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
 }
