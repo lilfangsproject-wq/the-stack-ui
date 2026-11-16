@@ -54,6 +54,17 @@ else ok("chat return tracking present");
 if (!app.includes("function closeChatSheet")) fail("missing closeChatSheet");
 else ok("closeChatSheet present");
 
+// Tab bar must stay tappable while a chat sheet is open (Seth: tabs should do things)
+if (/chat-sheet-open\s+\.tabbar\s*\{[^}]*pointer-events:\s*none/s.test(css)) {
+  fail("tab bar still disables pointer-events while chat sheet is open");
+} else ok("tab bar stays interactive over chat sheet");
+if (/chat-sheet-open\s+\.tabbar\s*\{[^}]*opacity:\s*0/s.test(css)) {
+  fail("tab bar still hides (opacity 0) while chat sheet is open");
+} else ok("tab bar stays visible over chat sheet");
+if (!/bottom:\s*calc\(var\(--tabbar-h\)/.test(css)) {
+  fail("chat sheet must leave bottom room for the tab bar");
+} else ok("chat sheet clears the tab bar");
+
 // Home must not wire section heads as fake Agents/channel jumps
 if (/cc-head home-tap" data-goto-agents/.test(app) || /cc-head home-tap" data-open-channel/.test(app)) {
   fail("section heads still navigate away from Home");
