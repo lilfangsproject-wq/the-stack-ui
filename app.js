@@ -58,16 +58,16 @@ const READS_KEY = "stack-reads-v1";
 const LOOK_KEY = "stack-look-v1";
 const QUICK_REACTIONS = ["👍", "👀", "✅", "❤️", "🔥"];
 
-/** Phone-steerable accents (iOS system colours) on the glass shell — tap Look in the menu. */
+/** Phone-steerable accents on the dark Liquid Glass theme — tap Look in the menu. Lime is the default. */
 const LOOKS = {
-  blue: { label: "Blue", accent: "#0a84ff", strong: "#0060df", soft: "rgba(10, 132, 255, 0.15)" },
-  indigo: { label: "Indigo", accent: "#5e5ce6", strong: "#4240c4", soft: "rgba(94, 92, 230, 0.16)" },
-  teal: { label: "Teal", accent: "#30b0c7", strong: "#1a8ea3", soft: "rgba(48, 176, 199, 0.16)" },
-  green: { label: "Green", accent: "#30d158", strong: "#24a846", soft: "rgba(48, 209, 88, 0.16)" },
-  orange: { label: "Orange", accent: "#ff9f0a", strong: "#d98200", soft: "rgba(255, 159, 10, 0.16)" },
-  pink: { label: "Pink", accent: "#ff375f", strong: "#e0244b", soft: "rgba(255, 55, 95, 0.15)" },
+  lime: { label: "Lime", accent: "#d4f25c", strong: "#b8d93c", soft: "rgba(212, 242, 92, 0.16)", on: "#151a05" },
+  violet: { label: "Violet", accent: "#b9a2ff", strong: "#9a7dff", soft: "rgba(185, 162, 255, 0.16)", on: "#1a1230" },
+  amber: { label: "Amber", accent: "#ffc94a", strong: "#f0ae1c", soft: "rgba(255, 201, 74, 0.16)", on: "#2a1f00" },
+  mint: { label: "Mint", accent: "#6ff0c4", strong: "#3fd6a5", soft: "rgba(111, 240, 196, 0.16)", on: "#04241a" },
+  coral: { label: "Coral", accent: "#ff8a70", strong: "#f2674a", soft: "rgba(255, 138, 112, 0.16)", on: "#2b0d06" },
+  white: { label: "White", accent: "#f4f5f2", strong: "#d9dbd5", soft: "rgba(244, 245, 242, 0.14)", on: "#111214" },
 };
-const LOOK_DEFAULT = "blue";
+const LOOK_DEFAULT = "lime";
 
 function applyLook(id) {
   const look = LOOKS[id] || LOOKS[LOOK_DEFAULT];
@@ -75,6 +75,7 @@ function applyLook(id) {
   root.style.setProperty("--accent", look.accent);
   root.style.setProperty("--accent-strong", look.strong);
   root.style.setProperty("--accent-soft", look.soft);
+  root.style.setProperty("--on-accent", look.on || "#ffffff");
   root.style.setProperty("--accent-glow", look.soft.replace(/0\.1\d\)/, "0.35)"));
   root.dataset.look = LOOKS[id] ? id : LOOK_DEFAULT;
   try {

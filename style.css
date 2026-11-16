@@ -1817,3 +1817,171 @@ button.primary-btn, .composer button[type="submit"], .cloud-connect button[type=
 .push-card .act { flex-shrink: 0; }
 .host-id { flex: 1 1 calc(100% - 2.6rem); }
 .host-top .aw-pill { margin-left: 0; }
+
+/* ==========================================================================
+   v25 — Dark Liquid Glass theme (Seth's favourite reference, 16 Nov 2026).
+   THEME ONLY — layout untouched. Near-black base, ambient lime/amber/violet
+   glows behind, smoked glass panels with thin bright rims, lime highlights.
+   ========================================================================== */
+:root, :root[data-look] {
+  color-scheme: dark;
+  --bg: #0b0c0e;
+  --text: #f4f5f2;
+  --muted: rgba(236, 238, 232, 0.6);
+  --line: rgba(255, 255, 255, 0.12);
+  --separator: rgba(255, 255, 255, 0.09);
+  --fill: rgba(255, 255, 255, 0.07);
+  --fill-strong: rgba(255, 255, 255, 0.12);
+  --glass: linear-gradient(160deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025) 60%, rgba(255, 255, 255, 0.045));
+  --glass-strong: linear-gradient(160deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.035) 60%, rgba(255, 255, 255, 0.06));
+  --glass-green: linear-gradient(160deg, color-mix(in srgb, var(--accent) 14%, rgba(255, 255, 255, 0.06)), rgba(255, 255, 255, 0.025) 65%);
+  --chrome: rgba(16, 17, 20, 0.55);
+  --chrome-strong: rgba(14, 15, 18, 0.82);
+  --avatar-bg: rgba(255, 255, 255, 0.09);
+  --rim:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  --shadow-float: 0 20px 60px rgba(0, 0, 0, 0.6);
+  --blur: blur(30px) saturate(140%);
+  --warn: #ffc94a;
+  --danger: #ff5f5f;
+  --violet: #b9a2ff;
+}
+/* Ambient glows behind the glass (lime top-left, amber bottom, violet right). */
+body {
+  background:
+    radial-gradient(38% 28% at 22% 6%, color-mix(in srgb, var(--accent) 34%, transparent), transparent 70%),
+    radial-gradient(30% 24% at 62% 0%, rgba(120, 140, 60, 0.22), transparent 70%),
+    radial-gradient(34% 26% at 100% 55%, rgba(150, 110, 255, 0.2), transparent 70%),
+    radial-gradient(40% 26% at 10% 100%, rgba(255, 150, 60, 0.26), transparent 70%),
+    radial-gradient(36% 24% at 80% 100%, rgba(255, 120, 90, 0.16), transparent 70%),
+    #0b0c0e;
+  background-attachment: fixed;
+}
+body, .main-head h1 { text-shadow: none; }
+
+/* Smoked glass surfaces with a hairline rim. */
+.cc-panel, .stat, .boot-card, .digest, .push-card, .seg {
+  background: var(--glass);
+  border: 0;
+  box-shadow: var(--rim), var(--shadow);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+}
+.agent-window, .job-card, .host, .home-card, .home-todo, .home-mention, .jump-hit, .msg .body, .live-pill, .ghost, .icon-btn {
+  background: var(--glass-strong);
+  border: 0;
+  box-shadow: var(--rim);
+}
+.main-head, .composer, .install-banner, .rail {
+  background: var(--chrome);
+  border: 0;
+  box-shadow: inset 0 -1px 0 var(--separator);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+}
+.composer { box-shadow: inset 0 1px 0 var(--separator); }
+@media (max-width: 720px) {
+  .rail { background: var(--chrome-strong); }
+  .tabbar {
+    background: linear-gradient(160deg, rgba(40, 42, 46, 0.72), rgba(20, 21, 24, 0.72));
+    box-shadow: var(--rim), var(--shadow-float);
+    -webkit-backdrop-filter: blur(36px) saturate(150%);
+    backdrop-filter: blur(36px) saturate(150%);
+  }
+  .tabbar button { color: var(--muted); }
+  .tabbar button.active { background: rgba(255, 255, 255, 0.1); color: var(--text); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+  .tabbar button.active .tab-ico { color: var(--accent); }
+}
+
+/* Highlights: lime chips/buttons with dark text, like "Beginners" / "75%". */
+.act-primary, button.primary-btn, .composer button[type="submit"], .cloud-connect button[type="submit"],
+.new-row button[type="submit"], .new-channel button[type="submit"] {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.act { background: var(--fill-strong); color: var(--text); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+.ghost, .aw-open, .link-btn { color: var(--text); }
+.aw-open { background: var(--fill-strong); border: 0; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+.seg button { color: var(--muted); }
+.seg button.active, .channel-list button.active {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+.seg-n { background: var(--fill-strong); color: var(--text); }
+.seg button.active .seg-n, .seg button[data-seg="running"].active .seg-n { background: var(--accent); color: var(--on-accent); }
+.seg button.alert .seg-n { background: var(--warn); color: #2a1f00; }
+.channel-list button { color: var(--text); }
+
+/* Status pills: soft tinted chips (lime / amber / violet / red). */
+.aw-pill, .job-pill { background: var(--fill-strong); color: var(--text); }
+.status-active .aw-pill, .pill-running, .host-online .aw-pill { background: color-mix(in srgb, var(--accent) 88%, transparent); color: var(--on-accent); }
+.status-recent .aw-pill, .pill-blocked, .host-stale .aw-pill { background: rgba(255, 201, 74, 0.9); color: #2a1f00; }
+.host-offline .aw-pill, .pill-closed { background: rgba(255, 95, 95, 0.85); color: #fff; }
+.pill-open { background: transparent; color: var(--violet); box-shadow: inset 0 0 0 1px rgba(185, 162, 255, 0.6); }
+.pill-merged { background: rgba(185, 162, 255, 0.85); color: #1a1230; }
+.pill-draft { background: var(--fill-strong); color: var(--muted); }
+.feed-kind { background: var(--fill-strong); color: var(--text); }
+.kind-result .feed-kind, .kind-merged .feed-kind { background: color-mix(in srgb, var(--accent) 88%, transparent); color: var(--on-accent); }
+.kind-note .feed-kind { background: rgba(255, 201, 74, 0.9); color: #2a1f00; }
+
+/* Activity sparkline: muted bars with the latest hours lit, like the reference chart. */
+.aw-spark rect.off { fill: rgba(255, 255, 255, 0.09); }
+.aw-spark rect.on { fill: rgba(255, 255, 255, 0.55); }
+.aw-spark rect.on:last-of-type, .status-active .aw-spark rect.on { fill: var(--accent); }
+
+.stat strong { color: var(--text); }
+.stat.alert { background: linear-gradient(160deg, rgba(255, 201, 74, 0.16), rgba(255, 255, 255, 0.03) 70%); box-shadow: var(--rim), var(--shadow); }
+.stat.alert strong { color: var(--warn); }
+.stat.live strong { color: var(--accent); }
+.agent-window.status-active, .digest {
+  background: var(--glass-green);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 0 30px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.agent-avatar, .msg-avatar, .host-ico { background: var(--avatar-bg); color: var(--text); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+.attach-btn { background: var(--fill-strong); color: var(--text); }
+.unread-badge { background: var(--accent); color: var(--on-accent); }
+.mention, .msg .body .mention { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.msg.mine .body { background: var(--accent); color: var(--on-accent); }
+.msg.mine .body .mention { color: var(--on-accent); background: rgba(0, 0, 0, 0.12); }
+.job-foot a, .feed-item a, .msg .thread-link { color: var(--accent); text-decoration: none; }
+.job-foot code, .home-empty code { background: var(--fill-strong); color: var(--text); }
+.jump input, .new-channel input, .new-row input, .composer textarea, .cloud-connect input, .model-pick select {
+  background-color: var(--fill);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.model-pick select option { color: #111; }
+.live-pill .dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.digest .warn { color: var(--warn); }
+.toast { background: linear-gradient(160deg, rgba(40, 42, 46, 0.9), rgba(22, 23, 26, 0.9)); color: var(--text); box-shadow: var(--rim), var(--shadow-float); }
+.toast.err { color: var(--danger); }
+/* v25 tune: primary actions lime (must follow .act), stronger ambient glow. */
+.act.act-primary, .digest-actions .act-primary, .push-card .act-primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+body {
+  background:
+    radial-gradient(45% 30% at 18% 4%, color-mix(in srgb, var(--accent) 48%, transparent), transparent 72%),
+    radial-gradient(32% 24% at 65% 0%, rgba(150, 170, 70, 0.3), transparent 70%),
+    radial-gradient(38% 30% at 105% 50%, rgba(150, 110, 255, 0.32), transparent 72%),
+    radial-gradient(46% 30% at 5% 102%, rgba(255, 150, 60, 0.38), transparent 72%),
+    radial-gradient(40% 26% at 85% 104%, rgba(255, 110, 90, 0.26), transparent 72%),
+    #0b0c0e;
+  background-attachment: fixed;
+}
+/* Chat width guard (v24 photo button made the composer overflow on 390px phones). */
+#chat-pane, .messages, .composer { min-width: 0; max-width: 100%; }
+.messages { overflow-x: hidden; }
+.composer { display: flex; align-items: flex-end; gap: 0.45rem; box-sizing: border-box; }
+.composer textarea { flex: 1 1 auto; min-width: 0; width: auto; }
+.composer button[type="submit"], .attach-btn { flex: 0 0 auto; }
+.msg .body { max-width: min(100%, 34rem); box-sizing: border-box; overflow-wrap: anywhere; }
+.main-head { min-width: 0; }
+.main-head-text { min-width: 0; }
+.main-head-text h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
