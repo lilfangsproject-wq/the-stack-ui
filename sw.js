@@ -3,8 +3,12 @@
  * Purpose: cache UI shell including github_hub.js under GitHub Pages subpath /the-stack-ui/.
  * Data: caches static assets only — no hub schema; hub via GitHub API in page JS.
  * User: cloud access UI hub — no Mac / same Wi‑Fi required.
+ *
+ * Auto-update: skipWaiting + clients.claim on every install/activate. The page calls
+ * registration.update() on focus / every 5 min; controllerchange triggers one reload.
+ * Bump CACHE when shipping a shell release so old caches are dropped on activate.
  */
-const CACHE = "the-stack-shell-v31";
+const CACHE = "the-stack-shell-v31.1";
 const SHELL = [
   "./index.html",
   "./cloud.html",
@@ -53,8 +57,7 @@ self.addEventListener("fetch", (event) => {
   // Never cache GitHub API or local /api — cloud mode uses api.github.com (other origin).
   if (url.pathname.includes("/api/")) return;
 
-  // v30.1: always revalidate with the server (Pages lets browsers cache 10 min), so a new release
-  // shows up on the next open instead of up to 10 minutes later. Offline still falls back to the cache.
+  // Always revalidate with the server (Pages can cache ~10 min). Offline falls back to cache.
   event.respondWith(
     fetch(event.request, { cache: "no-cache" })
       .then((res) => {
