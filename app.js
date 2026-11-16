@@ -638,14 +638,17 @@ async function loadCommandCentre() {
   let commits = [];
   let prefs = { agents: {} };
   let pulls = null;
+  let heartbeats = [];
   if (cloud) {
-    const [mem, com, pref, prs] = await Promise.allSettled([
+    const [mem, com, pref, prs, hb] = await Promise.allSettled([
       ghSharedMemory(),
       ghRecentCommits(20),
       ghLoadAgentPrefs(),
       ghRecentPulls(15),
+      typeof ghHostHeartbeats === "function" ? ghHostHeartbeats() : Promise.resolve([]),
     ]);
     if (prs.status === "fulfilled") pulls = prs.value;
+    if (hb.status === "fulfilled") heartbeats = hb.value;
     out.pullsSource = prs.status === "fulfilled" ? "pull requests" : "merge commits";
     if (mem.status === "fulfilled") events = mem.value;
     if (com.status === "fulfilled") commits = com.value;
@@ -717,7 +720,9 @@ async function loadCommandCentre() {
     })
     .join("")}</div>`;
 
-  ({ html: out.jobsHtml, needs: out.needsCount } = buildJobs({ events, commits, pulls, agents: out.agents, cloud }));
+  ({ html: out.jobsHtml, needs: out.needsCount, needsList: out.needsList, doneList: out.doneList } = buildJobs({ events, commits, pulls, agents: out.agents, cloud }));
+  out.hostsHtml = buildHosts(heartbeats, events, cloud);
+  out.digestHtml = buildDigest({ events, pulls, commits, needs: out.needsList || [], done: out.doneList || [] });
   // Feed: shared memory + commits on main, newest first.
   const feed = [
     ...events.map((ev) => ({
@@ -818,6 +823,7 @@ function jobCard(j) {
       </div>
       <strong class="job-title">${esc(clip(j.title, 90))}</strong>
       ${j.text ? `<p class="job-text">${esc(clip(j.text, 170))}</p>` : ""}
+      ${jobActions(j)}
       <div class="job-foot">
         <span class="job-who">${esc(j.who || "")}${j.branch ? ` · <code>${esc(clip(j.branch, 34))}</code>` : ""}</span>
         ${j.url ? `<a href="${esc(j.url)}" target="_blank" rel="noopener">${j.number ? "View PR" : "Open"} ↗</a>` : ""}
@@ -864,6 +870,16 @@ function buildJobs({ events, commits, pulls, agents, cloud }) {
       running.push({ status: "running", title: a.name, text: a.ev.text, who: a.role, at: a.ev.at });
     }
   }
+  state.jobIndex = {};
+  [...needs, ...running, ...done].forEach((j, i) => {
+    j.key = j.number ? `pr-${j.number}` : `ev-${j.who}-${String(j.at)}`;
+    state.jobIndex[j.key] = j;
+  });
+  const snoozed = loadSnoozes();
+  const visibleNeeds = needs.filter((j) => !snoozed[j.key] || snoozed[j.key] < Date.now());
+  const snoozedCount = needs.length - visibleNeeds.length;
+  needs.length = 0;
+  needs.push(...visibleNeeds);
   done.sort((x, y) => String(y.at).localeCompare(String(x.at)));
   const tabs = [
     ["needs", "Needs you", needs],
@@ -876,7 +892,7 @@ function buildJobs({ events, commits, pulls, agents, cloud }) {
     done: "Nothing finished in the last day.",
   };
   const first = needs.length ? "needs" : running.length ? "running" : "done";
-  return { needs: needs.length, html: `
+  return { needs: needs.length, needsList: needs, doneList: done, html: `
     <div class="seg" role="tablist">
       ${tabs
         .map(
@@ -892,6 +908,10 @@ function buildJobs({ events, commits, pulls, agents, cloud }) {
         ([id, , list]) =>
           `<div class="job-list" data-seg-panel="${id}" ${id === first ? "" : "hidden"}>${
             list.length ? list.map(jobCard).join("") : `<p class="home-empty">${empty[id]}</p>`
+          }${
+            id === "needs" && snoozedCount
+              ? `<button type="button" class="link-btn" data-unsnooze="1">Show ${snoozedCount} snoozed</button>`
+              : ""
           }</div>`
       )
       .join("")}` };
@@ -910,6 +930,305 @@ document.getElementById("home-body")?.addEventListener("click", (e) => {
     p.hidden = p.dataset.segPanel !== tab.dataset.seg;
   });
 });
+
+
+/* ---- v24 push: iPhone needs the Home Screen app (iOS 16.4+) ---- */
+const VAPID_PUBLIC = "BJtKWO5AwD7ajbBhvCNptJNqetUfHH8nYE9OYng23t9hZIQivN447khfM9ebqLiFHGN9DxTqovvmkYtUXMFGs3s";
+function b64urlToBytes(b64) {
+  const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+function pushSupported() {
+  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+}
+function pushState() {
+  if (!pushSupported()) {
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    return ios && !isStandalone() ? "needs-install" : "unsupported";
+  }
+  return Notification.permission; // default | granted | denied
+}
+async function enablePush() {
+  const st = pushState();
+  if (st === "needs-install") throw new Error("On iPhone, first Share → Add to Home Screen, open The Stack from the icon, then tap this again.");
+  if (st === "unsupported") throw new Error("This browser can't do push notifications.");
+  if (st === "denied") throw new Error("Notifications are blocked. Turn them on in Settings → Notifications → The Stack.");
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") throw new Error("Notifications not allowed.");
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64urlToBytes(VAPID_PUBLIC) });
+  }
+  await ghSavePushSubscription(sub, currentViewer());
+  try {
+    localStorage.setItem("stack-push-on", "1");
+  } catch {
+    /* ignore */
+  }
+  toast("Alerts on — you'll get a ping when an agent needs you");
+  loadHome().catch(() => {});
+}
+function pushPromptHtml() {
+  const st = pushState();
+  let on = false;
+  try {
+    on = localStorage.getItem("stack-push-on") === "1";
+  } catch {
+    on = false;
+  }
+  if (st === "granted" && on) return "";
+  if (st === "unsupported" || st === "denied") return "";
+  const copy =
+    st === "needs-install"
+      ? "Add The Stack to your Home Screen to get alerts when an agent is blocked or mentions you."
+      : "Get a ping when an agent is blocked or @mentions you.";
+  return `<section class="push-card">
+    <span class="push-ico" aria-hidden="true">🔔</span>
+    <p>${copy}</p>
+    ${st === "needs-install" ? "" : `<button type="button" class="act act-primary" data-push-enable="1">Turn on</button>`}
+  </section>`;
+}
+
+/* ---- v24: snooze, job actions, hosts, digest, photos ---- */
+const SNOOZE_KEY = "stack-snooze-v1";
+const LAST_SEEN_KEY = "stack-last-seen-v1";
+function loadSnoozes() {
+  try {
+    return JSON.parse(localStorage.getItem(SNOOZE_KEY) || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+function saveSnoozes(map) {
+  try {
+    localStorage.setItem(SNOOZE_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
+
+function jobActions(j) {
+  if (j.status === "open" || j.status === "draft") {
+    return `<div class="job-actions">
+      <button type="button" class="act act-primary" data-act="merge" data-key="${esc(j.key)}"${j.status === "draft" ? " disabled" : ""}>Merge</button>
+      <button type="button" class="act" data-act="snooze" data-key="${esc(j.key)}">Snooze</button>
+    </div>`;
+  }
+  if (j.status === "blocked") {
+    return `<div class="job-actions">
+      <button type="button" class="act act-primary" data-act="approve" data-key="${esc(j.key)}">Approve</button>
+      <button type="button" class="act" data-act="reply" data-key="${esc(j.key)}">Reply</button>
+      <button type="button" class="act" data-act="snooze" data-key="${esc(j.key)}">Snooze</button>
+    </div>`;
+  }
+  return "";
+}
+
+function agentForJob(j) {
+  const who = canonicalAgent(j.who) || j.who || "";
+  // Cursor-Cloud has no DM of its own; route to Cursor.
+  return who === "Cursor-Cloud" ? "Cursor" : who;
+}
+
+async function openAgentDm(agent, prefill) {
+  let slug = dmSlugFor(agent);
+  if (!slug) {
+    const ch = await api("/api/dms", { method: "POST", body: JSON.stringify({ me: currentViewer(), member: agent }) });
+    await loadChannels();
+    slug = (ch && ch.slug) || dmSlugFor(agent);
+  }
+  if (!slug) throw new Error(`No DM with ${agent}`);
+  state.channelSlug = slug;
+  showView("channel");
+  const box = document.getElementById("body");
+  if (prefill && box) {
+    box.value = prefill;
+    autosize(box);
+    setTimeout(() => box.focus(), 50);
+  }
+}
+
+function toast(msg, kind = "") {
+  let el = document.getElementById("toast");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "toast";
+    el.setAttribute("role", "status");
+    document.body.appendChild(el);
+  }
+  el.className = `toast show ${kind}`;
+  el.textContent = msg;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove("show"), 2600);
+}
+
+document.getElementById("home-body")?.addEventListener("click", async (e) => {
+  if (e.target.closest("[data-unsnooze]")) {
+    saveSnoozes({});
+    loadHome().catch(() => {});
+    return;
+  }
+  if (e.target.closest("[data-digest-ok]")) {
+    try {
+      localStorage.setItem(LAST_SEEN_KEY, new Date().toISOString());
+    } catch {
+      /* ignore */
+    }
+    state.digestSince = new Date().toISOString();
+    e.target.closest(".digest")?.remove();
+    return;
+  }
+  if (e.target.closest("[data-push-enable]")) {
+    enablePush().catch((err) => toast(friendlyError(err), "err"));
+    return;
+  }
+  const btn = e.target.closest(".job-actions .act");
+  if (!btn) return;
+  const j = (state.jobIndex || {})[btn.dataset.key];
+  if (!j) return;
+  const act = btn.dataset.act;
+  const card = btn.closest(".job-card");
+  if (act === "snooze") {
+    const map = loadSnoozes();
+    map[j.key] = Date.now() + 24 * 3600 * 1000;
+    saveSnoozes(map);
+    card?.classList.add("leaving");
+    toast("Snoozed for 24 hours");
+    setTimeout(() => loadHome().catch(() => {}), 250);
+    return;
+  }
+  if (act === "reply") {
+    openAgentDm(agentForJob(j), `Re: ${clip(j.title, 60)} — `).catch((err) => toast(friendlyError(err), "err"));
+    return;
+  }
+  btn.disabled = true;
+  try {
+    if (act === "approve") {
+      const agent = agentForJob(j);
+      let slug = dmSlugFor(agent);
+      if (!slug) {
+        const ch = await api("/api/dms", { method: "POST", body: JSON.stringify({ me: currentViewer(), member: agent }) });
+        slug = (ch && ch.slug) || "";
+        await loadChannels();
+      }
+      await api(`/api/channels/${encodeURIComponent(slug)}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ author: currentViewer(), body: `@${agent} ✅ Approved: ${clip(j.title, 80)} — go ahead.` }),
+      });
+      const map = loadSnoozes();
+      map[j.key] = Date.now() + 7 * 24 * 3600 * 1000;
+      saveSnoozes(map);
+      toast(`Approved — sent to ${agent}`);
+    } else if (act === "merge") {
+      if (!window.confirm(`Merge PR #${j.number} into main?\n\n${j.title}`)) {
+        btn.disabled = false;
+        return;
+      }
+      await ghMergePull(j.number, j.title);
+      toast(`PR #${j.number} merged`);
+    }
+    card?.classList.add("leaving");
+    setTimeout(() => loadHome().catch(() => {}), 300);
+  } catch (err) {
+    btn.disabled = false;
+    const status = err && err.status;
+    if (act === "merge" && (status === 403 || status === 404)) {
+      toast("Your token can't merge. Give it Pull requests: Read and write.", "err");
+    } else if (act === "merge" && status === 405) {
+      toast(`Can't merge yet: ${friendlyError(err)}`, "err");
+    } else {
+      toast(friendlyError(err), "err");
+    }
+  }
+});
+
+/* Hosts: heartbeat branch first, shared memory as fallback. */
+const HOSTS = [
+  { name: "Windows PC", role: "Always-on host", ids: ["desktop-kg22uf0", "windows", "win"], match: /DESKTOP-KG22UF0|\bWindows\b/i },
+  { name: "Mac", role: "MacBook (advisor)", ids: ["mac", "macbook", "seths-macbook"], match: /\bMac(Book)?\b/ },
+];
+function buildHosts(heartbeats, events, cloud) {
+  const now = Date.now();
+  const rows = HOSTS.map((h) => {
+    const hb = (heartbeats || []).find((b) =>
+      h.ids.some((id) => String(b.host || b.file || "").toLowerCase().replace(/\.json$/, "").includes(id))
+    );
+    if (hb && hb.at) {
+      const age = now - new Date(hb.at).getTime();
+      const key = age < 15 * 60000 ? "online" : age < 2 * 3600000 ? "stale" : "offline";
+      const label = { online: "Online", stale: "Quiet", offline: "Offline" }[key];
+      const bits = [hb.tailscale ? `Tailscale ${hb.tailscale}` : "", hb.uptime ? `up ${hb.uptime}` : "", hb.battery || ""].filter(Boolean).join(" · ");
+      return { ...h, key, label, at: hb.at, detail: bits || "Heartbeat received", source: "heartbeat" };
+    }
+    const ev = [...(events || [])]
+      .filter((x) => h.match.test(x.text || ""))
+      .sort((x, y) => String(y.at).localeCompare(String(x.at)))[0];
+    return {
+      ...h,
+      key: "unknown",
+      label: "No heartbeat",
+      at: ev ? ev.at : "",
+      detail: ev ? `Last mentioned: ${clip(ev.text, 110)}` : "Nothing reported yet.",
+      source: "memory",
+    };
+  });
+  return `<div class="host-row">${rows
+    .map(
+      (h) => `
+    <article class="host host-${h.key}">
+      <div class="host-top">
+        <span class="host-ico" aria-hidden="true">${h.name === "Mac" ? "⌘" : "⊞"}</span>
+        <div class="host-id"><strong>${esc(h.name)}</strong><span>${esc(h.role)}</span></div>
+        <span class="aw-pill"><span class="dot"></span>${esc(h.label)}</span>
+      </div>
+      <p class="host-detail">${esc(h.detail)}</p>
+      ${h.at ? `<time title="${esc(fmtTimeFull(h.at))}">${h.source === "heartbeat" ? "Heartbeat" : "Seen"} ${esc(fmtTime(h.at))}</time>` : ""}
+    </article>`
+    )
+    .join("")}</div>${
+    cloud && !(heartbeats || []).length
+      ? `<p class="home-empty small">Heartbeats start once each PC runs <code>Projects/The-Stack/heartbeat</code> (handed to Cursor).</p>`
+      : ""
+  }`;
+}
+
+/* Digest: what changed since the last time Seth tapped "Got it". */
+function buildDigest({ events, pulls, needs, done }) {
+  let since = state.digestSince;
+  if (!since) {
+    try {
+      since = localStorage.getItem(LAST_SEEN_KEY) || "";
+    } catch {
+      since = "";
+    }
+    if (!since) since = new Date(Date.now() - 24 * 3600000).toISOString();
+    state.digestSince = since;
+  }
+  const after = (iso) => iso && String(new Date(iso).toISOString()) > since;
+  const newEvents = (events || []).filter((e) => after(e.at));
+  const finished = (done || []).filter((j) => after(j.at));
+  const merged = (pulls || []).filter((p) => p.state === "merged" && after(p.at));
+  const blocked = (needs || []).filter((j) => after(j.at));
+  const who = [...new Set(newEvents.map((e) => canonicalAgent(e.agent) || e.agent))].filter(Boolean);
+  if (!newEvents.length && !merged.length) return "";
+  const parts = [];
+  if (finished.length) parts.push(`<strong>${finished.length}</strong> finished`);
+  if (merged.length) parts.push(`<strong>${merged.length}</strong> PR${merged.length > 1 ? "s" : ""} merged`);
+  if (blocked.length) parts.push(`<strong class="warn">${blocked.length}</strong> need${blocked.length > 1 ? "" : "s"} you`);
+  const top = finished.slice(0, 3).map((j) => clip(j.title, 40));
+  return `<section class="digest" aria-label="Since you last looked">
+    <div class="digest-head"><strong>Since you last looked</strong><span>${esc(fmtTime(since))}</span></div>
+    <p>${parts.length ? parts.join(" · ") + ". " : ""}${who.length ? `${esc(who.join(", "))} logged ${newEvents.length} update${newEvents.length === 1 ? "" : "s"}.` : ""}${
+      top.length ? ` Latest: ${top.map(esc).join("; ")}.` : ""
+    }</p>
+    <div class="digest-actions">
+      ${blocked.length ? `<a class="act act-primary" href="#cc-jobs">See what needs you</a>` : ""}
+      <button type="button" class="act" data-digest-ok="1">Got it</button>
+    </div>
+  </section>`;
+}
 
 document.getElementById("home-body")?.addEventListener("change", async (e) => {
   const sel = e.target.closest(".model-pick select");
@@ -1068,10 +1387,16 @@ async function loadHome() {
       <input id="jump-input" type="search" placeholder="Search channels &amp; agents" autocomplete="off" enterkeyhint="go" />
     </label>
     <div id="jump-results" class="jump-results" hidden></div>
+    ${cc.digestHtml || ""}
+    ${state.cloudMode ? pushPromptHtml() : ""}
     <div class="stat-row">${stats}</div>
     <section class="home-section cc-panel" id="cc-jobs">
       <div class="cc-head"><h2>Jobs</h2><span class="cc-src">${esc(cc.pullsSource ? `shared memory + ${cc.pullsSource}` : "")}</span></div>
       ${cc.jobsHtml}
+    </section>
+    <section class="home-section cc-panel" id="cc-hosts">
+      <div class="cc-head"><h2>Computers</h2><span class="cc-src">heartbeat · shared memory</span></div>
+      ${cc.hostsHtml || ""}
     </section>
     <section class="home-section cc-panel" id="cc-agents">
       <div class="cc-head"><h2>Agents running</h2><span class="cc-src">${esc(cc.agentsSource)}</span></div>
@@ -1170,7 +1495,17 @@ function renderMessages(data) {
         <div class="meta"><strong>${esc(m.author)}</strong><time title="${esc(
           fmtTimeFull(m.created_at)
         )}">${esc(fmtTime(m.created_at))}</time></div>
-        <div class="body">${formatBodyHtml(m.body)}</div>
+        ${m.body ? `<div class="body">${formatBodyHtml(m.body)}</div>` : ""}
+        ${
+          Array.isArray(m.attachments) && m.attachments.length
+            ? `<div class="msg-photos">${m.attachments
+                .map(
+                  (a) =>
+                    `<button type="button" class="photo" data-photo="${esc(a.path)}" aria-label="Open photo ${esc(a.name || "")}"><span class="photo-loading">Loading photo…</span></button>`
+                )
+                .join("")}</div>`
+            : ""
+        }
         <div class="react-row">
           <div class="react-chips">${chips}</div>
           <div class="react-picker" hidden>${adders}</div>
@@ -1187,6 +1522,7 @@ function renderMessages(data) {
   if (box.dataset.sig === nextHtml) return;
   box.dataset.sig = nextHtml;
   box.innerHTML = nextHtml;
+  hydratePhotos(box);
   if (stick) box.scrollTop = box.scrollHeight;
   const last = data.messages[data.messages.length - 1];
   if (last?.created_at) markChannelRead(ch.slug || state.channelSlug, last.created_at);
@@ -1536,17 +1872,109 @@ document.getElementById("messages").addEventListener("click", (e) => {
   openThread(btn.dataset.parent);
 });
 
+
+/* ---- v24 photos: shrink on the phone, upload to hub/attachments, show inline ---- */
+state.pendingPhotos = [];
+async function shrinkImage(file, max = 1600, quality = 0.82) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error("Couldn't read that image"));
+      i.src = url;
+    });
+    const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement("canvas");
+    c.width = Math.round(img.naturalWidth * scale);
+    c.height = Math.round(img.naturalHeight * scale);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", quality));
+    if (!blob) throw new Error("Couldn't compress that image");
+    return blob;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+function paintPendingPhotos() {
+  const tray = document.getElementById("photo-tray");
+  if (!tray) return;
+  tray.hidden = !state.pendingPhotos.length;
+  tray.innerHTML = state.pendingPhotos
+    .map(
+      (p, i) =>
+        `<span class="tray-item"><img src="${p.preview}" alt="" /><button type="button" data-remove-photo="${i}" aria-label="Remove photo">×</button></span>`
+    )
+    .join("");
+}
+function clearPendingPhotos() {
+  state.pendingPhotos.forEach((p) => URL.revokeObjectURL(p.preview));
+  state.pendingPhotos = [];
+  paintPendingPhotos();
+}
+document.getElementById("photo-input")?.addEventListener("change", async (e) => {
+  const files = [...(e.target.files || [])].slice(0, 4 - state.pendingPhotos.length);
+  for (const f of files) {
+    try {
+      const blob = await shrinkImage(f);
+      state.pendingPhotos.push({ blob, preview: URL.createObjectURL(blob) });
+    } catch (err) {
+      toast(friendlyError(err), "err");
+    }
+  }
+  e.target.value = "";
+  paintPendingPhotos();
+});
+document.getElementById("photo-tray")?.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-remove-photo]");
+  if (!b) return;
+  const [gone] = state.pendingPhotos.splice(Number(b.dataset.removePhoto), 1);
+  if (gone) URL.revokeObjectURL(gone.preview);
+  paintPendingPhotos();
+});
+function hydratePhotos(root) {
+  if (typeof ghAttachmentUrl !== "function") return;
+  root.querySelectorAll(".photo[data-photo]:not([data-ready])").forEach((el) => {
+    el.dataset.ready = "1";
+    ghAttachmentUrl(el.dataset.photo)
+      .then((url) => {
+        el.innerHTML = `<img src="${url}" alt="Photo" loading="lazy" />`;
+        el.dataset.url = url;
+      })
+      .catch(() => {
+        el.innerHTML = `<span class="photo-loading">Photo unavailable</span>`;
+      });
+  });
+}
+document.getElementById("messages")?.addEventListener("click", (e) => {
+  const ph = e.target.closest(".photo[data-url]");
+  if (!ph) return;
+  const lb = document.createElement("div");
+  lb.className = "lightbox";
+  lb.innerHTML = `<img src="${ph.dataset.url}" alt="Photo" /><button type="button" aria-label="Close">×</button>`;
+  lb.addEventListener("click", () => lb.remove());
+  document.body.appendChild(lb);
+});
+
 document.getElementById("composer").addEventListener("submit", async (e) => {
   e.preventDefault();
   const author = document.getElementById("author").value.trim() || "Seth";
   const body = document.getElementById("body").value.trim();
-  if (!body) return;
+  const pending = state.pendingPhotos || [];
+  if (!body && !pending.length) return;
   const btn = e.target.querySelector('button[type="submit"]');
   if (btn) btn.disabled = true;
   const path = `/api/channels/${encodeURIComponent(state.channelSlug)}/messages`;
   const payload = { author, body };
   try {
+    if (pending.length) {
+      if (!state.cloudMode) throw new Error("Photos need the cloud hub (open with ?cloud=1).");
+      if (btn) btn.textContent = "Uploading…";
+      payload.attachments = [];
+      for (const p of pending) payload.attachments.push(await ghUploadAttachment(state.channelSlug, p.blob, "jpg"));
+    }
     await api(path, { method: "POST", body: JSON.stringify(payload) });
+    clearPendingPhotos();
     document.getElementById("body").value = "";
     autosize(document.getElementById("body"));
     await loadMessages();
@@ -1573,7 +2001,10 @@ document.getElementById("composer").addEventListener("submit", async (e) => {
     renderMessages(cached);
     setLive(false, "queued in pocket");
   } finally {
-    if (btn) btn.disabled = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Send";
+    }
   }
 });
 

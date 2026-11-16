@@ -295,6 +295,93 @@ async function ghRecentPulls(limit = 15) {
   }));
 }
 
+/* ---- v24: hosts, PR merge, photos, push ---- */
+const GH_HEARTBEAT_BRANCH = "heartbeat";
+
+async function ghHostHeartbeats() {
+  // Hosts write hosts/<name>.json on the heartbeat branch (keeps main history clean).
+  let list;
+  try {
+    list = await ghApi(`/repos/${ghState.repo}/contents/hosts?ref=${GH_HEARTBEAT_BRANCH}`);
+  } catch (err) {
+    if (err.status === 404) return [];
+    throw err;
+  }
+  const files = (Array.isArray(list) ? list : []).filter((f) => /\.json$/.test(f.name));
+  const rows = await Promise.all(
+    files.map(async (f) => {
+      try {
+        const data = await ghApi(
+          `/repos/${ghState.repo}/contents/${f.path}?ref=${GH_HEARTBEAT_BRANCH}`,
+          { headers: { Accept: "application/vnd.github.raw+json" } }
+        );
+        return { file: f.name, ...data };
+      } catch {
+        return null;
+      }
+    })
+  );
+  return rows.filter(Boolean);
+}
+
+async function ghMergePull(number, title) {
+  return ghApi(`/repos/${ghState.repo}/pulls/${number}/merge`, {
+    method: "PUT",
+    body: JSON.stringify({ merge_method: "merge", commit_title: `Merge PR #${number} from The Stack: ${title || ""}`.trim() }),
+  });
+}
+
+async function ghUploadAttachment(slug, blob, ext = "jpg") {
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  const name = `${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
+  const rel = `attachments/${slug}/${name}`;
+  const path = `${GH_HUB_PREFIX}/${rel}`;
+  await ghApi(`/repos/${ghState.repo}/contents/${path}`, {
+    method: "PUT",
+    body: JSON.stringify({ message: `stack: photo in ${slug}`, content: btoa(bin), branch: ghState.branch }),
+  });
+  return { path: rel, name, type: blob.type || "image/jpeg", size: buf.length };
+}
+
+const ghAttachmentCache = new Map();
+async function ghAttachmentUrl(rel) {
+  // Private repo: fetch with the token, hand the <img> a blob URL.
+  if (ghAttachmentCache.has(rel)) return ghAttachmentCache.get(rel);
+  const p = (async () => {
+    const token = ghSanitizeToken(ghState.token);
+    const res = await ghFetch(
+      `https://api.github.com/repos/${ghState.repo}/contents/${GH_HUB_PREFIX}/${rel}?ref=${encodeURIComponent(ghState.branch)}`,
+      { headers: { Accept: "application/vnd.github.raw", Authorization: `Bearer ${token}` } }
+    );
+    if (!res.ok) throw new Error(`photo_${res.status}`);
+    return URL.createObjectURL(await res.blob());
+  })();
+  ghAttachmentCache.set(rel, p);
+  p.catch(() => ghAttachmentCache.delete(rel));
+  return p;
+}
+
+async function ghSavePushSubscription(sub, who = "Seth") {
+  const json = sub.toJSON ? sub.toJSON() : sub;
+  return ghPutFile(
+    "push/subscriptions.json",
+    async (existing) => {
+      let data = { subscriptions: [] };
+      try {
+        if (existing.text) data = JSON.parse(existing.text);
+      } catch {
+        /* rebuild */
+      }
+      const rest = (data.subscriptions || []).filter((s) => s.endpoint !== json.endpoint);
+      rest.push({ ...json, who, ua: navigator.userAgent.slice(0, 120), added_at: new Date().toISOString() });
+      return JSON.stringify({ note: "Web push subscriptions for The Stack (sent by .github/workflows/stack-push.yml).", subscriptions: rest }, null, 2) + "\n";
+    },
+    "stack: push subscription"
+  );
+}
+
 async function ghLoadAgentPrefs() {
   const data = await ghReadJson("agents.json", { agents: {} });
   return data && data.agents ? data : { agents: {} };
@@ -447,7 +534,7 @@ function ghDmSlug(a, b) {
   return "dm-" + [...new Set(parts)].join("-");
 }
 
-async function ghAppendMessage(slug, { body, author, parent_id }) {
+async function ghAppendMessage(slug, { body, author, parent_id, attachments }) {
   const channels = await ghListChannels();
   let ch = channels.find((c) => c.slug === slug);
   if (!ch) throw new Error("channel_not_found");
@@ -460,6 +547,7 @@ async function ghAppendMessage(slug, { body, author, parent_id }) {
     author: author || "Seth",
     body: text,
     mentions: ghExtractMentions(text),
+    ...(Array.isArray(attachments) && attachments.length ? { attachments } : {}),
     created_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
   };
   const label = ch.kind === "dm" ? `dm ${slug}` : `#${slug}`;

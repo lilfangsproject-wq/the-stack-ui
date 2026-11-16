@@ -101,9 +101,14 @@
         <button type="button" id="toggle-lists" class="ghost">Lists</button>
       </header>
       <section id="messages" class="messages" aria-live="polite"></section>
+      <div id="photo-tray" class="photo-tray" hidden></div>
       <form id="composer" class="composer">
         <input id="author" name="author" value="Seth" aria-label="Author" autocomplete="nickname" />
-        <textarea id="body" name="body" rows="1" placeholder="Message… use @Name to mention" required></textarea>
+        <label class="attach-btn" title="Add photo">
+          <input id="photo-input" type="file" accept="image/*" multiple hidden />
+          <span aria-hidden="true">＋</span><span class="sr-only">Add photo</span>
+        </label>
+        <textarea id="body" name="body" rows="1" placeholder="Message… use @Name to mention"></textarea>
         <button type="submit">Send</button>
       </form>
       <p class="composer-hint">Enter sends · Shift+Enter newline · Install via Add to Home Screen</p>
