@@ -15,6 +15,8 @@ const state = {
   unreads: {},
   /** Last rendered Computers cards keyed by id (mac / windows). */
   hostCards: {},
+  /** agent name → last online heartbeat ISO */
+  hostPresenceByAgent: {},
   openHostId: null,
 };
 
@@ -299,7 +301,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v31.9";
+const STACK_VERSION = "v32.0";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
@@ -1050,16 +1052,23 @@ function canonicalAgent(raw) {
   return hit ? hit.name : null;
 }
 
-function agentStatus(iso, chatIso) {
+function agentStatus(iso, chatIso, hostIso) {
   const chatT = chatIso ? new Date(chatIso).getTime() : NaN;
   if (!Number.isNaN(chatT) && Date.now() - chatT < AGENT_CHAT_ACTIVE_MS) {
     return { key: "active", label: "In chat" };
   }
   const t = iso ? new Date(iso).getTime() : NaN;
+  if (!Number.isNaN(t)) {
+    const age = Date.now() - t;
+    if (age < AGENT_ACTIVE_MS) return { key: "active", label: "Running" };
+    if (age < AGENT_RECENT_MS) return { key: "recent", label: "Recent" };
+  }
+  // v32: if this agent's machine heartbeat is fresh, don't look fully idle.
+  const hostT = hostIso ? new Date(hostIso).getTime() : NaN;
+  if (!Number.isNaN(hostT) && Date.now() - hostT < 15 * 60000) {
+    return { key: "recent", label: "Host online" };
+  }
   if (Number.isNaN(t)) return { key: "idle", label: "No activity logged" };
-  const age = Date.now() - t;
-  if (age < AGENT_ACTIVE_MS) return { key: "active", label: "Running" };
-  if (age < AGENT_RECENT_MS) return { key: "recent", label: "Recent" };
   return { key: "idle", label: "Idle" };
 }
 
@@ -1128,11 +1137,14 @@ async function loadCommandCentre() {
     const ch = (state.channels || []).find((c) => c.slug === slug);
     if (ch && ch.updated_at) chatPresence[a.name] = ch.updated_at;
   }
+  // Warm host→agent presence before status labels (Computers sheet + Home lines).
+  buildHosts(heartbeats, events, cloud);
   out.agents = liveAgentRoster()
     .map((a) => {
       const ev = latest[a.name];
-      const st = agentStatus(ev && ev.at, chatPresence[a.name]);
-      return { ...a, ev, chatAt: chatPresence[a.name] || "", status: st.key, statusLabel: st.label };
+      const hostAt = (state.hostPresenceByAgent && state.hostPresenceByAgent[a.name]) || "";
+      const st = agentStatus(ev && ev.at, chatPresence[a.name], hostAt);
+      return { ...a, ev, chatAt: chatPresence[a.name] || "", hostAt, status: st.key, statusLabel: st.label };
     })
     .sort((x, y) => {
       const rank = { active: 0, recent: 1, idle: 2 };
@@ -2177,6 +2189,7 @@ const HOSTS = [
     match: /DESKTOP-KG22UF0|\bWindows (PC|host|DC|box|machine)\b/i,
     install: "powershell -ExecutionPolicy Bypass -File Projects\\The-Stack\\heartbeat\\install-windows.ps1",
     runs: "Desktop Commander · Hermes · Ollama line-bridge",
+    agents: ["Hermes", "Claude"],
   },
   {
     id: "mac",
@@ -2186,6 +2199,7 @@ const HOSTS = [
     match: /\bMacBook\b|\bMac (asleep|sleep|awake|wake|offline|online|not listed|DC|host)\b|\bwake Mac\b/i,
     install: "bash Projects/The-Stack/heartbeat/install-mac.sh",
     runs: "Cursor · Claude CLI · Wispr · Obsidian vault",
+    agents: ["Cursor", "Claude"],
   },
 ];
 function hostClause(ev, re) {
@@ -2250,6 +2264,12 @@ function buildHosts(heartbeats, events, cloud) {
     };
   });
   state.hostCards = Object.fromEntries(rows.map((h) => [h.id, h]));
+  const presence = {};
+  for (const h of rows) {
+    if (h.key !== "online" || !h.at) continue;
+    for (const agent of h.agents || []) presence[agent] = h.at;
+  }
+  state.hostPresenceByAgent = presence;
   return `<div class="host-row">${rows
     .map(
       (h) => `
@@ -2340,7 +2360,11 @@ function openHostSheet(id) {
   `;
 
   const needsInstall = host.key === "unknown" || host.key === "offline";
+  const chatBtns = (host.agents || [])
+    .map((name) => `<button type="button" class="act" data-host-act="chat" data-agent="${esc(name)}">Chat with ${esc(name)}</button>`)
+    .join("");
   document.getElementById("host-sheet-actions").innerHTML = `
+    ${chatBtns}
     <button type="button" class="act act-primary" data-host-act="copy-install">${needsInstall ? "Copy install command" : "Copy heartbeat install"}</button>
     ${host.tailscale ? `<button type="button" class="act" data-host-act="copy-tailscale">Copy Tailscale IP</button>` : ""}
     <button type="button" class="act" data-host-act="refresh">Refresh status</button>
@@ -2626,12 +2650,12 @@ async function loadHome() {
       <div class="cc-head"><h2>To-dos</h2><span class="cc-src">${todos.length} open</span></div>
       <div class="home-cards">${todoHtml}</div>
     </section>
+    <section class="home-section cc-panel" id="cc-hosts">
+      <div class="cc-head"><h2>Computers</h2><span class="cc-src">tap for actions · heartbeat</span></div>
+      ${cc.hostsHtml || ""}
+    </section>
     <details class="home-more">
-      <summary>Computers, models, and the feed</summary>
-      <section class="home-section cc-panel" id="cc-hosts">
-        <div class="cc-head"><h2>Computers</h2><span class="cc-src">heartbeat · shared memory</span></div>
-        ${cc.hostsHtml || ""}
-      </section>
+      <summary>Models and the feed</summary>
       <section class="home-section cc-panel" id="cc-agents">
         <div class="cc-head"><h2>Models</h2><span class="cc-src">${esc(cc.agentsSource)}</span></div>
         ${cc.agentsHtml}
@@ -3121,6 +3145,12 @@ document.getElementById("host-sheet")?.addEventListener("click", async (e) => {
   const kind = act.dataset.hostAct;
   if (kind === "close") {
     closeHostSheet();
+    return;
+  }
+  if (kind === "chat") {
+    const agent = act.dataset.agent;
+    closeHostSheet();
+    if (agent) openAgentDm(agent).catch((err) => toast(friendlyError(err), "err"));
     return;
   }
   if (kind === "copy-install") {
