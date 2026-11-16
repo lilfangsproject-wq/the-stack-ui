@@ -22,7 +22,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>our app · zero spend · <span data-stack-version>v31.2</span></small>
+          <small>our app · zero spend · <span data-stack-version>v31.3</span></small>
         </div>
       </div>
       <p id="boot-status">Connecting…</p>
@@ -45,7 +45,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>agent command centre · <span data-stack-version>v31.2</span></small>
+          <small>agent command centre · <span data-stack-version>v31.3</span></small>
         </div>
       </div>
       <div class="live-pill" id="live-pill" title="Hub connection">
@@ -121,8 +121,22 @@
       </section>
     </main>
 
-    <main class="main hidden" id="chat-pane">
+    <main class="main hidden chats-pane" id="chats-pane">
       <header class="main-head">
+        <button type="button" id="menu-toggle-chats" class="icon-btn" aria-label="Open menu">☰</button>
+        <div class="main-head-text">
+          <h1>Chats</h1>
+          <p class="purpose" id="chats-headline">Agents and channels</p>
+        </div>
+        <button type="button" id="chats-new" class="ghost">New</button>
+      </header>
+      <section class="chats-body" id="chats-inbox" aria-label="Conversations"></section>
+    </main>
+
+    <main class="main hidden" id="chat-pane">
+      <div class="sheet-grabber" aria-hidden="true"><span></span></div>
+      <header class="main-head">
+        <button type="button" id="chat-back" class="icon-btn chat-back" aria-label="Back to chats">‹</button>
         <button type="button" id="menu-toggle" class="icon-btn" aria-label="Open channels">☰</button>
         <div class="main-head-text">
           <h1 id="channel-title">#the-digest</h1>
