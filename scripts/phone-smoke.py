@@ -78,7 +78,12 @@ async def main():
         page.on("console", on_console)
         base = "http://127.0.0.1:8765/index.html?cloud=1"
         await page.goto(base)
-        await page.wait_for_timeout(600)
+        await page.wait_for_selector("#cloud-connect", timeout=4000)
+        boot_txt = await page.locator("#boot-status").inner_text()
+        if "Connecting" in boot_txt:
+            errors.append("boot still says Connecting with no token")
+        if await page.locator("#tabbar svg.tab-ico").count() != 4:
+            errors.append("tab bar is missing the four icons")
         await page.evaluate(
             """() => {
               localStorage.setItem('stack-github-hub-v1', JSON.stringify({token:'ghp_mock',repo:'lilfangsproject-wq/ai-workspace',branch:'main'}));
@@ -89,10 +94,27 @@ async def main():
         await page.wait_for_timeout(3500)
         shell = await page.locator("#shell:not(.hidden)").count()
         home = await page.locator("#home-pane:not(.hidden)").count()
+        order = await page.evaluate(
+            """() => {
+              const ids = [...document.querySelectorAll('#home-body [id]')].map((n) => n.id);
+              const needs = ids.indexOf('cc-needs');
+              const running = ids.indexOf('cc-running');
+              const latest = ids.indexOf('cc-latest');
+              const hosts = ids.indexOf('cc-hosts');
+              return { needs, running, latest, hosts };
+            }"""
+        )
+        if not (order["needs"] >= 0 and order["needs"] < order["running"] < order["latest"]):
+            errors.append(f"home order wrong: {order}")
+        if order["hosts"] >= 0 and order["hosts"] < order["latest"]:
+            errors.append("computers still sit above Latest")
+        wash = await page.evaluate("() => getComputedStyle(document.body).backgroundImage")
+        if wash.count("radial-gradient") != 1:
+            errors.append(f"expected one page wash, got {wash.count('radial-gradient')}")
         await page.screenshot(path=str(OUT / "v31.7-home.png"))
         back_ok = True
         sheet = False
-        agent = page.locator(".agent-window[data-open-agent]").first
+        agent = page.locator(".agent-line[data-open-agent]").first
         if await agent.count():
             await agent.click()
             await page.wait_for_timeout(1000)

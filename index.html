@@ -22,10 +22,20 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>our app · zero spend · <span data-stack-version>v31.8</span></small>
+          <small>our app · zero spend · <span data-stack-version>v31.9</span></small>
         </div>
       </div>
-      <p id="boot-status">Connecting…</p>
+      <p id="boot-status">Opening the vault…</p>
+      <script>
+        try {
+          var raw = localStorage.getItem("stack-github-hub-v1");
+          var tok = raw && JSON.parse(raw).token;
+          if (!tok) {
+            document.getElementById("boot-status").innerHTML =
+              "<strong>Sign in</strong><span class=\"boot-sub\">Paste your GitHub token to open the vault hub.</span>";
+          }
+        } catch (e) {}
+      </script>
       <button type="button" id="boot-retry" class="ghost hidden">Retry</button>
     </div>
   </div>
@@ -45,7 +55,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>agent command centre · <span data-stack-version>v31.8</span></small>
+          <small>agent command centre · <span data-stack-version>v31.9</span></small>
         </div>
       </div>
       <div class="live-pill" id="live-pill" title="Hub connection">
@@ -198,10 +208,10 @@
       <footer class="host-sheet-actions" id="host-sheet-actions"></footer>
     </aside>
     <nav class="tabbar" id="tabbar" aria-label="Sections">
-      <button type="button" data-tab="home" class="active"><span class="tab-ico" aria-hidden="true">⌂</span><span>Home</span></button>
-      <button type="button" data-tab="chats"><span class="tab-ico" aria-hidden="true">#</span><span>Chats</span></button>
-      <button type="button" data-tab="agents"><span class="tab-ico" aria-hidden="true">◎</span><span>Agents</span></button>
-      <button type="button" data-tab="notes"><span class="tab-ico" aria-hidden="true">✎</span><span>Notes</span></button>
+      <button type="button" data-tab="home" class="active"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z"/></svg><span>Home</span></button>
+      <button type="button" data-tab="chats"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 16.5 3.5 20V8.5A2.5 2.5 0 0 1 6 6h8a2.5 2.5 0 0 1 2.5 2.5V14A2.5 2.5 0 0 1 14 16.5z"/><path d="M8.5 11h.01M12 11h.01"/></svg><span>Chats</span></button>
+      <button type="button" data-tab="agents"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="2.6"/><circle cx="16" cy="9.2" r="2"/><path d="M4.2 18.5c.7-2.4 2.6-3.6 4.8-3.6s4.1 1.2 4.8 3.6"/><path d="M14.2 15.1c1.3-.3 2.6.2 3.4 1.4.5.8.7 1.4.8 1.9"/></svg><span>Agents</span></button>
+      <button type="button" data-tab="notes"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h7.2L19 8.8V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M14 4v5h5M8.5 13h7M8.5 16.5h4.5"/></svg><span>Notes</span></button>
     </nav>
   </div>
   <script src="github_hub.js"></script>

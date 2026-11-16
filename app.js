@@ -299,7 +299,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v31.8";
+const STACK_VERSION = "v31.9";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
@@ -358,7 +358,7 @@ async function bootCloud() {
     paintVersion();
     return false;
   }
-  status.textContent = "Connecting to GitHub hub…";
+  status.textContent = "Opening the vault…";
   try {
     if (typeof ghProbeGithub === "function") {
       status.textContent = "Checking GitHub reachability…";
@@ -1141,6 +1141,23 @@ async function loadCommandCentre() {
   out.agentsSource = cloud
     ? `shared memory · DMs · ${ghState.branch}`
     : "connect cloud hub for live status";
+
+  function agentLine(a) {
+    const line = a.ev ? clip(a.ev.text, 84) : "Nothing in shared memory yet.";
+    const dm = dmSlugFor(a.name);
+    const open = dm
+      ? ` data-open-agent="${esc(a.name)}" aria-label="Open chat with ${esc(a.name)}"`
+      : "";
+    return `<button type="button" class="agent-line status-${a.status}"${open}>
+      <span class="agent-avatar" aria-hidden="true">${initialOf(a.name)}</span>
+      <span class="agent-line-main"><strong>${esc(a.name)}</strong><span>${esc(line)}</span></span>
+      <span class="aw-pill"><span class="dot"></span>${esc(a.statusLabel)}</span>
+    </button>`;
+  }
+  out.runningLinesHtml =
+    out.agents.filter((a) => a.status === "active").map(agentLine).join("") ||
+    `<p class="home-empty">No agent has logged work in the last 2 hours.</p>`;
+  out.latestLinesHtml = out.agents.map(agentLine).join("");
 
   out.agentsHtml = `<div class="agent-list">${out.agents
     .map((a) => {
@@ -2568,52 +2585,70 @@ async function loadHome() {
     : `<p class="home-empty">No reports yet. Agents post into #the-digest.</p>`;
   const cc = await loadCommandCentre();
   const running = cc.agents.filter((x) => x.status === "active").length;
-  // Stats: Needs you → Agents inbox. Running / To-dos stay on Home and scroll to that section.
+  const needs = cc.needsList || [];
+  // Stats stay on Home and scroll to the section. Full triage is still on Agents.
   const stats = [
-    ["Needs you", cc.needsCount || 0, "goto-needs", (cc.needsCount || 0) > 0 ? "alert" : ""],
-    ["Running now", running, "cc-agents", running ? "live" : ""],
+    ["Needs you", needs.length, "cc-needs", needs.length ? "alert" : ""],
+    ["Running now", running, "cc-running", running ? "live" : ""],
     ["To-dos", todos.length, "cc-todos", ""],
   ]
-    .map(([k, v, dest, cls]) =>
-      dest === "goto-needs"
-        ? `<button type="button" class="stat ${cls} home-tap" data-goto-agents="needs"><strong>${v}</strong><span>${k}</span></button>`
-        : `<button type="button" class="stat ${cls} home-tap" data-scroll-to="${esc(dest)}"><strong>${v}</strong><span>${k}</span></button>`
+    .map(
+      ([k, v, dest, cls]) =>
+        `<button type="button" class="stat ${cls} home-tap" data-scroll-to="${esc(dest)}"><strong>${v}</strong><span>${k}</span></button>`
     )
     .join("");
+  const needsBlock = needs.length
+    ? `<div class="job-list">${needs.map(jobCard).join("")}</div>`
+    : `<p class="home-empty">${state.cloudMode ? "Nothing waiting on you." : "Connect the cloud hub to see jobs."}</p>`;
   const homeHtml = `
     ${emptyBanner}
     <label class="jump">
       <span class="jump-icon" aria-hidden="true">⌕</span>
-      <input id="jump-input" type="search" placeholder="Search chats &amp; messages" autocomplete="off" enterkeyhint="go" />
+      <input id="jump-input" type="search" placeholder="Search chats & messages" autocomplete="off" enterkeyhint="go" />
     </label>
     <div id="jump-results" class="jump-results" hidden></div>
-    ${cc.digestHtml || ""}
     ${state.cloudMode ? pushPromptHtml() : ""}
     <div class="stat-row">${stats}</div>
-    <section class="home-section cc-panel" id="cc-hosts">
-      <div class="cc-head"><h2>Computers</h2><span class="cc-src">heartbeat · shared memory</span></div>
-      ${cc.hostsHtml || ""}
+    <section class="home-section cc-panel" id="cc-needs">
+      <div class="cc-head"><h2>Needs you</h2><span class="cc-src">${needs.length} open</span></div>
+      ${needsBlock}
     </section>
-    <section class="home-section cc-panel" id="cc-agents">
-      <div class="cc-head"><h2>Agents running</h2><span class="cc-src">${esc(cc.agentsSource)}</span></div>
-      ${cc.agentsHtml}
+    <section class="home-section cc-panel" id="cc-running">
+      <div class="cc-head"><h2>Running</h2><span class="cc-src">${running} active</span></div>
+      <div class="agent-lines">${cc.runningLinesHtml || ""}</div>
     </section>
+    <section class="home-section cc-panel" id="cc-latest">
+      <div class="cc-head"><h2>Latest</h2><span class="cc-src">one line each</span></div>
+      <div class="agent-lines">${cc.latestLinesHtml || ""}</div>
+    </section>
+    ${cc.digestHtml || ""}
     <section class="home-section cc-panel" id="cc-todos">
       <div class="cc-head"><h2>To-dos</h2><span class="cc-src">${todos.length} open</span></div>
       <div class="home-cards">${todoHtml}</div>
     </section>
-    <section class="home-section cc-panel" id="cc-feed">
-      <div class="cc-head"><h2>What’s going on</h2><span class="cc-src">${esc(cc.feedSource)}</span></div>
-      ${cc.feedHtml}
-    </section>
-    <section class="home-section" id="cc-mentions">
-      <div class="cc-head"><h2>Mentions</h2></div>
-      ${mentionHtml}
-    </section>
-    <section class="home-section">
-      <div class="cc-head"><h2>Digest</h2></div>
-      ${reportHtml}
-    </section>`;
+    <details class="home-more">
+      <summary>Computers, models, and the feed</summary>
+      <section class="home-section cc-panel" id="cc-hosts">
+        <div class="cc-head"><h2>Computers</h2><span class="cc-src">heartbeat · shared memory</span></div>
+        ${cc.hostsHtml || ""}
+      </section>
+      <section class="home-section cc-panel" id="cc-agents">
+        <div class="cc-head"><h2>Models</h2><span class="cc-src">${esc(cc.agentsSource)}</span></div>
+        ${cc.agentsHtml}
+      </section>
+      <section class="home-section cc-panel" id="cc-feed">
+        <div class="cc-head"><h2>What’s going on</h2><span class="cc-src">${esc(cc.feedSource)}</span></div>
+        ${cc.feedHtml}
+      </section>
+      <section class="home-section" id="cc-mentions">
+        <div class="cc-head"><h2>Mentions</h2></div>
+        ${mentionHtml}
+      </section>
+      <section class="home-section">
+        <div class="cc-head"><h2>Digest</h2></div>
+        ${reportHtml}
+      </section>
+    </details>`;
   if (body.dataset.sig === homeHtml) return;
   const jumpVal = document.getElementById("jump-input")?.value || "";
   const openFeed = [...body.querySelectorAll(".feed details[open] .feed-title")].map((x) => x.textContent);
@@ -2964,14 +2999,31 @@ async function bootFromPocket() {
   return true;
 }
 
+function isPagesHost() {
+  try {
+    return /\.github\.io$/i.test(location.hostname);
+  } catch {
+    return false;
+  }
+}
+
 async function boot() {
   const bootEl = document.getElementById("boot");
   const status = document.getElementById("boot-status");
   const retry = document.getElementById("boot-retry");
   retry.classList.add("hidden");
-  const forceCloud = wantsCloudHub();
-
   if (typeof ghLoadCreds === "function") ghLoadCreds();
+  paintVersion();
+  const forceCloud = wantsCloudHub() || isPagesHost();
+  // No token and this is the cloud shell: show sign-in now. Don't sit on a spinner.
+  if (forceCloud && !ghState?.token) {
+    state.cloudMode = true;
+    showCloudConnect();
+    return;
+  }
+  if (forceCloud && status && !status.querySelector("strong")) {
+    status.textContent = "Opening the vault…";
+  }
 
   // Product path: cloud GitHub hub (no Mac). Prefer when forced or when
   // there is no local /api and we already have (or can collect) a PAT.
