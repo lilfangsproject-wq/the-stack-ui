@@ -294,7 +294,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v31";
+const STACK_VERSION = "v31.0";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
@@ -799,14 +799,18 @@ async function loadCommandCentre() {
   let prefs = { agents: {} };
   let pulls = null;
   let heartbeats = [];
+  let handovers = [];
+  let needsSeth = [];
   if (cloud) {
-    const [mem, com, pref, prs, hb, js] = await Promise.allSettled([
+    const [mem, com, pref, prs, hb, js, hos, ns] = await Promise.allSettled([
       ghSharedMemory(),
       ghRecentCommits(20),
       ghLoadAgentPrefs(),
       ghRecentPulls(15),
       typeof ghHostHeartbeats === "function" ? ghHostHeartbeats() : Promise.resolve([]),
       typeof ghLoadJobState === "function" ? ghLoadJobState() : Promise.resolve({ dismissed: {} }),
+      typeof ghListHandovers === "function" ? ghListHandovers() : Promise.resolve([]),
+      typeof ghLoadNeedsSeth === "function" ? ghLoadNeedsSeth() : Promise.resolve([]),
     ]);
     if (prs.status === "fulfilled") pulls = prs.value;
     if (hb.status === "fulfilled") heartbeats = hb.value;
@@ -815,6 +819,9 @@ async function loadCommandCentre() {
     if (mem.status === "fulfilled") events = mem.value;
     if (com.status === "fulfilled") commits = com.value;
     if (pref.status === "fulfilled") prefs = pref.value;
+    if (hos.status === "fulfilled") handovers = hos.value || [];
+    if (ns.status === "fulfilled") needsSeth = ns.value || [];
+    state.handovers = handovers;
     state.ccErrors = [mem, com].filter((r) => r.status === "rejected").map((r) => friendlyError(r.reason));
   }
   state.agentPrefs = prefs.agents || {};
@@ -894,7 +901,16 @@ async function loadCommandCentre() {
     })
     .join("")}</div>`;
 
-  ({ html: out.jobsHtml, needs: out.needsCount, needsList: out.needsList, doneList: out.doneList } = buildJobs({ events, commits, pulls, agents: out.agents, cloud }));
+  ({ html: out.jobsHtml, needs: out.needsCount, needsList: out.needsList, doneList: out.doneList } = buildJobs({
+    events,
+    commits,
+    pulls,
+    agents: out.agents,
+    cloud,
+    handovers,
+    needsSeth,
+  }));
+  out.handovers = handovers;
   out.hostsHtml = buildHosts(heartbeats, events, cloud);
   const nl = out.needsList || [];
   // v31: Home keeps one Needs-you surface (digest CTA + orange stat). Full list lives on Agents.
@@ -1048,7 +1064,7 @@ function jobCard(j) {
     </article>`;
 }
 
-function buildJobs({ events, commits, pulls, agents, cloud }) {
+function buildJobs({ events, commits, pulls, agents, cloud, handovers, needsSeth }) {
   const now = Date.now();
   const within = (iso, ms) => iso && now - new Date(iso).getTime() < ms;
   const needs = [];
@@ -1062,13 +1078,41 @@ function buildJobs({ events, commits, pulls, agents, cloud }) {
     if (!latestByAgent[who]) latestByAgent[who] = ev;
   }
   const dismissed = state.dismissedJobs || {};
+  const seenNeedKeys = new Set();
+  // v31.0: structured handovers + needs_seth.json feed the unified Needs-you inbox first.
+  for (const item of needsSeth || []) {
+    if (!item || item.resolved) continue;
+    const key = item.key || `ns-${item.at}-${item.title}`;
+    if (dismissed[key] || seenNeedKeys.has(key)) continue;
+    seenNeedKeys.add(key);
+    needs.push({
+      status: "blocked",
+      title: item.title || "Needs Seth",
+      text: item.reason || item.recommended_action || "",
+      who: item.origin || "system",
+      at: item.at || "",
+      key,
+      kind: "needs_seth",
+      priority: item.priority,
+    });
+  }
+  for (const h of handovers || []) {
+    if (typeof ghHandoverToNeedsJob !== "function") break;
+    const job = ghHandoverToNeedsJob(h);
+    if (!job || !job.urgent) continue;
+    const key = `ho-${h.id}`;
+    if (dismissed[key] || seenNeedKeys.has(key)) continue;
+    seenNeedKeys.add(key);
+    needs.push({ ...job, key });
+  }
   for (const ev of evs) {
     const who = canonicalAgent(ev.agent) || ev.agent;
     const title = String(ev.id || "").replace(/-\d{8}$/, "").replace(/[-_]+/g, " ");
     const text = ev.text || "";
     const asks = eventAsksSeth(ev);
     const key = `ev-${who}-${String(ev.at)}`;
-    if (latestByAgent[who] === ev && asks && within(ev.at, 72 * 3600000) && !dismissed[key]) {
+    if (latestByAgent[who] === ev && asks && within(ev.at, 72 * 3600000) && !dismissed[key] && !seenNeedKeys.has(key)) {
+      seenNeedKeys.add(key);
       needs.push({ status: "blocked", title, text, who, at: ev.at });
     } else if (ev.kind === "result" && within(ev.at, 24 * 3600000)) {
       done.push({ status: "done", title, text, who, at: ev.at });
@@ -1490,6 +1534,30 @@ function paintAgentsView() {
     running: f ? `${f} hasn't logged work in the last 2 hours.` : "No agent has logged work in the last 2 hours.",
     done: "Nothing finished in the last day.",
   }[seg];
+  const openHandovers = (state.handovers || []).filter(
+    (h) => h && !["COMPLETED", "CANCELLED"].includes(String(h.status || ""))
+  );
+  const handoverHtml = openHandovers.length
+    ? `<section class="handover-panel"><h3 class="task-day">Handovers</h3>${openHandovers
+        .slice(0, 12)
+        .map((h) => {
+          const st = esc(h.status || "?");
+          const ack = esc(h.ack_status || "pending");
+          return `<article class="task st-${h.status === "FAILED_DISPATCH" || h.status === "BLOCKED" || h.status === "ESCALATED" ? "blocked" : "open"}">
+            <div class="task-head">
+              <span class="task-ico">${STATUS_ICON.blocked}</span>
+              <span class="task-main">
+                <span class="task-title">${esc(clip(h.description || h.id, 90))}</span>
+                <span class="task-meta">${esc(h.from_agent || "?")} → ${esc(h.to_agent || "?")} · ${st} · ack ${ack}${
+                  h.task_id ? ` · ${esc(h.task_id)}` : ""
+                }</span>
+              </span>
+              <time class="task-time">${esc(fmtTime(h.created_at))}</time>
+            </div>
+          </article>`;
+        })
+        .join("")}</section>`
+    : `<section class="handover-panel"><h3 class="task-day">Handovers</h3><p class="home-empty">No open handovers. Dispatches without acknowledgement never count as done.</p></section>`;
   const agentsHtml = `
     <div class="agents-controls">
     <div class="agent-strip">${strip}</div>
@@ -1509,6 +1577,7 @@ function paintAgentsView() {
     </div>
     ${f ? `<button type="button" class="link-btn clear-filter" data-agent-filter="">Showing ${esc(f)} only · Show all</button>` : ""}
     </div>
+    ${handoverHtml}
     <div class="task-list">
       ${
         order.length

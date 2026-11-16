@@ -436,6 +436,112 @@ async function ghDismissJob(key, info) {
   );
 }
 
+/* v31.0: structured handovers (hub/handovers.jsonl) — not ordinary chat. */
+const GH_HANDOVER_NEEDS_SETH = new Set([
+  "FAILED_DISPATCH",
+  "BLOCKED",
+  "ESCALATED",
+  "REJECTED",
+]);
+
+function ghParseHandoversJsonl(text) {
+  const byId = new Map();
+  for (const line of String(text || "").split("\n")) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    try {
+      const row = JSON.parse(t);
+      if (row && row.id) byId.set(row.id, row);
+    } catch {
+      /* skip corrupt line */
+    }
+  }
+  return [...byId.values()].sort((a, b) =>
+    String(b.created_at || "").localeCompare(String(a.created_at || ""))
+  );
+}
+
+async function ghListHandovers() {
+  const file = await ghGetFile("handovers.jsonl");
+  return ghParseHandoversJsonl(file.text);
+}
+
+async function ghGetHandover(id) {
+  const rows = await ghListHandovers();
+  return rows.find((r) => r.id === id) || null;
+}
+
+async function ghAppendHandoverSnapshot(rec, message) {
+  if (!rec || !rec.id) throw new Error("handover_id_required");
+  return ghPutFile(
+    "handovers.jsonl",
+    async (existing) =>
+      (existing.text ? existing.text.replace(/\s*$/, "\n") : "") +
+      JSON.stringify(rec) +
+      "\n",
+    message || `stack: handover ${rec.id} → ${rec.status}`
+  );
+}
+
+async function ghLoadNeedsSeth() {
+  const data = await ghReadJson("needs_seth.json", { items: [] });
+  const items = Array.isArray(data && data.items) ? data.items : [];
+  return items.filter((i) => i && !i.resolved);
+}
+
+async function ghResolveNeedsSeth(key, info = {}) {
+  return ghPutFile(
+    "needs_seth.json",
+    async (existing) => {
+      let data = { items: [] };
+      try {
+        if (existing.text) data = JSON.parse(existing.text);
+      } catch {
+        /* rebuild */
+      }
+      data.note =
+        "Unified Needs Seth inbox for The Stack v31. Items requiring Seth action — not a noisy activity feed. Deduped by key.";
+      data.items = (data.items || []).map((item) =>
+        item.key === key
+          ? {
+              ...item,
+              resolved: true,
+              unread: false,
+              resolved_at: new Date().toISOString(),
+              resolved_by: (info && info.by) || "Seth",
+              resolve_action: (info && info.action) || "resolved",
+            }
+          : item
+      );
+      data.updated_at = new Date().toISOString();
+      return JSON.stringify(data, null, 2) + "\n";
+    },
+    `stack: needs-seth ${info && info.action ? info.action : "resolved"}`
+  );
+}
+
+function ghHandoverToNeedsJob(h) {
+  const status = String(h.status || "");
+  const blocked = GH_HANDOVER_NEEDS_SETH.has(status) || status === "DISPATCHED";
+  // DISPATCHED without ack is visible but only FAILED/BLOCKED/ESCALATED/REJECTED are urgent Needs-you.
+  const urgent = GH_HANDOVER_NEEDS_SETH.has(status);
+  if (!urgent && status !== "DISPATCHED" && status !== "ACKNOWLEDGED" && status !== "IN_PROGRESS") {
+    return null;
+  }
+  return {
+    status: urgent ? "blocked" : status === "IN_PROGRESS" ? "running" : "open",
+    title: `Handover ${status}: ${String(h.description || h.id).slice(0, 80)}`,
+    text: `task ${h.task_id || "?"} · ${h.from_agent || "?"} → ${h.to_agent || "?"} · ack=${h.ack_status || "pending"}`,
+    who: h.to_agent || h.from_agent || "handover",
+    at: h.created_at || "",
+    handover_id: h.id,
+    task_id: h.task_id,
+    priority: h.priority,
+    kind: "handover",
+    urgent,
+  };
+}
+
 /* v31: last-read cursors synced across devices (hub/reads.json). */
 async function ghLoadReads() {
   const data = await ghReadJson("reads.json", { reads: {} });
