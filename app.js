@@ -294,7 +294,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v31.3";
+const STACK_VERSION = "v31.4";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
@@ -1151,7 +1151,9 @@ async function loadCommandCentre() {
       const dm = dmSlugFor(a.name);
       const unread = dm ? state.unreads[dm] || 0 : 0;
       return `
-      <article class="agent-window status-${a.status}" data-agent="${esc(a.name)}">
+      <article class="agent-window status-${a.status} home-tap" data-agent="${esc(a.name)}"${
+        dm ? ` data-open-agent="${esc(a.name)}" tabindex="0" role="link" aria-label="Open chat with ${esc(a.name)}"` : ""
+      }>
         <div class="aw-top">
           <span class="agent-avatar" aria-hidden="true">${initialOf(a.name)}</span>
           <div class="aw-id">
@@ -1167,14 +1169,14 @@ async function loadCommandCentre() {
             : `<span class="muted">Nothing in shared memory yet.</span>`
         }</p>
         <div class="aw-foot">
-          <label class="model-pick">
+          <label class="model-pick" data-stop-nav="1">
             <span class="sr-only">Preferred model for ${esc(a.name)}</span>
             <select data-agent="${esc(a.name)}" ${cloud ? "" : "disabled"}>${optionHtml}</select>
           </label>
           <time title="${esc(a.ev ? fmtTimeFull(a.ev.at) : "")}">${a.ev ? esc(fmtTime(a.ev.at)) : ""}</time>
           ${
             dm
-              ? `<button type="button" class="aw-open home-open-channel" data-slug="${esc(dm)}">Chat${
+              ? `<button type="button" class="aw-open home-open-channel" data-slug="${esc(dm)}" data-stop-nav="1">Chat${
                   unread ? ` <span class="unread-badge">${unread}</span>` : ""
                 }</button>`
               : ""
@@ -1231,20 +1233,27 @@ async function loadCommandCentre() {
   out.feedSource = cloud ? `git ${ghState.branch} · ${feed.length} latest` : "connect cloud hub";
   out.feedHtml = feed.length
     ? `<ol class="feed">${feed
-        .map(
-          (f) => `
+        .map((f) => {
+          const agent = canonicalAgent(f.who);
+          const openAttr = f.url
+            ? ` data-open-url="${esc(f.url)}"`
+            : agent
+              ? ` data-open-agent="${esc(agent)}"`
+              : ` data-goto-agents="running"`;
+          return `
       <li class="feed-item kind-${esc(f.kind.toLowerCase())}">
         <details>
-          <summary>
+          <summary class="home-tap"${openAttr}>
             <span class="feed-kind">${esc(f.kind)}</span>
             <span class="feed-title">${esc(f.title || clip(f.text, 70))}</span>
             <span class="feed-meta">${esc(f.who)} · <time title="${esc(fmtTimeFull(f.at))}">${esc(fmtTime(f.at))}</time></span>
           </summary>
           ${f.text ? `<p>${esc(f.text)}</p>` : ""}
-          ${f.url ? `<a href="${esc(f.url)}" target="_blank" rel="noopener">Open on GitHub ↗</a>` : ""}
+          ${f.url ? `<a href="${esc(f.url)}" target="_blank" rel="noopener" data-stop-nav="1">Open on GitHub ↗</a>` : ""}
+          ${agent ? `<button type="button" class="act" data-open-agent="${esc(agent)}" data-stop-nav="1">Chat with ${esc(agent)}</button>` : ""}
         </details>
-      </li>`
-        )
+      </li>`;
+        })
         .join("")}</ol>`
     : `<p class="home-empty">${
         cloud
@@ -1627,13 +1636,56 @@ function refreshJobsView() {
 }
 async function onJobsClick(e) {
   const go = e.target.closest("[data-goto-agents]");
-  if (go) {
+  if (go && !e.target.closest("[data-stop-nav]")) {
     state.agentsSeg = go.dataset.gotoAgents || "";
     state.agentFilter = "";
     state.openTask = go.dataset.task || "";
     showView("agents");
     return;
   }
+
+  const openUrl = e.target.closest("[data-open-url]");
+  if (openUrl && !e.target.closest("[data-stop-nav]")) {
+    e.preventDefault();
+    const url = openUrl.dataset.openUrl;
+    if (url) window.open(url, "_blank", "noopener");
+    return;
+  }
+
+  const openAgent = e.target.closest("[data-open-agent]");
+  if (openAgent && !e.target.closest("[data-stop-nav], .model-pick, select")) {
+    e.preventDefault();
+    openAgentDm(openAgent.dataset.openAgent).catch((err) => toast(friendlyError(err), "err"));
+    return;
+  }
+
+  const openChannel = e.target.closest("[data-open-channel]");
+  if (openChannel && !e.target.closest("[data-stop-nav]")) {
+    state.channelSlug = openChannel.dataset.openChannel;
+    state.threadParentId = null;
+    document.getElementById("thread")?.classList.add("hidden");
+    showView("channel");
+    return;
+  }
+
+  const openList = e.target.closest("[data-open-list]");
+  if (openList && !e.target.closest("[data-stop-nav], .tick")) {
+    const id = openList.dataset.openList;
+    if (id) {
+      state.listId = id;
+      document.getElementById("lists-pane")?.classList.add("open");
+      loadLists().catch(() => {});
+    }
+    return;
+  }
+
+  const scrollTo = e.target.closest("[data-scroll-to]");
+  if (scrollTo) {
+    const el = document.getElementById(scrollTo.dataset.scrollTo);
+    el?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
   const homeTick = e.target.closest(".home-todo .tick[data-row]");
   if (homeTick) {
     homeTick.disabled = true;
@@ -2126,9 +2178,10 @@ function buildHosts(heartbeats, events, cloud) {
     };
   });
   return `<div class="host-row">${rows
-    .map(
-      (h) => `
-    <article class="host host-${h.key}">
+    .map((h) => {
+      const agent = h.name === "Mac" ? "Claude" : "Hermes";
+      return `
+    <button type="button" class="host host-${h.key} home-tap" data-open-agent="${esc(agent)}" aria-label="${esc(h.name)} · ${esc(h.label)} — chat with ${esc(agent)}">
       <div class="host-top">
         <span class="host-ico" aria-hidden="true">${h.name === "Mac" ? "⌘" : "⊞"}</span>
         <div class="host-id"><strong>${esc(h.name)}</strong><span>${esc(h.role)}</span></div>
@@ -2136,8 +2189,8 @@ function buildHosts(heartbeats, events, cloud) {
       </div>
       <p class="host-detail">${esc(h.detail)}</p>
       ${h.at ? `<time title="${esc(fmtTimeFull(h.at))}">${h.source === "heartbeat" ? "Heartbeat" : "Seen"} ${esc(fmtTime(h.at))}</time>` : ""}
-    </article>`
-    )
+    </button>`;
+    })
     .join("")}</div>${
     cloud && !(heartbeats || []).length
       ? `<p class="home-empty small">Heartbeats start once each PC runs <code>Projects/The-Stack/heartbeat</code> (handed to Cursor).</p>`
@@ -2182,9 +2235,9 @@ function buildDigest({ events, pulls, commits, needs, done }) {
     .sort((a, b) => b[1].n - a[1].n)
     .map(([who, r]) => {
       const head = String(r.latest.id || "").replace(/-\d{8}$/, "").replace(/[-_]+/g, " ");
-      return `<li><span class="dg-av" aria-hidden="true">${initialOf(who)}</span><span class="dg-main"><strong>${esc(who)}</strong> · ${r.n} update${
+      return `<li><button type="button" class="dg-row home-tap" data-open-agent="${esc(who)}"><span class="dg-av" aria-hidden="true">${initialOf(who)}</span><span class="dg-main"><strong>${esc(who)}</strong> · ${r.n} update${
         r.n === 1 ? "" : "s"
-      }${r.results ? `, ${r.results} finished` : ""}<span class="dg-sub">Latest: ${esc(clip(head || r.latest.text, 60))} · ${esc(fmtTime(r.latest.at))}</span></span></li>`;
+      }${r.results ? `, ${r.results} finished` : ""}<span class="dg-sub">Latest: ${esc(clip(head || r.latest.text, 60))} · ${esc(fmtTime(r.latest.at))}</span></span></button></li>`;
     })
     .join("");
   const parts = [];
@@ -2196,13 +2249,13 @@ function buildDigest({ events, pulls, commits, needs, done }) {
   const mergedHtml = merged.length
     ? `<h4>Merged</h4><ul class="dg-list">${merged
         .slice(0, 5)
-        .map((m) => `<li><span class="task-ico st-merged">${STATUS_ICON.merged}</span><span class="dg-main">PR #${m.n} · ${esc(clip(m.title, 60))}<span class="dg-sub">${esc(fmtTime(m.at))}</span></span></li>`)
+        .map((m) => `<li><button type="button" class="dg-row home-tap" data-goto-agents="done"><span class="task-ico st-merged">${STATUS_ICON.merged}</span><span class="dg-main">PR #${m.n} · ${esc(clip(m.title, 60))}<span class="dg-sub">${esc(fmtTime(m.at))}</span></span></button></li>`)
         .join("")}</ul>`
     : "";
   const needsHtml = blocked.length
     ? `<h4>Needs you</h4><ul class="dg-list">${blocked
         .slice(0, 4)
-        .map((j) => `<li><span class="task-ico st-blocked">${STATUS_ICON.blocked}</span><span class="dg-main">${esc(clip(j.title, 60))}<span class="dg-sub">${esc(canonicalAgent(j.who) || j.who || "")} · ${esc(fmtTime(j.at))}</span></span></li>`)
+        .map((j) => `<li><button type="button" class="dg-row home-tap" data-goto-agents="needs" data-task="${esc(j.key || "")}"><span class="task-ico st-blocked">${STATUS_ICON.blocked}</span><span class="dg-main">${esc(clip(j.title, 60))}<span class="dg-sub">${esc(canonicalAgent(j.who) || j.who || "")} · ${esc(fmtTime(j.at))}</span></span></button></li>`)
         .join("")}</ul>`
     : "";
   return `<section class="digest" aria-label="Since you last looked">
@@ -2317,13 +2370,13 @@ async function loadHome() {
     ? todos
         .map(
           (t) => `
-      <div class="home-todo">
-        <button type="button" class="tick" data-list="${esc(t.list_id || "")}" data-row="${esc(t.row_id || "")}" aria-label="Mark done: ${esc(t.item || "")}"></button>
+      <div class="home-todo home-tap" data-open-list="${esc(t.list_id || "")}" role="link" tabindex="0" aria-label="Open list for ${esc(t.item || "todo")}">
+        <button type="button" class="tick" data-list="${esc(t.list_id || "")}" data-row="${esc(t.row_id || "")}" data-stop-nav="1" aria-label="Mark done: ${esc(t.item || "")}"></button>
         <div>
           <div>${esc(t.item || "(untitled)")}</div>
           <div class="owner">${esc(t.list || "")}${t.owner ? " · " + esc(t.owner) : ""}</div>
         </div>
-        <button type="button" class="ghost home-open-list" data-list="${esc(t.list_id || "")}">List</button>
+        <button type="button" class="ghost home-open-list" data-list="${esc(t.list_id || "")}" data-stop-nav="1">List</button>
       </div>`
         )
         .join("")
@@ -2361,14 +2414,14 @@ async function loadHome() {
   const cc = await loadCommandCentre();
   const running = cc.agents.filter((x) => x.status === "active").length;
   const stats = [
-    ["Needs you", cc.needsCount || 0, "goto-agents", (cc.needsCount || 0) > 0 ? "alert" : ""],
-    ["Running now", running, "cc-agents", running ? "live" : ""],
-    ["To-dos", todos.length, "cc-todos", ""],
+    ["Needs you", cc.needsCount || 0, "needs", (cc.needsCount || 0) > 0 ? "alert" : ""],
+    ["Running now", running, "running", running ? "live" : ""],
+    ["To-dos", todos.length, "todos", ""],
   ]
-    .map(([k, v, id, cls]) =>
-      id === "goto-agents"
-        ? `<button type="button" class="stat ${cls}" data-goto-agents="needs"><strong>${v}</strong><span>${k}</span></button>`
-        : `<a class="stat ${cls}" href="#${id}"><strong>${v}</strong><span>${k}</span></a>`
+    .map(([k, v, dest, cls]) =>
+      dest === "todos"
+        ? `<button type="button" class="stat ${cls} home-tap" data-scroll-to="cc-todos"><strong>${v}</strong><span>${k}</span></button>`
+        : `<button type="button" class="stat ${cls} home-tap" data-goto-agents="${esc(dest)}"><strong>${v}</strong><span>${k}</span></button>`
     )
     .join("");
   const homeHtml = `
@@ -2382,27 +2435,39 @@ async function loadHome() {
     ${state.cloudMode ? pushPromptHtml() : ""}
     <div class="stat-row">${stats}</div>
     <section class="home-section cc-panel" id="cc-hosts">
-      <div class="cc-head"><h2>Computers</h2><span class="cc-src">heartbeat · shared memory</span></div>
+      <button type="button" class="cc-head home-tap" data-goto-agents="running" aria-label="Open Agents">
+        <h2>Computers</h2><span class="cc-src">heartbeat · shared memory</span>
+      </button>
       ${cc.hostsHtml || ""}
     </section>
     <section class="home-section cc-panel" id="cc-agents">
-      <div class="cc-head"><h2>Agents running</h2><span class="cc-src">${esc(cc.agentsSource)}</span></div>
+      <button type="button" class="cc-head home-tap" data-goto-agents="running" aria-label="Open Agents">
+        <h2>Agents running</h2><span class="cc-src">${esc(cc.agentsSource)}</span>
+      </button>
       ${cc.agentsHtml}
     </section>
     <section class="home-section cc-panel" id="cc-todos">
-      <div class="cc-head"><h2>To-dos</h2><span class="cc-src">${todos.length} open</span></div>
+      <button type="button" class="cc-head home-tap" data-scroll-to="cc-todos" aria-label="Jump to to-dos">
+        <h2>To-dos</h2><span class="cc-src">${todos.length} open</span>
+      </button>
       <div class="home-cards">${todoHtml}</div>
     </section>
     <section class="home-section cc-panel" id="cc-feed">
-      <div class="cc-head"><h2>What’s going on</h2><span class="cc-src">${esc(cc.feedSource)}</span></div>
+      <button type="button" class="cc-head home-tap" data-goto-agents="done" aria-label="Open Agents activity">
+        <h2>What’s going on</h2><span class="cc-src">${esc(cc.feedSource)}</span>
+      </button>
       ${cc.feedHtml}
     </section>
     <section class="home-section" id="cc-mentions">
-      <h2>Mentions</h2>
+      <button type="button" class="cc-head home-tap" data-open-channel="the-digest" aria-label="Open mentions in digest">
+        <h2>Mentions</h2><span class="cc-src">tap a card</span>
+      </button>
       ${mentionHtml}
     </section>
     <section class="home-section">
-      <h2>Digest</h2>
+      <button type="button" class="cc-head home-tap" data-open-channel="the-digest" aria-label="Open digest channel">
+        <h2>Digest</h2><span class="cc-src">#the-digest</span>
+      </button>
       ${reportHtml}
     </section>`;
   if (body.dataset.sig === homeHtml) return;
@@ -2831,6 +2896,8 @@ document.getElementById("home-body")?.addEventListener("click", (e) => {
   const ch = e.target.closest(".home-open-channel");
   if (ch) {
     state.channelSlug = ch.dataset.slug;
+    state.threadParentId = null;
+    document.getElementById("thread")?.classList.add("hidden");
     showView("channel");
     return;
   }
@@ -2840,6 +2907,13 @@ document.getElementById("home-body")?.addEventListener("click", (e) => {
     document.getElementById("lists-pane").classList.add("open");
     loadLists().catch(() => {});
   }
+});
+document.getElementById("home-body")?.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const tap = e.target.closest("[data-open-agent], [data-open-channel], [data-open-list], [data-goto-agents], [data-scroll-to]");
+  if (!tap || e.target.closest("input, textarea, select, button.tick")) return;
+  e.preventDefault();
+  tap.click();
 });
 document.getElementById("rail-backdrop").addEventListener("click", () => setRailOpen(false));
 
