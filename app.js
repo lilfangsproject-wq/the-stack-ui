@@ -265,7 +265,7 @@ function showCloudConnect(errMsg) {
           <input name="branch" value="main" autocomplete="off" required />
         </label>
       </details>
-      <p class="cloud-help">Stays on this phone only. Needs Contents access on the vault repo.</p>
+      <p class="cloud-help">Stays on this device only. Needs Contents access on the vault repo.</p>
     `;
     document.querySelector(".boot-card").appendChild(form);
     form.addEventListener("submit", async (e) => {
@@ -294,7 +294,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v30.2";
+const STACK_VERSION = "v31";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
@@ -338,6 +338,7 @@ async function bootCloud() {
     el.hidden = false;
     el.textContent = `Cloud · ${ghState.repo}@${ghState.branch} · Add to Home Screen`;
     await loadChannels();
+    await syncReadsFromHub();
     await loadLists();
     showView("home");
     setLive(true, health.host);
@@ -373,6 +374,35 @@ function saveReads(reads) {
   localStorage.setItem(READS_KEY, JSON.stringify(reads));
 }
 
+let readsHubTimer = null;
+function scheduleReadsHubSave() {
+  if (!state.cloudMode || typeof ghSaveReads !== "function") return;
+  clearTimeout(readsHubTimer);
+  readsHubTimer = setTimeout(async () => {
+    try {
+      await ghSaveReads(loadReads());
+    } catch {
+      /* offline / conflict — local still wins until next sync */
+    }
+  }, 1200);
+}
+
+async function syncReadsFromHub() {
+  if (!state.cloudMode || typeof ghLoadReads !== "function") return;
+  try {
+    const remote = (await ghLoadReads()) || {};
+    const local = loadReads();
+    const merged = { ...remote };
+    for (const [k, v] of Object.entries(local)) {
+      if (!merged[k] || String(v) > String(merged[k])) merged[k] = v;
+    }
+    saveReads(merged);
+    if (JSON.stringify(merged) !== JSON.stringify(remote)) scheduleReadsHubSave();
+  } catch {
+    /* keep local */
+  }
+}
+
 function markChannelRead(slug, iso) {
   if (!slug) return;
   const reads = loadReads();
@@ -380,6 +410,7 @@ function markChannelRead(slug, iso) {
   if (!iso || String(iso) >= String(prev)) {
     reads[slug] = iso || new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
     saveReads(reads);
+    scheduleReadsHubSave();
   }
 }
 
@@ -554,10 +585,15 @@ function paintChannelNav() {
 
 /* v26: session strip on the chat screen — agents first (Claude on top), then channels. */
 const LAST_CHAT_KEY = "stack-last-chat-v1";
-const AGENT_ORDER = ["claude", "cursor", "chatgpt", "nori", "hermes"];
+const AGENT_ORDER = ["claude", "cursor", "chatgpt", "hermes"];
+const ARCHIVED_AGENTS = new Set(["nori"]);
 function sessionList() {
   const viewer = currentViewer();
-  const dms = (state.channels || []).filter((c) => c.kind === "dm");
+  const dms = (state.channels || []).filter((c) => {
+    if (c.kind !== "dm") return false;
+    const label = String(dmLabel(c, viewer)).toLowerCase();
+    return !ARCHIVED_AGENTS.has(label);
+  });
   const pubs = (state.channels || []).filter((c) => c.kind !== "dm");
   const rank = (c) => {
     const i = AGENT_ORDER.indexOf(String(dmLabel(c, viewer)).toLowerCase());
@@ -622,6 +658,7 @@ async function loadChannels() {
     state.pocketMode = true;
   }
   state.channels = channels || [];
+  state.messageIndexBuilt = false;
   paintChannelNav();
 }
 
@@ -696,23 +733,28 @@ function showView(view) {
 
 /* ---- Command centre (v23): agents running, model pickers, git-main feed ---- */
 const AGENT_ROSTER = [
-  { name: "Claude", role: "Reviews, research, copy", aliases: ["claude"] },
-  { name: "Cursor", role: "Builds on the Mac", aliases: ["cursor"] },
+  { name: "Claude", role: "Engineering grind", aliases: ["claude"] },
+  { name: "Cursor", role: "Build + integrate", aliases: ["cursor"] },
   { name: "Cursor-Cloud", role: "Cloud coordinator", aliases: ["cursor-cloud", "cursor cloud"] },
-  { name: "ChatGPT", role: "Backup dispatch, research", aliases: ["chatgpt"] },
-  { name: "Nori", role: "Primary dispatch (Grok)", aliases: ["nori"] },
-  { name: "Hermes", role: "Windows host agent", aliases: ["hermes", "windows-migration"] },
+  { name: "ChatGPT", role: "Coord + verify", aliases: ["chatgpt"] },
+  { name: "Hermes", role: "Standby (when tasked)", aliases: ["hermes", "windows-migration"] },
+  { name: "Nori", role: "Archived", aliases: ["nori"], archived: true },
 ];
 const MODEL_OPTIONS = {
   Claude: ["Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Haiku 5.5", "Claude Fable 5.2"],
   Cursor: ["Auto", "Claude Opus 5.5", "Claude Sonnet 5.5", "GPT (latest)", "Gemini (latest)"],
   "Cursor-Cloud": ["Auto", "Claude Opus 5.5", "Claude Sonnet 5.5", "GPT (latest)"],
   ChatGPT: ["Default", "Fast", "Deep reasoning"],
-  Nori: ["Grok (latest)", "Grok fast"],
   Hermes: ["Local (Ollama)", "FreeLLM gateway", "Claude Sonnet 5.5"],
+  Nori: ["Grok (latest)", "Grok fast"],
 };
 const AGENT_ACTIVE_MS = 2 * 3600 * 1000;
 const AGENT_RECENT_MS = 24 * 3600 * 1000;
+const AGENT_CHAT_ACTIVE_MS = 15 * 60 * 1000;
+
+function liveAgentRoster() {
+  return AGENT_ROSTER.filter((a) => !a.archived);
+}
 
 function canonicalAgent(raw) {
   const low = String(raw || "").trim().toLowerCase();
@@ -720,7 +762,11 @@ function canonicalAgent(raw) {
   return hit ? hit.name : null;
 }
 
-function agentStatus(iso) {
+function agentStatus(iso, chatIso) {
+  const chatT = chatIso ? new Date(chatIso).getTime() : NaN;
+  if (!Number.isNaN(chatT) && Date.now() - chatT < AGENT_CHAT_ACTIVE_MS) {
+    return { key: "active", label: "In chat" };
+  }
   const t = iso ? new Date(iso).getTime() : NaN;
   if (Number.isNaN(t)) return { key: "idle", label: "No activity logged" };
   const age = Date.now() - t;
@@ -773,21 +819,33 @@ async function loadCommandCentre() {
   }
   state.agentPrefs = prefs.agents || {};
 
-  // Latest shared-memory event per agent = "what it's doing".
+  // Latest shared-memory event per agent = "what it's doing"; chat presence from recent DM posts.
   const latest = {};
   for (const ev of events) {
     const name = canonicalAgent(ev.agent);
     if (!name) continue;
     if (!latest[name] || String(ev.at) > String(latest[name].at)) latest[name] = ev;
   }
-  out.agents = AGENT_ROSTER.map((a) => {
-    const ev = latest[a.name];
-    return { ...a, ev, ...{ status: agentStatus(ev && ev.at).key, statusLabel: agentStatus(ev && ev.at).label } };
-  }).sort((x, y) => {
-    const rank = { active: 0, recent: 1, idle: 2 };
-    return rank[x.status] - rank[y.status] || String((y.ev && y.ev.at) || "").localeCompare(String((x.ev && x.ev.at) || ""));
-  });
-  out.agentsSource = cloud ? `shared memory · ${ghState.branch}` : "connect cloud hub for live status";
+  // Presence: recent DM activity (channel updated_at) — no extra GitHub GETs on each Home poll.
+  const chatPresence = {};
+  for (const a of liveAgentRoster()) {
+    const slug = dmSlugFor(a.name);
+    const ch = (state.channels || []).find((c) => c.slug === slug);
+    if (ch && ch.updated_at) chatPresence[a.name] = ch.updated_at;
+  }
+  out.agents = liveAgentRoster()
+    .map((a) => {
+      const ev = latest[a.name];
+      const st = agentStatus(ev && ev.at, chatPresence[a.name]);
+      return { ...a, ev, chatAt: chatPresence[a.name] || "", status: st.key, statusLabel: st.label };
+    })
+    .sort((x, y) => {
+      const rank = { active: 0, recent: 1, idle: 2 };
+      return rank[x.status] - rank[y.status] || String((y.ev && y.ev.at) || "").localeCompare(String((x.ev && x.ev.at) || ""));
+    });
+  out.agentsSource = cloud
+    ? `shared memory · DMs · ${ghState.branch}`
+    : "connect cloud hub for live status";
 
   out.agentsHtml = `<div class="agent-list">${out.agents
     .map((a) => {
@@ -839,24 +897,8 @@ async function loadCommandCentre() {
   ({ html: out.jobsHtml, needs: out.needsCount, needsList: out.needsList, doneList: out.doneList } = buildJobs({ events, commits, pulls, agents: out.agents, cloud }));
   out.hostsHtml = buildHosts(heartbeats, events, cloud);
   const nl = out.needsList || [];
-  out.needsHtml = nl.length
-    ? `<section class="home-section needs-mini" id="cc-needs">
-        <div class="cc-head"><h2>Needs you</h2><button type="button" class="link-btn" data-goto-agents="needs">Open Agents ›</button></div>
-        ${nl
-          .slice(0, 4)
-          .map(
-            (j) => `<button type="button" class="needs-row" data-goto-agents="needs" data-task="${esc(j.key)}">
-              <span class="task-ico">${STATUS_ICON[j.status] || STATUS_ICON.blocked}</span>
-              <span class="needs-main"><strong>${esc(clip(j.title, 60))}</strong><span>${esc(
-                [canonicalAgent(j.who) || j.who, j.number ? `PR #${j.number}` : ""].filter(Boolean).join(" · ")
-              )}</span></span>
-              <time>${esc(fmtTime(j.at))}</time>
-            </button>`
-          )
-          .join("")}
-        ${nl.length > 4 ? `<button type="button" class="link-btn" data-goto-agents="needs">+${nl.length - 4} more</button>` : ""}
-      </section>`
-    : "";
+  // v31: Home keeps one Needs-you surface (digest CTA + orange stat). Full list lives on Agents.
+  out.needsHtml = "";
   out.digestHtml = buildDigest({ events, pulls, commits, needs: out.needsList || [], done: out.doneList || [] });
   // Feed: shared memory + commits on main, newest first.
   const feed = [
@@ -939,8 +981,45 @@ function sparkline(events, agent) {
 }
 
 /* Linear-style triage + Codex-style job cards. */
-// Agents shout BLOCKED in caps for real blockers; the rest are explicit asks of Seth.
-const NEEDS_SETH_RE = /\bBLOCKED\b|\b[Ss]eth (still )?needs\b|\bneeds [Ss]eth\b|\bwaiting on [Ss]eth\b|\b[Ss]eth must\b|\b[Ss]eth: (tap|type|open|paste|run|approve|add)/;
+// Live asks only — mirrored in Projects/The-Stack/lib/needs_you.mjs (push sender + tests).
+function eventAsksSeth(ev) {
+  if (!ev) return false;
+  const kind = String(ev.kind || "").toLowerCase();
+  if (kind === "blocked") return true;
+  const text = String(ev.text || "");
+  if (!text) return false;
+  const metaAboutRule =
+    /\b(literal(ly)?|contain(s|ed)?|describ\w*|about the|rule says|says? BLOCKED|shout(s|ing)?\s+BLOCKED|word BLOCKED|false.?positiv|tripped the rule|while describing|in caps for)\b/i.test(
+      text
+    ) && /\bBLOCKED\b/.test(text);
+  const blockedLead =
+    /(?:^|[.!?]\s|\n)\s*BLOCKED\b|\bBLOCKED:\s|\bBLOCKED\b(?:\s+from\b|\s+until\b|\s*—|\s+-)|status:\s*BLOCKED\b/i.test(
+      text
+    );
+  if (metaAboutRule && !blockedLead) return false;
+  const sethAsk =
+    /\b[Ss]eth (still )?needs\b|\bneeds [Ss]eth\b|\bwaiting on [Ss]eth\b|\b[Ss]eth must\b|\b[Ss]eth: (tap|type|open|paste|run|approve|add|merge|wake)/.test(
+      text
+    );
+  const blockedStatus =
+    blockedLead ||
+    (/\bBLOCKED\b/.test(text) && !/\b(says?|saying|said|shout|literal|rule|word|contain|describ|about)\b/i.test(text));
+  if (kind === "result") return blockedStatus;
+  return blockedStatus || sethAsk;
+}
+
+function prNeedsSeth(p, dismissed) {
+  if (!p || p.state !== "open" || p.draft) return false;
+  if (dismissed && dismissed[`pr-${p.number}`]) return false;
+  const title = String(p.title || "");
+  if (
+    /^(Log |Review:|Theme kit:|Test phone alert)/i.test(title) &&
+    !/\b(approve|needs you|please merge)\b/i.test(title)
+  ) {
+    return false;
+  }
+  return true;
+}
 
 function jobCard(j) {
   const pill = {
@@ -975,8 +1054,7 @@ function buildJobs({ events, commits, pulls, agents, cloud }) {
   const needs = [];
   const running = [];
   const done = [];
-  // v27: an agent "needs you" only if its LATEST entry asks for Seth. Finished results count only
-  // if they shout BLOCKED. Anything Seth approved (hub jobs.json) is gone on every device.
+  // Latest entry per agent only; classifier ignores meta "BLOCKED" talk. Approvals in hub/jobs.json.
   const evs = [...(events || [])].sort((x, y) => String(y.at).localeCompare(String(x.at)));
   const latestByAgent = {};
   for (const ev of evs) {
@@ -988,7 +1066,7 @@ function buildJobs({ events, commits, pulls, agents, cloud }) {
     const who = canonicalAgent(ev.agent) || ev.agent;
     const title = String(ev.id || "").replace(/-\d{8}$/, "").replace(/[-_]+/g, " ");
     const text = ev.text || "";
-    const asks = NEEDS_SETH_RE.test(text) && (ev.kind !== "result" || /\bBLOCKED\b/.test(text));
+    const asks = eventAsksSeth(ev);
     const key = `ev-${who}-${String(ev.at)}`;
     if (latestByAgent[who] === ev && asks && within(ev.at, 72 * 3600000) && !dismissed[key]) {
       needs.push({ status: "blocked", title, text, who, at: ev.at });
@@ -999,7 +1077,7 @@ function buildJobs({ events, commits, pulls, agents, cloud }) {
   if (Array.isArray(pulls)) {
     for (const p of pulls) {
       const job = { status: p.draft ? "draft" : p.state, number: p.number, title: p.title, who: p.author, branch: p.branch, at: p.at, url: p.url };
-      if (p.state === "open" && !dismissed[`pr-${p.number}`]) needs.unshift({ ...job, text: p.draft ? "Draft PR" : "Waiting for review / merge" });
+      if (prNeedsSeth(p, dismissed)) needs.unshift({ ...job, text: "Waiting for review / merge" });
       else if (p.state === "merged" && within(p.at, 48 * 3600000)) done.push(job);
     }
   } else {
@@ -1925,13 +2003,12 @@ async function loadHome() {
     ${emptyBanner}
     <label class="jump">
       <span class="jump-icon" aria-hidden="true">⌕</span>
-      <input id="jump-input" type="search" placeholder="Search channels &amp; agents" autocomplete="off" enterkeyhint="go" />
+      <input id="jump-input" type="search" placeholder="Search chats &amp; messages" autocomplete="off" enterkeyhint="go" />
     </label>
     <div id="jump-results" class="jump-results" hidden></div>
     ${cc.digestHtml || ""}
     ${state.cloudMode ? pushPromptHtml() : ""}
     <div class="stat-row">${stats}</div>
-    ${cc.needsHtml}
     <section class="home-section cc-panel" id="cc-hosts">
       <div class="cc-head"><h2>Computers</h2><span class="cc-src">heartbeat · shared memory</span></div>
       ${cc.hostsHtml || ""}
@@ -2393,7 +2470,7 @@ document.getElementById("home-body")?.addEventListener("click", (e) => {
 });
 document.getElementById("rail-backdrop").addEventListener("click", () => setRailOpen(false));
 
-/* Bottom tab bar (phone): Home · Chats · Agents · Lists. Desktop keeps the rail. */
+/* Bottom tab bar (phone): Home · Chats · Agents · Notes. Desktop keeps the rail. */
 function setActiveTab(tab) {
   document.querySelectorAll("#tabbar button").forEach((b) => {
     b.classList.toggle("active", b.dataset.tab === tab);
@@ -2423,38 +2500,115 @@ document.getElementById("tabbar")?.addEventListener("click", (e) => {
   setActiveTab(tab);
 });
 
-/* Home jump search: filter channels + agent DMs, tap or Enter to open. */
-function jumpMatches(q) {
+/* Home jump search: channels, agents, and cross-chat message text. */
+function jumpChannelMatches(q) {
   const viewer = currentViewer();
   const needle = q.trim().toLowerCase();
   if (!needle) return [];
   return (state.channels || [])
-    .map((c) => ({ c, label: c.kind === "dm" ? dmLabel(c, viewer) : `#${c.slug}` }))
-    .filter(({ c, label }) =>
-      [label, c.slug, c.purpose || ""].some((v) => String(v).toLowerCase().includes(needle))
-    )
-    .slice(0, 8);
+    .map((c) => ({
+      type: "channel",
+      c,
+      label: c.kind === "dm" ? dmLabel(c, viewer) : `#${c.slug}`,
+      preview: c.purpose || "",
+    }))
+    .filter(({ c, label, preview }) =>
+      [label, c.slug, preview].some((v) => String(v).toLowerCase().includes(needle))
+    );
 }
-document.getElementById("home-body")?.addEventListener("input", (e) => {
-  if (e.target.id !== "jump-input") return;
+
+function jumpMessageMatches(q) {
+  const needle = q.trim().toLowerCase();
+  if (!needle || needle.length < 2) return [];
+  const viewer = currentViewer();
+  return (state.messageIndex || [])
+    .filter((m) =>
+      [m.body, m.author, m.slug].some((v) => String(v || "").toLowerCase().includes(needle))
+    )
+    .slice(0, 12)
+    .map((m) => {
+      const ch = (state.channels || []).find((c) => c.slug === m.slug);
+      const label = ch
+        ? ch.kind === "dm"
+          ? dmLabel(ch, viewer)
+          : `#${ch.slug}`
+        : m.slug;
+      return {
+        type: "message",
+        c: ch || { slug: m.slug, kind: "channel" },
+        label,
+        preview: `${m.author}: ${clip(m.body, 72)}`,
+        at: m.at,
+      };
+    });
+}
+
+function jumpMatches(q) {
+  const ch = jumpChannelMatches(q);
+  const msg = jumpMessageMatches(q).filter((m) => !ch.some((c) => c.c.slug === m.c.slug && !m.preview));
+  return [...ch, ...msg].slice(0, 12);
+}
+
+async function ensureMessageIndex() {
+  if (state.messageIndexBuilt || !state.cloudMode) return;
+  // Cap API cost: 10 most recently updated channels, last 80 msgs each.
+  const channels = [...(state.channels || [])]
+    .sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")))
+    .slice(0, 10);
+  const out = [];
+  await Promise.all(
+    channels.map(async (c) => {
+      try {
+        const data = await api(`/api/channels/${encodeURIComponent(c.slug)}/messages`);
+        const rows = data.messages || data || [];
+        for (const m of rows.slice(-80)) {
+          out.push({
+            slug: c.slug,
+            author: m.author || "",
+            body: m.body || "",
+            at: m.created_at || "",
+            id: m.id || "",
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+    })
+  );
+  state.messageIndex = out;
+  state.messageIndexBuilt = true;
+}
+
+function paintJumpResults(q) {
   const box = document.getElementById("jump-results");
-  const hits = jumpMatches(e.target.value);
-  if (!e.target.value.trim()) {
+  if (!box) return;
+  const needle = q.trim();
+  if (!needle) {
     box.hidden = true;
     box.innerHTML = "";
     return;
   }
+  const hits = jumpMatches(needle);
   box.innerHTML = hits.length
     ? hits
         .map(
-          ({ c, label }) =>
-            `<button type="button" class="jump-hit home-open-channel" data-slug="${esc(c.slug)}"><span class="jump-kind">${
-              c.kind === "dm" ? "Agent" : "Channel"
-            }</span>${esc(label)}</button>`
+          (h) =>
+            `<button type="button" class="jump-hit home-open-channel" data-slug="${esc(h.c.slug)}"><span class="jump-kind">${
+              h.type === "message" ? "Msg" : h.c.kind === "dm" ? "Agent" : "Channel"
+            }</span><span class="jump-main">${esc(h.label)}${
+              h.preview ? `<span class="jump-sub">${esc(h.preview)}</span>` : ""
+            }</span></button>`
         )
         .join("")
-    : `<p class="home-empty">No channel or agent matches “${esc(e.target.value.trim())}”.</p>`;
+    : `<p class="home-empty">No chats or messages match “${esc(needle)}”.</p>`;
   box.hidden = false;
+}
+
+document.getElementById("home-body")?.addEventListener("input", async (e) => {
+  if (e.target.id !== "jump-input") return;
+  const q = e.target.value;
+  if (q.trim().length >= 2) await ensureMessageIndex();
+  paintJumpResults(q);
 });
 document.getElementById("home-body")?.addEventListener("keydown", (e) => {
   if (e.target.id !== "jump-input" || e.key !== "Enter") return;

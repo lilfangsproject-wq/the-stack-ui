@@ -436,6 +436,31 @@ async function ghDismissJob(key, info) {
   );
 }
 
+/* v31: last-read cursors synced across devices (hub/reads.json). */
+async function ghLoadReads() {
+  const data = await ghReadJson("reads.json", { reads: {} });
+  return data && data.reads && typeof data.reads === "object" ? data.reads : {};
+}
+async function ghSaveReads(reads) {
+  return ghPutFile(
+    "reads.json",
+    async (existing) => {
+      let data = { reads: {} };
+      try {
+        if (existing.text) data = JSON.parse(existing.text);
+      } catch {
+        /* rebuild */
+      }
+      data.note =
+        "Per-channel last-read cursors for The Stack (unread badges). Synced across Seth's devices; not agent-facing.";
+      data.reads = reads && typeof reads === "object" ? reads : {};
+      data.updated_at = new Date().toISOString();
+      return JSON.stringify(data, null, 2) + "\n";
+    },
+    "stack: reads"
+  );
+}
+
 /* v30 personal notes: hub/notes.json (private repo, synced across devices). */
 async function ghLoadNotes() {
   const data = await ghReadJson("notes.json", { notes: [] });
