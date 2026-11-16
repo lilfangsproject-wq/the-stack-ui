@@ -61,6 +61,16 @@ const QUICK_REACTIONS = ["👍", "👀", "✅", "❤️", "🔥"];
 
 /** Phone-steerable accents on the dark Liquid Glass theme — tap Look in the menu. Lime is the default. */
 const LOOKS = {
+  iris: {
+    label: "Iridescent",
+    accent: "#cdbdff",
+    strong: "#b3a0ff",
+    soft: "rgba(205, 189, 255, 0.16)",
+    on: "#17131f",
+    // Chameleon headlight film: pearl → pink → lavender → ice blue → mint.
+    grad: "linear-gradient(115deg, #ffe3f3 0%, #f3b8e6 18%, #cdbdff 38%, #a9dcff 58%, #b9f5dc 78%, #fff1d6 100%)",
+    swatch: "linear-gradient(135deg, #f3b8e6, #cdbdff, #a9dcff, #b9f5dc)",
+  },
   lime: { label: "Lime", accent: "#d4f25c", strong: "#b8d93c", soft: "rgba(212, 242, 92, 0.16)", on: "#151a05" },
   violet: { label: "Violet", accent: "#b9a2ff", strong: "#9a7dff", soft: "rgba(185, 162, 255, 0.16)", on: "#1a1230" },
   amber: { label: "Amber", accent: "#ffc94a", strong: "#f0ae1c", soft: "rgba(255, 201, 74, 0.16)", on: "#2a1f00" },
@@ -68,7 +78,7 @@ const LOOKS = {
   coral: { label: "Coral", accent: "#ff8a70", strong: "#f2674a", soft: "rgba(255, 138, 112, 0.16)", on: "#2b0d06" },
   white: { label: "White", accent: "#f4f5f2", strong: "#d9dbd5", soft: "rgba(244, 245, 242, 0.14)", on: "#111214" },
 };
-const LOOK_DEFAULT = "lime";
+const LOOK_DEFAULT = "iris";
 
 function applyLook(id) {
   const look = LOOKS[id] || LOOKS[LOOK_DEFAULT];
@@ -77,6 +87,8 @@ function applyLook(id) {
   root.style.setProperty("--accent-strong", look.strong);
   root.style.setProperty("--accent-soft", look.soft);
   root.style.setProperty("--on-accent", look.on || "#ffffff");
+  root.style.setProperty("--accent-grad", look.grad || look.accent);
+  root.toggleAttribute("data-iris", Boolean(look.grad));
   root.style.setProperty("--accent-glow", look.soft.replace(/0\.1\d\)/, "0.35)"));
   root.dataset.look = LOOKS[id] ? id : LOOK_DEFAULT;
   try {
@@ -105,7 +117,7 @@ function initLookPicker() {
     host.innerHTML = Object.entries(LOOKS)
       .map(
         ([id, look]) =>
-          `<button type="button" class="look-swatch" role="radio" data-look="${id}" aria-label="${look.label}" style="--swatch:${look.accent}" title="${look.label}"></button>`
+          `<button type="button" class="look-swatch" role="radio" data-look="${id}" aria-label="${look.label}" style="--swatch:${look.accent};${look.swatch ? `background:${look.swatch}` : ""}" title="${look.label}"></button>`
       )
       .join("");
     host.addEventListener("click", (e) => {
@@ -1235,8 +1247,9 @@ async function onJobsClick(e) {
       saveSnoozes(map);
       try {
         await ghDismissJob(j.key, { action: "approved", title: j.title, agent, by: currentViewer() });
-      } catch {
-        /* local snooze still hides it on this phone */
+      } catch (err) {
+        // Message went through; only the cross-device record failed. Say so instead of failing silently.
+        toast(`Approved, but couldn't save it for your other devices: ${friendlyError(err)}`, "err");
       }
       toast(`Approved — sent to ${agent}`);
     } else if (act === "merge") {
@@ -1351,6 +1364,7 @@ function paintAgentsView() {
     done: "Nothing finished in the last day.",
   }[seg];
   const agentsHtml = `
+    <div class="agents-controls">
     <div class="agent-strip">${strip}</div>
     <div class="seg linear-seg" role="tablist">
       ${[
@@ -1367,6 +1381,7 @@ function paintAgentsView() {
         .join("")}
     </div>
     ${f ? `<button type="button" class="link-btn clear-filter" data-agent-filter="">Showing ${esc(f)} only · Show all</button>` : ""}
+    </div>
     <div class="task-list">
       ${
         order.length

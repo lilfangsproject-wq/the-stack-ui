@@ -2180,3 +2180,77 @@ body {
 .task + .task { box-shadow: none; position: relative; }
 .task + .task::before { content: ""; position: absolute; left: 2.45rem; right: 0.6rem; top: 0; height: 1px; background: var(--separator); }
 .task.open + .task::before, .task + .task.open::before { display: none; }
+
+/* v29 Agents top: strip + tabs stay pinned under the header; chips fade at the edges. */
+.agents-body { padding-top: 0; }
+.agents-controls {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0 -1rem;
+  padding: 0.7rem 1rem 0.65rem;
+  display: grid;
+  gap: 0.6rem;
+  background: linear-gradient(180deg, rgba(11, 12, 14, 0.94), rgba(11, 12, 14, 0.82));
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  backdrop-filter: blur(22px) saturate(140%);
+  box-shadow: 0 1px 0 var(--separator);
+}
+.agents-controls .agent-strip {
+  margin: 0 -1rem;
+  padding: 0.1rem 1rem;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 1rem, #000 calc(100% - 2.2rem), transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 1rem, #000 calc(100% - 2.2rem), transparent 100%);
+  scroll-padding-inline: 1rem;
+  scroll-snap-type: x proximity;
+}
+.agents-controls .agent-strip::after { content: ""; flex: 0 0 1.4rem; }
+.agent-pill { scroll-snap-align: start; }
+.agents-controls .clear-filter { margin: -0.2rem 0 0; justify-self: start; }
+.agents-controls .seg { margin: 0; }
+.task-list { padding-top: 0.2rem; }
+#agents-pane .main-head { box-shadow: none; }
+
+/* v29 Iridescent accent: pearlescent gradient fills with a slow chameleon shift. */
+:root { --accent-grad: var(--accent); }
+.act-primary, .act.act-primary, button.primary-btn, .composer button[type="submit"], .cloud-connect button[type="submit"],
+.new-row button[type="submit"], .new-channel button[type="submit"], .session-chip.active, .msg.mine .body,
+.unread-badge, .seg button.active .seg-n, .seg button[data-seg="running"].active .seg-n,
+.status-active .aw-pill, .pill-running, .host-online .aw-pill, .kind-result .feed-kind, .kind-merged .feed-kind,
+.list-row.done .tick, .home-todo.ticked .tick {
+  background: var(--accent-grad);
+  background-size: 220% 100%;
+  color: var(--on-accent);
+}
+:root[data-iris] .act-primary, :root[data-iris] .composer button[type="submit"], :root[data-iris] .session-chip.active,
+:root[data-iris] .msg.mine .body, :root[data-iris] button.primary-btn, :root[data-iris] .cloud-connect button[type="submit"] {
+  animation: iris-shift 9s ease-in-out infinite alternate;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 6px 22px rgba(205, 189, 255, 0.25);
+}
+@keyframes iris-shift { from { background-position: 0% 50%; } to { background-position: 100% 50%; } }
+@media (prefers-reduced-motion: reduce) { :root[data-iris] * { animation: none !important; } }
+:root[data-iris] .tabbar button.active .tab-ico,
+:root[data-iris] .stat.live strong {
+  background: linear-gradient(115deg, #f3b8e6, #cdbdff, #a9dcff, #b9f5dc);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+:root[data-iris] .agent-pill.st-active .sdot, :root[data-iris] .live-pill .dot { background: linear-gradient(135deg, #f3b8e6, #a9dcff, #b9f5dc); box-shadow: 0 0 8px rgba(205, 189, 255, 0.7); }
+:root[data-iris] .agent-window.status-active, :root[data-iris] .digest {
+  background: linear-gradient(160deg, rgba(243, 184, 230, 0.12), rgba(169, 220, 255, 0.08) 45%, rgba(185, 245, 220, 0.06) 75%, rgba(255, 255, 255, 0.02));
+  box-shadow: inset 0 0 0 1px rgba(205, 189, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 0 30px rgba(205, 189, 255, 0.1);
+}
+/* Ambient glows follow the film: pink, lavender, ice blue instead of lime/amber. */
+:root[data-iris] body {
+  background:
+    radial-gradient(45% 30% at 18% 4%, rgba(243, 184, 230, 0.32), transparent 72%),
+    radial-gradient(32% 24% at 65% 0%, rgba(205, 189, 255, 0.26), transparent 70%),
+    radial-gradient(38% 30% at 105% 50%, rgba(169, 220, 255, 0.24), transparent 72%),
+    radial-gradient(46% 30% at 5% 102%, rgba(185, 245, 220, 0.2), transparent 72%),
+    radial-gradient(40% 26% at 85% 104%, rgba(255, 210, 230, 0.18), transparent 72%),
+    #0b0c0e;
+  background-attachment: fixed;
+}
+.look-swatch { background: var(--swatch); }
+.agents-controls { background: linear-gradient(180deg, rgba(11, 12, 14, 0.97), rgba(11, 12, 14, 0.95)); }
