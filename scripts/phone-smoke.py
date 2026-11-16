@@ -5,9 +5,15 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from playwright.async_api import async_playwright
 
-UI = Path("/Users/seef/Documents/Codex/2026-10-27/h/outputs/the-stack-ui")
-HUB = Path("/Users/seef/Documents/Codex/2026-10-27/h/outputs/AI Workspace/Projects/The-Stack/hub")
-OUT = Path("/tmp/stack-premium")
+ROOT = Path(__file__).resolve().parents[1]
+UI = Path(os.environ.get("STACK_UI_ROOT", ROOT))
+_HUB_CANDIDATES = [
+    Path(os.environ["STACK_HUB_ROOT"]) if os.environ.get("STACK_HUB_ROOT") else None,
+    Path("/agent/repos/ai-workspace/Projects/The-Stack/hub"),
+    Path("/Users/seef/Documents/Codex/2026-10-27/h/outputs/AI Workspace/Projects/The-Stack/hub"),
+]
+HUB = next((p for p in _HUB_CANDIDATES if p and p.is_dir()), ROOT / "hub")
+OUT = Path(os.environ.get("STACK_SMOKE_OUT", "/tmp/stack-premium"))
 OUT.mkdir(parents=True, exist_ok=True)
 
 class Handler(SimpleHTTPRequestHandler):
@@ -83,7 +89,7 @@ async def main():
         await page.wait_for_timeout(3500)
         shell = await page.locator("#shell:not(.hidden)").count()
         home = await page.locator("#home-pane:not(.hidden)").count()
-        await page.screenshot(path=str(OUT / "v31.6-home.png"))
+        await page.screenshot(path=str(OUT / "v31.7-home.png"))
         back_ok = True
         sheet = False
         agent = page.locator(".agent-window[data-open-agent]").first
@@ -91,15 +97,15 @@ async def main():
             await agent.click()
             await page.wait_for_timeout(1000)
             sheet = await page.evaluate("document.getElementById('chat-pane')?.classList.contains('sheet-open')")
-            await page.screenshot(path=str(OUT / "v31.6-chat-from-home.png"))
+            await page.screenshot(path=str(OUT / "v31.7-chat-from-home.png"))
             await page.locator("#chat-back").click()
             await page.wait_for_timeout(600)
             back_ok = await page.evaluate("!document.getElementById('home-pane')?.classList.contains('hidden')")
-            await page.screenshot(path=str(OUT / "v31.6-back-home.png"))
+            await page.screenshot(path=str(OUT / "v31.7-back-home.png"))
         await page.locator(".tabbar [data-tab='chats']").click()
         await page.wait_for_timeout(800)
         inbox = await page.locator("#chats-pane:not(.hidden) .chat-inbox-row").count()
-        await page.screenshot(path=str(OUT / "v31.6-chats-inbox.png"))
+        await page.screenshot(path=str(OUT / "v31.7-chats-inbox.png"))
         # Composer controls aligned (heights) when a chat is open
         if inbox:
             await page.locator(".chat-inbox-row").first.click()
@@ -112,9 +118,51 @@ async def main():
                   return a && t && s ? [a.getBoundingClientRect().height, t.getBoundingClientRect().height, s.getBoundingClientRect().height] : null;
                 }"""
             )
-            await page.screenshot(path=str(OUT / "v31.6-composer.png"))
+            await page.screenshot(path=str(OUT / "v31.7-composer.png"))
         else:
             heights = None
+
+        # v31.7: tabs must work while a chat sheet is open
+        tabs_from_sheet = None
+        await page.locator(".tabbar [data-tab='chats']").click()
+        await page.wait_for_timeout(500)
+        if await page.locator("#chats-pane:not(.hidden) .chat-inbox-row").count():
+            await page.locator(".chat-inbox-row").first.click()
+            await page.wait_for_timeout(700)
+            sheet_open = await page.evaluate(
+                "() => !!document.getElementById('chat-pane')?.classList.contains('sheet-open')"
+            )
+            tab_live = await page.evaluate(
+                """() => {
+                  const tab = document.getElementById('tabbar');
+                  const cs = getComputedStyle(tab);
+                  const btn = tab.querySelector('button[data-tab="agents"]');
+                  const r = btn.getBoundingClientRect();
+                  return {
+                    opacity: cs.opacity,
+                    pointerEvents: cs.pointerEvents,
+                    inView: r.top < window.innerHeight && r.bottom > 0 && r.width > 0,
+                  };
+                }"""
+            )
+            await page.locator(".tabbar [data-tab='agents']").click()
+            await page.wait_for_timeout(700)
+            landed = await page.evaluate(
+                """() => ({
+                  agents: !document.getElementById('agents-pane')?.classList.contains('hidden'),
+                  sheet: !!document.getElementById('chat-pane')?.classList.contains('sheet-open'),
+                  active: document.querySelector('#tabbar button.active')?.dataset.tab || null,
+                })"""
+            )
+            await page.screenshot(path=str(OUT / "v31.7-tab-from-sheet.png"))
+            tabs_from_sheet = {"sheet_was_open": sheet_open, "tab": tab_live, "landed": landed}
+            if not sheet_open:
+                errors.append("expected chat sheet open before tab tap")
+            if tab_live.get("opacity") in ("0", 0) or tab_live.get("pointerEvents") == "none" or not tab_live.get("inView"):
+                errors.append(f"tab bar inert while sheet open: {tab_live}")
+            if not landed.get("agents") or landed.get("active") != "agents":
+                errors.append(f"Agents tab from open chat failed: {landed}")
+
         await browser.close()
     httpd.shutdown()
     report = {
@@ -124,6 +172,7 @@ async def main():
         "back_to_home": back_ok,
         "inbox_rows": inbox,
         "composer_heights": heights,
+        "tabs_from_sheet": tabs_from_sheet,
         "js_errors": errors[:8],
     }
     print(json.dumps(report, indent=2))
@@ -136,6 +185,8 @@ async def main():
         raise SystemExit("Back from Home-opened chat did not return to Home")
     if heights and max(heights) - min(heights) > 6:
         raise SystemExit(f"composer control heights uneven: {heights}")
+    if tabs_from_sheet is None:
+        print("WARN: skipped tabs_from_sheet (no inbox rows)")
     print("SMOKE PASSED")
 
 asyncio.run(main())
