@@ -22,7 +22,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>our app · zero spend · <span data-stack-version>v31.9</span></small>
+          <small>our app · zero spend · <span data-stack-version>v32.1</span></small>
         </div>
       </div>
       <p id="boot-status">Opening the vault…</p>
@@ -55,7 +55,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>agent command centre · <span data-stack-version>v31.9</span></small>
+          <small>agent command centre · <span data-stack-version>v32.1</span></small>
         </div>
       </div>
       <div class="live-pill" id="live-pill" title="Hub connection">
@@ -120,12 +120,10 @@
         </div>
       </header>
       <section class="notes-body" id="notes-body">
+        <input id="note-search" class="note-search" type="search" placeholder="Search notes" aria-label="Search notes" enterkeyhint="search" />
         <form id="note-form" class="note-compose">
           <textarea id="note-text" rows="2" placeholder="Write a note…" aria-label="New note"></textarea>
-          <div class="note-compose-row">
-            <input id="note-search" type="search" placeholder="Search notes" aria-label="Search notes" />
-            <button type="submit" class="act act-primary">Save</button>
-          </div>
+          <button type="submit" class="act act-primary note-save">Save</button>
         </form>
         <div id="notes-list" class="notes-list"></div>
       </section>

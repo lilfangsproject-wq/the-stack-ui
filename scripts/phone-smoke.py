@@ -98,16 +98,17 @@ async def main():
             """() => {
               const ids = [...document.querySelectorAll('#home-body [id]')].map((n) => n.id);
               const needs = ids.indexOf('cc-needs');
-              const running = ids.indexOf('cc-running');
-              const latest = ids.indexOf('cc-latest');
+              const roster = ids.indexOf('cc-roster');
               const hosts = ids.indexOf('cc-hosts');
-              return { needs, running, latest, hosts };
+              return { needs, roster, hosts, running: ids.indexOf('cc-running'), latest: ids.indexOf('cc-latest') };
             }"""
         )
-        if not (order["needs"] >= 0 and order["needs"] < order["running"] < order["latest"]):
+        if not (order["needs"] >= 0 and order["roster"] > order["needs"]):
             errors.append(f"home order wrong: {order}")
-        if order["hosts"] >= 0 and order["hosts"] < order["latest"]:
-            errors.append("computers still sit above Latest")
+        if order["running"] >= 0 or order["latest"] >= 0:
+            errors.append("home still splits Running and Latest")
+        if order["hosts"] >= 0 and order["hosts"] < order["roster"]:
+            errors.append("computers still sit above the agent roster")
         wash = await page.evaluate("() => getComputedStyle(document.body).backgroundImage")
         if wash.count("radial-gradient") != 1:
             errors.append(f"expected one page wash, got {wash.count('radial-gradient')}")

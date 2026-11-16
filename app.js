@@ -301,7 +301,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v32.0";
+const STACK_VERSION = "v32.1";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
@@ -1155,21 +1155,19 @@ async function loadCommandCentre() {
     : "connect cloud hub for live status";
 
   function agentLine(a) {
-    const line = a.ev ? clip(a.ev.text, 84) : "Nothing in shared memory yet.";
+    const line = a.ev ? clip(a.ev.text, 84) : a.role || "Idle";
+    const quiet = a.status === "idle" && !a.ev ? " is-quiet" : "";
     const dm = dmSlugFor(a.name);
     const open = dm
       ? ` data-open-agent="${esc(a.name)}" aria-label="Open chat with ${esc(a.name)}"`
       : "";
-    return `<button type="button" class="agent-line status-${a.status}"${open}>
+    return `<button type="button" class="agent-line status-${a.status}${quiet}"${open}>
       <span class="agent-avatar" aria-hidden="true">${initialOf(a.name)}</span>
       <span class="agent-line-main"><strong>${esc(a.name)}</strong><span>${esc(line)}</span></span>
       <span class="aw-pill"><span class="dot"></span>${esc(a.statusLabel)}</span>
     </button>`;
   }
-  out.runningLinesHtml =
-    out.agents.filter((a) => a.status === "active").map(agentLine).join("") ||
-    `<p class="home-empty">No agent has logged work in the last 2 hours.</p>`;
-  out.latestLinesHtml = out.agents.map(agentLine).join("");
+  out.rosterHtml = out.agents.map(agentLine).join("");
 
   out.agentsHtml = `<div class="agent-list">${out.agents
     .map((a) => {
@@ -2451,7 +2449,7 @@ function buildDigest({ events, pulls, commits, needs, done }) {
   const needsHtml = blocked.length
     ? `<h4>Needs you</h4><ul class="dg-list">${blocked
         .slice(0, 4)
-        .map((j) => `<li><button type="button" class="dg-row home-tap" data-goto-agents="needs" data-task="${esc(j.key || "")}"><span class="task-ico st-blocked">${STATUS_ICON.blocked}</span><span class="dg-main">${esc(clip(j.title, 60))}<span class="dg-sub">${esc(canonicalAgent(j.who) || j.who || "")} · ${esc(fmtTime(j.at))}</span></span></button></li>`)
+        .map((j) => `<li><button type="button" class="dg-row home-tap" data-scroll-to="cc-needs"><span class="task-ico st-blocked">${STATUS_ICON.blocked}</span><span class="dg-main">${esc(clip(j.title, 60))}<span class="dg-sub">${esc(canonicalAgent(j.who) || j.who || "")} · ${esc(fmtTime(j.at))}</span></span></button></li>`)
         .join("")}</ul>`
     : "";
   return `<section class="digest" aria-label="Since you last looked">
@@ -2613,7 +2611,7 @@ async function loadHome() {
   // Stats stay on Home and scroll to the section. Full triage is still on Agents.
   const stats = [
     ["Needs you", needs.length, "cc-needs", needs.length ? "alert" : ""],
-    ["Running now", running, "cc-running", running ? "live" : ""],
+    ["Running now", running, "cc-roster", running ? "live" : ""],
     ["To-dos", todos.length, "cc-todos", ""],
   ]
     .map(
@@ -2637,15 +2635,11 @@ async function loadHome() {
       <div class="cc-head"><h2>Needs you</h2><span class="cc-src">${needs.length} open</span></div>
       ${needsBlock}
     </section>
-    <section class="home-section cc-panel" id="cc-running">
-      <div class="cc-head"><h2>Running</h2><span class="cc-src">${running} active</span></div>
-      <div class="agent-lines">${cc.runningLinesHtml || ""}</div>
-    </section>
-    <section class="home-section cc-panel" id="cc-latest">
-      <div class="cc-head"><h2>Latest</h2><span class="cc-src">one line each</span></div>
-      <div class="agent-lines">${cc.latestLinesHtml || ""}</div>
-    </section>
     ${cc.digestHtml || ""}
+    <section class="home-section cc-panel" id="cc-roster">
+      <div class="cc-head"><h2>Agents</h2><span class="cc-src">${running ? `${running} running` : "all quiet"}</span></div>
+      <div class="agent-lines">${cc.rosterHtml || ""}</div>
+    </section>
     <section class="home-section cc-panel" id="cc-todos">
       <div class="cc-head"><h2>To-dos</h2><span class="cc-src">${todos.length} open</span></div>
       <div class="home-cards">${todoHtml}</div>
