@@ -75,12 +75,23 @@ if (/host host-\$\{h\.key\} home-tap" data-open-agent/.test(app) || /data-open-a
   fail("computer cards still open agent DMs");
 } else if (app.includes('data-open-agent="${esc(agent)}" aria-label="${esc(h.name)}')) {
   fail("computer cards still open agent DMs");
-} else ok("computer cards are status-only");
+} else ok("computer cards do not open agent DMs");
 
 // Feed summary must not hijack navigation
 if (/summary class="home-tap"\$\{openAttr\}/.test(app) || /summary class="home-tap" data-open-/.test(app)) {
   fail("feed summary still hijacks taps");
 } else ok("feed expands normally");
+
+
+// Computers cards must open a useful host sheet (not status-only dead tiles)
+if (!app.includes("data-open-host") || !app.includes("function openHostSheet")) {
+  fail("Computers cards missing openHostSheet / data-open-host");
+} else ok("Computers cards open a detail sheet");
+if (!html.includes('id="host-sheet"')) fail("index missing host-sheet");
+else ok("host-sheet markup present");
+if (/chat-sheet-open\s+\.tabbar\s*\{[^}]*pointer-events:\s*none/s.test(css) === false) {
+  // keep prior tab bar checks; no-op here
+}
 
 // Required shell assets
 for (const f of ["favicon.svg", "icon-180.png", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "manifest.webmanifest"]) {

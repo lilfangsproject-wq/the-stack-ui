@@ -2717,6 +2717,7 @@ html, body {
 /* v31.5 — home taps only where the destination is obvious */
 .home-tap,
 .agent-window[data-open-agent],
+.host[data-open-host],
 .home-todo[data-open-list],
 button.dg-row,
 a.dg-row {
@@ -2763,3 +2764,134 @@ a.dg-row:focus-visible,
   gap: 0.4rem;
   margin-top: 0.45rem;
 }
+
+/* v31.8 — Computers cards open a detail sheet */
+button.host {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+  margin: 0;
+  min-height: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+button.host:active {
+  transform: scale(0.985);
+}
+button.host:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+.host-sheet {
+  position: fixed;
+  left: 0.6rem;
+  right: 0.6rem;
+  bottom: calc(var(--tabbar-h) + 0.7rem + var(--safe-bottom));
+  top: auto;
+  max-height: min(72dvh, 36rem);
+  z-index: 30;
+  display: none;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.55rem 0.75rem 0.85rem;
+  border-radius: 22px;
+  background: linear-gradient(160deg, rgba(42, 44, 48, 0.92), rgba(18, 19, 22, 0.94));
+  border: 0.5px solid var(--line);
+  box-shadow: var(--rim), var(--shadow-float);
+  -webkit-backdrop-filter: blur(36px) saturate(160%);
+  backdrop-filter: blur(36px) saturate(160%);
+  overflow: hidden;
+}
+.host-sheet.open,
+.host-sheet:not([hidden]) {
+  display: flex;
+}
+.host-sheet[hidden] { display: none !important; }
+.host-sheet-head {
+  padding: 0.15rem 0 0.35rem;
+  gap: 0.45rem;
+  align-items: center;
+}
+.host-sheet-head .aw-pill { margin-left: auto; flex: 0 0 auto; }
+.host-sheet-body {
+  overflow: auto;
+  min-height: 0;
+  display: grid;
+  gap: 0.75rem;
+  padding-right: 0.1rem;
+}
+.host-sheet-lead {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--text) 88%, transparent);
+}
+.host-facts {
+  margin: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+.host-facts > div {
+  display: grid;
+  grid-template-columns: 6.2rem 1fr;
+  gap: 0.45rem;
+  align-items: baseline;
+  padding: 0.35rem 0.45rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.host-facts dt {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 650;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.host-facts dd {
+  margin: 0;
+  font-size: 0.84rem;
+  word-break: break-word;
+}
+.host-mentions h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: 650;
+}
+.host-mentions ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+.host-mentions li {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.host-mentions li strong { font-size: 0.78rem; }
+.host-mentions li span { font-size: 0.78rem; color: color-mix(in srgb, var(--text) 80%, transparent); }
+.host-mentions time { font-size: 0.68rem; color: var(--muted); }
+.host-sheet-actions {
+  display: grid;
+  gap: 0.4rem;
+}
+.host-sheet-actions .act {
+  width: 100%;
+  justify-content: center;
+  min-height: 2.5rem;
+}
+@media (min-width: 721px) {
+  .host-sheet {
+    left: auto;
+    right: 1.25rem;
+    width: min(26rem, calc(100vw - 18rem));
+    bottom: 1.25rem;
+  }
+}
+

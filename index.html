@@ -22,7 +22,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>our app · zero spend · <span data-stack-version>v31.7</span></small>
+          <small>our app · zero spend · <span data-stack-version>v31.8</span></small>
         </div>
       </div>
       <p id="boot-status">Connecting…</p>
@@ -45,7 +45,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>agent command centre · <span data-stack-version>v31.7</span></small>
+          <small>agent command centre · <span data-stack-version>v31.8</span></small>
         </div>
       </div>
       <div class="live-pill" id="live-pill" title="Hub connection">
@@ -183,6 +183,19 @@
         <input name="c3" placeholder="Notes" />
         <button type="submit">Add row</button>
       </form>
+    </aside>
+
+    <aside class="host-sheet" id="host-sheet" hidden>
+      <header class="main-head host-sheet-head">
+        <button type="button" id="host-sheet-close" class="icon-btn" aria-label="Close">‹</button>
+        <div class="main-head-text">
+          <h1 id="host-sheet-title">Computer</h1>
+          <p class="purpose" id="host-sheet-sub">Status</p>
+        </div>
+        <span class="aw-pill" id="host-sheet-pill"><span class="dot"></span>—</span>
+      </header>
+      <section class="host-sheet-body" id="host-sheet-body"></section>
+      <footer class="host-sheet-actions" id="host-sheet-actions"></footer>
     </aside>
     <nav class="tabbar" id="tabbar" aria-label="Sections">
       <button type="button" data-tab="home" class="active"><span class="tab-ico" aria-hidden="true">⌂</span><span>Home</span></button>
