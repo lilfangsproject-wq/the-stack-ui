@@ -4,6 +4,8 @@ const state = {
   channelSlug: "the-digest",
   listId: null,
   threadParentId: null,
+  /** Where Back / pull-down should land after a phone chat sheet. */
+  chatReturnTo: "chats",
   pollTimer: null,
   hostLabel: "local",
   pocketMode: false,
@@ -294,7 +296,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v31.5";
+const STACK_VERSION = "v31.6";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
@@ -760,20 +762,25 @@ function showChatsInbox() {
   if (typeof setActiveTab === "function") setActiveTab("chats");
 }
 
+function rememberChatReturn() {
+  const v = state.view;
+  state.chatReturnTo = v === "home" || v === "agents" || v === "notes" || v === "chats" ? v : "chats";
+}
+
 function openChatSheet() {
   const chat = document.getElementById("chat-pane");
   if (!chat) return;
   if (isPhoneShell()) {
-    // Keep inbox underneath so dismiss reveals it (iOS Messages feel).
-    document.getElementById("chats-pane")?.classList.remove("hidden");
-    document.getElementById("home-pane")?.classList.add("hidden");
-    document.getElementById("agents-pane")?.classList.add("hidden");
-    document.getElementById("notes-pane")?.classList.add("hidden");
+    // Underlay matches where Back should land (Home stays under if you opened from Home).
+    const under = state.chatReturnTo || "chats";
+    document.getElementById("chats-pane")?.classList.toggle("hidden", under !== "chats");
+    document.getElementById("home-pane")?.classList.toggle("hidden", under !== "home");
+    document.getElementById("agents-pane")?.classList.toggle("hidden", under !== "agents");
+    document.getElementById("notes-pane")?.classList.toggle("hidden", under !== "notes");
     const already = chat.classList.contains("sheet-open") && !chat.classList.contains("hidden");
     chat.classList.remove("hidden", "sheet-exiting", "sheet-dragging");
     chat.style.removeProperty("transform");
     if (!already) {
-      // Start off-screen, then spring up on the next frame.
       chat.classList.remove("sheet-open");
       void chat.offsetWidth;
       requestAnimationFrame(() => chat.classList.add("sheet-open"));
@@ -789,9 +796,10 @@ function openChatSheet() {
   }
 }
 
-function closeChatSheet({ to = "chats" } = {}) {
+function closeChatSheet({ to } = {}) {
   const chat = document.getElementById("chat-pane");
   if (!chat) return;
+  const dest = to || state.chatReturnTo || "chats";
   state.threadParentId = null;
   document.getElementById("thread")?.classList.add("hidden");
 
@@ -799,7 +807,7 @@ function closeChatSheet({ to = "chats" } = {}) {
     chat.classList.remove("sheet-open", "sheet-dragging", "sheet-exiting");
     chat.style.removeProperty("transform");
     document.getElementById("shell")?.classList.remove("chat-sheet-open");
-    showView(to === "channel" ? "chats" : to);
+    showView(dest === "channel" ? "chats" : dest);
     return;
   }
 
@@ -807,7 +815,6 @@ function closeChatSheet({ to = "chats" } = {}) {
   chat.classList.add("sheet-exiting");
   chat.classList.remove("sheet-open", "sheet-dragging");
   chat.style.removeProperty("transform");
-  // Freeze scroll so flings don't keep moving messages under the exit.
   const box = document.getElementById("messages");
   if (box) box.style.overflow = "hidden";
 
@@ -820,10 +827,9 @@ function closeChatSheet({ to = "chats" } = {}) {
     chat.style.removeProperty("transform");
     if (box) box.style.overflow = "";
     document.getElementById("shell")?.classList.remove("chat-sheet-open");
-    state.view = to === "channel" ? "chats" : to;
-    if (to === "home") showView("home");
-    else if (to === "agents") showView("agents");
-    else if (to === "notes") showView("notes");
+    if (dest === "home") showView("home");
+    else if (dest === "agents") showView("agents");
+    else if (dest === "notes") showView("notes");
     else showChatsInbox();
   };
   chat.addEventListener("transitionend", finish, { once: true });
@@ -848,12 +854,13 @@ function setupChatSheetGestures() {
     if (document.getElementById("thread") && !document.getElementById("thread").classList.contains("hidden")) {
       return false;
     }
-    const inGrab =
-      target.closest(".sheet-grabber") ||
-      target.closest(".main-head") ||
-      target.closest("#session-strip");
-    const atTop = box && box.scrollTop <= 1;
-    if (!inGrab && !atTop) return false;
+    // Only the grabber / header — never the message list (that fights scroll).
+    const inGrab = target.closest(".sheet-grabber, .main-head, .chat-back");
+    if (!inGrab) return false;
+    if (target.closest("button, a, input, textarea, select, label")) {
+      // Let real controls (Back, Lists) win; grabber + title area still dismiss.
+      if (!target.closest(".sheet-grabber, .main-head-text, h1, .purpose")) return false;
+    }
     startY = y;
     startX = x;
     dy = 0;
@@ -871,15 +878,9 @@ function setupChatSheetGestures() {
         armed = false;
         return;
       }
-      if (rawY < 8) return;
-      // Only claim the gesture once it's clearly a downward pull.
-      if (box && box.scrollTop > 1) {
-        armed = false;
-        return;
-      }
+      if (rawY < 10) return;
       dragging = true;
       chat.classList.add("sheet-dragging");
-      if (box) box.style.overflow = "hidden";
     }
     dy = Math.max(0, rawY);
     const resist = Math.min(dy, 420);
@@ -893,9 +894,8 @@ function setupChatSheetGestures() {
     if (!dragging) return;
     dragging = false;
     chat.classList.remove("sheet-dragging");
-    if (box) box.style.overflow = "";
     if (dy > 110) {
-      closeChatSheet({ to: "chats" });
+      closeChatSheet();
     } else {
       chat.style.removeProperty("transform");
     }
@@ -923,6 +923,8 @@ function setupChatSheetGestures() {
 }
 
 function showView(view) {
+  // Capture where chat should return before we overwrite state.view.
+  if (view === "channel" && state.view !== "channel") rememberChatReturn();
   state.view = view;
   const agentsPane = document.getElementById("agents-pane");
   const notesPane = document.getElementById("notes-pane");
@@ -988,7 +990,7 @@ function showView(view) {
       }
     });
   } else {
-    // channel
+    // channel — rememberChatReturn() must be called by the opener before showView.
     try {
       localStorage.setItem(LAST_CHAT_KEY, state.channelSlug);
     } catch {
@@ -2976,7 +2978,7 @@ document.getElementById("chats-inbox")?.addEventListener("click", (e) => {
 });
 document.getElementById("chats-new")?.addEventListener("click", () => setRailOpen(true));
 document.getElementById("chat-back")?.addEventListener("click", () => {
-  closeChatSheet({ to: "chats" });
+  closeChatSheet(); // returns to wherever you opened the chat from
 });
 setupChatSheetGestures();
 
