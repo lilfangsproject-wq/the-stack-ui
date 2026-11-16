@@ -296,7 +296,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v31.6";
+const STACK_VERSION = "v31.7";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
@@ -507,7 +507,16 @@ function fmtTimeFull(iso) {
 }
 
 function initialOf(name) {
-  return esc(String(name || "?").trim().charAt(0).toUpperCase() || "?");
+  // v31.7: two-letter tag instead of one char — "Claude"/"Cursor"/"ChatGPT"/"Cursor-Cloud"
+  // all started with "C" and were indistinguishable at a glance. "#channel" keeps its "#".
+  const n = String(name || "?").trim();
+  if (!n) return "?";
+  if (n[0] === "#") return "#";
+  const parts = n.split(/[\s\-_]+/).filter(Boolean);
+  if (parts.length >= 2) return esc((parts[0][0] + parts[1][0]).toUpperCase());
+  const w = parts[0] || n;
+  if (w.length <= 1) return esc(w.toUpperCase());
+  return esc(w[0].toUpperCase() + w[1].toLowerCase());
 }
 
 function channelLabel(slug, kind) {
