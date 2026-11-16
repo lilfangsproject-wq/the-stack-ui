@@ -56,7 +56,9 @@ function friendlyError(err) {
 }
 
 const READS_KEY = "stack-reads-v1";
-const LOOK_KEY = "stack-look-v1";
+// v2 key: only an accent the person actually tapped is remembered (v1 also saved the default on every
+// load, which pinned old defaults like Lime after the default changed to Iridescent).
+const LOOK_KEY = "stack-look-v2";
 const QUICK_REACTIONS = ["👍", "👀", "✅", "❤️", "🔥"];
 
 /** Phone-steerable accents on the dark Liquid Glass theme — tap Look in the menu. Lime is the default. */
@@ -80,7 +82,7 @@ const LOOKS = {
 };
 const LOOK_DEFAULT = "iris";
 
-function applyLook(id) {
+function applyLook(id, remember = false) {
   const look = LOOKS[id] || LOOKS[LOOK_DEFAULT];
   const root = document.documentElement;
   root.style.setProperty("--accent", look.accent);
@@ -91,12 +93,14 @@ function applyLook(id) {
   root.toggleAttribute("data-iris", Boolean(look.grad));
   root.style.setProperty("--accent-glow", look.soft.replace(/0\.1\d\)/, "0.35)"));
   root.dataset.look = LOOKS[id] ? id : LOOK_DEFAULT;
-  try {
-    localStorage.setItem(LOOK_KEY, root.dataset.look);
-  } catch {
-    /* ignore */
+  if (remember) {
+    try {
+      localStorage.setItem(LOOK_KEY, root.dataset.look);
+      localStorage.removeItem("stack-look-v1");
+    } catch {
+      /* ignore */
+    }
   }
-  const theme = document.querySelector('meta[name="theme-color"]');
   /* theme-color comes from the light/dark meta tags in index.html */
   document.querySelectorAll("#look-picker .look-swatch").forEach((btn) => {
     const on = btn.dataset.look === root.dataset.look;
@@ -123,7 +127,7 @@ function initLookPicker() {
     host.addEventListener("click", (e) => {
       const btn = e.target.closest(".look-swatch");
       if (!btn) return;
-      applyLook(btn.dataset.look);
+      applyLook(btn.dataset.look, true);
     });
   }
   applyLook(saved);
@@ -290,7 +294,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v30.1";
+const STACK_VERSION = "v30.2";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
