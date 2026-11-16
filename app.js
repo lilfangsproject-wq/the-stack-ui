@@ -294,7 +294,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v31.1";
+const STACK_VERSION = "v31.2";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }

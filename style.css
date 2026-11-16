@@ -2404,3 +2404,119 @@ button.stat { font: inherit; text-align: left; border: 0; color: var(--text); cu
 .save-note { font: inherit; font-size: 0.78rem; font-weight: 600; color: var(--accent); background: var(--fill); border: 0; border-radius: 999px; padding: 0.3rem 0.7rem; min-height: 0; }
 .msg:not(.open) .save-note { display: none; }
 @media (max-width: 720px) { #toggle-lists { display: none; } }
+
+/* v31.2 — composer + tabbar polish (phone chat dock).
+ * Fixes: uneven + / field / Send heights, cramped gap above tabbar, heavy Send glow. */
+@media (max-width: 720px) {
+  :root { --composer-control-h: 2.55rem; }
+
+  #chat-pane {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  #chat-pane .messages {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 0.65rem 0.85rem 0.85rem;
+  }
+  #chat-pane .photo-tray {
+    padding: 0.35rem 0.85rem 0.15rem;
+  }
+
+  #chat-pane .composer {
+    position: relative;
+    z-index: 11;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0 0.75rem calc(var(--tabbar-h) + 0.95rem + var(--safe-bottom));
+    padding: 0.4rem;
+    border: 0;
+    border-radius: 22px;
+    background: linear-gradient(160deg, rgba(42, 44, 48, 0.78), rgba(18, 19, 22, 0.82));
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.12), var(--shadow-float);
+    -webkit-backdrop-filter: blur(36px) saturate(160%);
+    backdrop-filter: blur(36px) saturate(160%);
+  }
+
+  #chat-pane .attach-btn {
+    width: var(--composer-control-h);
+    height: var(--composer-control-h);
+    min-height: var(--composer-control-h);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+    font-size: 1.15rem;
+    font-weight: 600;
+  }
+
+  #chat-pane .composer textarea {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: var(--composer-control-h);
+    max-height: 7.5rem;
+    margin: 0;
+    padding: 0.62rem 0.9rem;
+    border: 0;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    line-height: 1.35;
+    resize: none;
+  }
+  #chat-pane .composer textarea:focus {
+    outline: none;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18), 0 0 0 3px rgba(205, 189, 255, 0.12);
+  }
+  #chat-pane .composer textarea::placeholder {
+    color: color-mix(in srgb, var(--muted) 88%, transparent);
+  }
+
+  #chat-pane .composer button[type="submit"] {
+    flex: 0 0 auto;
+    height: var(--composer-control-h);
+    min-height: var(--composer-control-h);
+    min-width: 4.4rem;
+    margin: 0;
+    padding: 0 1rem;
+    border: 0;
+    border-radius: 999px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    /* Quiet glass CTA — no purple under-glow */
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 1px 2px rgba(0, 0, 0, 0.25);
+  }
+  :root[data-iris] #chat-pane .composer button[type="submit"] {
+    animation: none;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 1px 2px rgba(0, 0, 0, 0.22);
+  }
+
+  /* Tab bar: quieter active state, same glass language as composer dock */
+  .tabbar {
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: calc(0.55rem + var(--safe-bottom));
+    background: linear-gradient(160deg, rgba(42, 44, 48, 0.78), rgba(18, 19, 22, 0.82));
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.12), var(--shadow-float);
+  }
+  .tabbar button.active {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  }
+  .tabbar button.active .tab-ico {
+    text-shadow: none;
+    color: var(--accent);
+  }
+  :root[data-iris] .tabbar button.active .tab-ico {
+    text-shadow: none;
+  }
+
+  .toast {
+    bottom: calc(var(--tabbar-h) + 4.6rem + var(--safe-bottom));
+  }
+}
