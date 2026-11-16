@@ -303,7 +303,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v31.7";
+const STACK_VERSION = "v31.8";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
@@ -760,7 +760,10 @@ function paintChatsInbox() {
 function showChatsInbox() {
   hideAllMains();
   const pane = document.getElementById("chats-pane");
-  if (pane) pane.classList.remove("hidden");
+  if (pane) {
+    pane.classList.remove("hidden");
+    flashPaneEnter(pane);
+  }
   document.getElementById("shell")?.classList.remove("chat-sheet-open");
   const chat = document.getElementById("chat-pane");
   chat?.classList.remove("sheet-open", "sheet-dragging", "sheet-exiting");
@@ -945,6 +948,13 @@ function setupChatSheetGestures() {
   chat.addEventListener("touchcancel", onEnd, { passive: true });
 }
 
+function flashPaneEnter(el) {
+  if (!el || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  el.classList.remove("pane-enter");
+  void el.offsetWidth;
+  el.classList.add("pane-enter");
+}
+
 function showView(view) {
   // Capture where chat should return before we overwrite state.view.
   if (view === "channel" && state.view !== "channel") rememberChatReturn();
@@ -960,6 +970,8 @@ function showView(view) {
     chatsPane?.classList.add("hidden");
     closeChatSheetImmediate();
     document.getElementById("lists-pane").classList.remove("open");
+    notesPane?.classList.remove("hidden");
+    flashPaneEnter(notesPane);
     if (typeof setActiveTab === "function") setActiveTab("notes");
     loadNotes().catch((err) => {
       document.getElementById("notes-list").innerHTML = `<p class="home-empty">${esc(friendlyError(err))}</p>`;
@@ -970,6 +982,7 @@ function showView(view) {
     document.getElementById("home-pane").classList.add("hidden");
     chatsPane?.classList.add("hidden");
     closeChatSheetImmediate();
+    flashPaneEnter(agentsPane);
     if (typeof setActiveTab === "function") setActiveTab("agents");
     loadAgentsView().catch((err) => {
       const b = document.getElementById("agents-body");
@@ -991,6 +1004,7 @@ function showView(view) {
   const homeNav = document.getElementById("home-nav");
   if (view === "home") {
     home.classList.remove("hidden");
+    flashPaneEnter(home);
     chatsPane?.classList.add("hidden");
     closeChatSheetImmediate();
     if (homeNav) homeNav.classList.add("active");
@@ -2317,10 +2331,11 @@ function openHostSheet(name) {
       <button type="button" class="act" data-host-act="chat">Chat about this PC</button>`;
   }
   el.dataset.hostName = row.name;
-  el.classList.remove("hidden");
+  el.classList.remove("hidden", "host-sheet-open");
   el.removeAttribute("hidden");
-  requestAnimationFrame(() => el.classList.add("host-sheet-open"));
   document.getElementById("shell")?.classList.add("host-sheet-open");
+  void el.offsetWidth;
+  requestAnimationFrame(() => el.classList.add("host-sheet-open"));
 }
 
 async function onHostSheetClick(e) {
@@ -3174,6 +3189,64 @@ document.getElementById("chat-back")?.addEventListener("click", () => {
   closeChatSheet(); // returns to wherever you opened the chat from
 });
 setupChatSheetGestures();
+
+/* iOS PWA: pin chat sheet to visualViewport so the keyboard doesn't eat the thread. */
+function setupKeyboardChrome() {
+  const root = document.documentElement;
+  const author = document.getElementById("author");
+  if (author) {
+    author.tabIndex = -1;
+    if (isPhoneShell()) {
+      // Keep value for send payload, but out of iOS prev/next field chrome.
+      author.setAttribute("readonly", "");
+      author.setAttribute("aria-hidden", "true");
+    }
+  }
+  const sync = () => {
+    const vv = window.visualViewport;
+    const layoutH = window.innerHeight || document.documentElement.clientHeight || 0;
+    if (!vv) {
+      root.style.setProperty("--vvh", `${layoutH}px`);
+      root.style.setProperty("--vv-top", "0px");
+      root.style.setProperty("--kb", "0px");
+      document.body.classList.remove("kb-open");
+      document.getElementById("shell")?.classList.remove("kb-open");
+      return;
+    }
+    const kb = Math.max(0, layoutH - vv.height - vv.offsetTop);
+    root.style.setProperty("--vvh", `${Math.round(vv.height)}px`);
+    root.style.setProperty("--vv-top", `${Math.round(vv.offsetTop)}px`);
+    root.style.setProperty("--kb", `${Math.round(kb)}px`);
+    const open = kb > 72;
+    document.body.classList.toggle("kb-open", open);
+    document.getElementById("shell")?.classList.toggle("kb-open", open);
+    if (open && state.view === "channel") {
+      const box = document.getElementById("messages");
+      if (box) {
+        requestAnimationFrame(() => {
+          box.scrollTop = box.scrollHeight;
+        });
+      }
+    }
+  };
+  sync();
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", sync);
+    window.visualViewport.addEventListener("scroll", sync);
+  }
+  window.addEventListener("resize", sync);
+  const body = document.getElementById("body");
+  body?.addEventListener("focus", () => {
+    setTimeout(sync, 50);
+    setTimeout(() => {
+      const box = document.getElementById("messages");
+      if (box) box.scrollTop = box.scrollHeight;
+    }, 120);
+  });
+  body?.addEventListener("blur", () => setTimeout(sync, 80));
+}
+
+setupKeyboardChrome();
 
 /* Keep sheet layout when rotating in/out of the phone media query. */
 (function bindPhoneShellResize() {
