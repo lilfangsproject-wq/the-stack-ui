@@ -290,6 +290,10 @@ function showCloudConnect(errMsg) {
   }
 }
 
+const STACK_VERSION = "v30.1";
+function paintVersion() {
+  document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
+}
 async function bootCloud() {
   const bootEl = document.getElementById("boot");
   const status = document.getElementById("boot-status");
@@ -302,8 +306,10 @@ async function bootCloud() {
     ghState.token = ghSanitizeToken(ghState.token);
     if (typeof ghSaveCreds === "function") ghSaveCreds();
   }
+  paintVersion();
   if (!ghState.token) {
     showCloudConnect();
+    paintVersion();
     return false;
   }
   status.textContent = "Connecting to GitHub hub…";

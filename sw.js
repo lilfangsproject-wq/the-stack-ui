@@ -4,7 +4,7 @@
  * Data: caches static assets only — no hub schema; hub via GitHub API in page JS.
  * User: cloud access UI hub — no Mac / same Wi‑Fi required.
  */
-const CACHE = "the-stack-shell-v30-home-chats";
+const CACHE = "the-stack-shell-v30-1";
 const SHELL = [
   "./index.html",
   "./cloud.html",
@@ -53,8 +53,10 @@ self.addEventListener("fetch", (event) => {
   // Never cache GitHub API or local /api — cloud mode uses api.github.com (other origin).
   if (url.pathname.includes("/api/")) return;
 
+  // v30.1: always revalidate with the server (Pages lets browsers cache 10 min), so a new release
+  // shows up on the next open instead of up to 10 minutes later. Offline still falls back to the cache.
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, { cache: "no-cache" })
       .then((res) => {
         if (res.ok && event.request.method === "GET") {
           const copy = res.clone();
