@@ -382,6 +382,30 @@ async function ghSavePushSubscription(sub, who = "Seth") {
   );
 }
 
+/* v27: job dismissals shared across devices (Approve writes here; Snooze stays per-phone). */
+async function ghLoadJobState() {
+  const data = await ghReadJson("jobs.json", { dismissed: {} });
+  return data && data.dismissed ? data : { dismissed: {} };
+}
+async function ghDismissJob(key, info) {
+  return ghPutFile(
+    "jobs.json",
+    async (existing) => {
+      let data = { dismissed: {} };
+      try {
+        if (existing.text) data = JSON.parse(existing.text);
+      } catch {
+        /* rebuild */
+      }
+      data.note = "Jobs Seth approved/dismissed in The Stack. Keys: pr-<n> or ev-<agent>-<iso time>.";
+      data.dismissed = data.dismissed || {};
+      data.dismissed[key] = { ...info, at: new Date().toISOString() };
+      return JSON.stringify(data, null, 2) + "\n";
+    },
+    `stack: job ${info && info.action ? info.action : "dismissed"}`
+  );
+}
+
 async function ghLoadAgentPrefs() {
   const data = await ghReadJson("agents.json", { agents: {} });
   return data && data.agents ? data : { agents: {} };

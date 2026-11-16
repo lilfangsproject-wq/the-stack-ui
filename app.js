@@ -707,15 +707,17 @@ async function loadCommandCentre() {
   let pulls = null;
   let heartbeats = [];
   if (cloud) {
-    const [mem, com, pref, prs, hb] = await Promise.allSettled([
+    const [mem, com, pref, prs, hb, js] = await Promise.allSettled([
       ghSharedMemory(),
       ghRecentCommits(20),
       ghLoadAgentPrefs(),
       ghRecentPulls(15),
       typeof ghHostHeartbeats === "function" ? ghHostHeartbeats() : Promise.resolve([]),
+      typeof ghLoadJobState === "function" ? ghLoadJobState() : Promise.resolve({ dismissed: {} }),
     ]);
     if (prs.status === "fulfilled") pulls = prs.value;
     if (hb.status === "fulfilled") heartbeats = hb.value;
+    state.dismissedJobs = js.status === "fulfilled" ? js.value.dismissed || {} : {};
     out.pullsSource = prs.status === "fulfilled" ? "pull requests" : "merge commits";
     if (mem.status === "fulfilled") events = mem.value;
     if (com.status === "fulfilled") commits = com.value;
@@ -807,7 +809,10 @@ async function loadCommandCentre() {
           kind: /^Merge pull request/i.test(first) ? "Merged" : "Commit",
           who: c.author || "git",
           at: c.at,
-          title: clip(first.replace(/^Merge pull request (#\d+) from [^/]+\//i, "PR $1 · "), 80),
+          title: clip(
+            first.replace(/^Merge pull request (#\d+) from [^/]+\/(?:[a-z]+\/)?(.+?)(?:-\d{8}.*)?$/i, (_, n, b) => `PR ${n} merged · ${b.replace(/[-_]+/g, " ")}`),
+            80
+          ),
           text: rest.join(" ").replace(/Co-authored-by:.*$/gim, "").trim(),
           url: c.url,
         };
@@ -904,30 +909,39 @@ function buildJobs({ events, commits, pulls, agents, cloud }) {
   const needs = [];
   const running = [];
   const done = [];
-  const seenBlockedAgent = new Set();
-  // Newest first so only each agent's latest blocker shows.
+  // v27: an agent "needs you" only if its LATEST entry asks for Seth. Finished results count only
+  // if they shout BLOCKED. Anything Seth approved (hub jobs.json) is gone on every device.
   const evs = [...(events || [])].sort((x, y) => String(y.at).localeCompare(String(x.at)));
+  const latestByAgent = {};
+  for (const ev of evs) {
+    const who = canonicalAgent(ev.agent) || ev.agent;
+    if (!latestByAgent[who]) latestByAgent[who] = ev;
+  }
+  const dismissed = state.dismissedJobs || {};
   for (const ev of evs) {
     const who = canonicalAgent(ev.agent) || ev.agent;
     const title = String(ev.id || "").replace(/-\d{8}$/, "").replace(/[-_]+/g, " ");
-    if (within(ev.at, 72 * 3600000) && NEEDS_SETH_RE.test(ev.text || "") && !seenBlockedAgent.has(who)) {
-      seenBlockedAgent.add(who);
-      needs.push({ status: "blocked", title, text: ev.text, who, at: ev.at });
+    const text = ev.text || "";
+    const asks = NEEDS_SETH_RE.test(text) && (ev.kind !== "result" || /\bBLOCKED\b/.test(text));
+    const key = `ev-${who}-${String(ev.at)}`;
+    if (latestByAgent[who] === ev && asks && within(ev.at, 72 * 3600000) && !dismissed[key]) {
+      needs.push({ status: "blocked", title, text, who, at: ev.at });
     } else if (ev.kind === "result" && within(ev.at, 24 * 3600000)) {
-      done.push({ status: "done", title, text: ev.text, who, at: ev.at });
+      done.push({ status: "done", title, text, who, at: ev.at });
     }
   }
   if (Array.isArray(pulls)) {
     for (const p of pulls) {
       const job = { status: p.draft ? "draft" : p.state, number: p.number, title: p.title, who: p.author, branch: p.branch, at: p.at, url: p.url };
-      if (p.state === "open") needs.unshift({ ...job, text: p.draft ? "Draft PR" : "Waiting for review / merge" });
+      if (p.state === "open" && !dismissed[`pr-${p.number}`]) needs.unshift({ ...job, text: p.draft ? "Draft PR" : "Waiting for review / merge" });
       else if (p.state === "merged" && within(p.at, 48 * 3600000)) done.push(job);
     }
   } else {
     for (const c of commits || []) {
       const m = /^Merge pull request #(\d+) from [^/]+\/(\S+)/.exec(c.message || "");
       if (m && within(c.at, 48 * 3600000)) {
-        const title = String(c.message).split("\n").slice(1).join(" ").trim() || m[2];
+        const human = m[2].replace(/^[a-z]+\//, "").replace(/-\d{8}.*$/, "").replace(/[-_]+/g, " ");
+        const title = String(c.message).split("\n").slice(1).join(" ").trim() || human;
         done.push({ status: "merged", number: Number(m[1]), title, who: c.author, branch: m[2], at: c.at, url: c.url });
       }
     }
@@ -1132,6 +1146,21 @@ function toast(msg, kind = "") {
 }
 
 document.getElementById("home-body")?.addEventListener("click", async (e) => {
+  const homeTick = e.target.closest(".home-todo .tick[data-row]");
+  if (homeTick) {
+    homeTick.disabled = true;
+    homeTick.closest(".home-todo")?.classList.add("ticked");
+    try {
+      await ghSetRowStatus(homeTick.dataset.list, homeTick.dataset.row, "done");
+      toast("Ticked off");
+      setTimeout(() => loadHome().catch(() => {}), 350);
+    } catch (err) {
+      homeTick.disabled = false;
+      homeTick.closest(".home-todo")?.classList.remove("ticked");
+      toast(friendlyError(err), "err");
+    }
+    return;
+  }
   if (e.target.closest("[data-unsnooze]")) {
     saveSnoozes({});
     loadHome().catch(() => {});
@@ -1187,6 +1216,11 @@ document.getElementById("home-body")?.addEventListener("click", async (e) => {
       const map = loadSnoozes();
       map[j.key] = Date.now() + 7 * 24 * 3600 * 1000;
       saveSnoozes(map);
+      try {
+        await ghDismissJob(j.key, { action: "approved", title: j.title, agent, by: currentViewer() });
+      } catch {
+        /* local snooze still hides it on this phone */
+      }
       toast(`Approved — sent to ${agent}`);
     } else if (act === "merge") {
       if (!window.confirm(`Merge PR #${j.number} into main?\n\n${j.title}`)) {
@@ -1213,9 +1247,16 @@ document.getElementById("home-body")?.addEventListener("click", async (e) => {
 
 /* Hosts: heartbeat branch first, shared memory as fallback. */
 const HOSTS = [
-  { name: "Windows PC", role: "Always-on host", ids: ["desktop-kg22uf0", "windows", "win"], match: /DESKTOP-KG22UF0|\bWindows\b/i },
-  { name: "Mac", role: "MacBook (advisor)", ids: ["mac", "macbook", "seths-macbook"], match: /\bMac(Book)?\b/ },
+  { name: "Windows PC", role: "Always-on host", ids: ["desktop-kg22uf0", "windows", "win"], match: /DESKTOP-KG22UF0|\bWindows (PC|host|DC|box|machine)\b/i },
+  { name: "Mac", role: "MacBook (advisor)", ids: ["mac", "macbook", "seths-macbook"], match: /\bMacBook\b|\bMac (asleep|sleep|awake|wake|offline|online|not listed|DC|host)\b|\bwake Mac\b/i },
 ];
+function hostClause(ev, re) {
+  // Pull just the fragment about this PC out of a longer shared-memory line.
+  const parts = String(ev.text || "").split(/[;.]\s+|\s—\s/);
+  const hit = parts.find((p) => re.test(p)) || ev.text || "";
+  const who = canonicalAgent(ev.agent) || ev.agent || "";
+  return `${who ? who + ": " : ""}${clip(hit, 90)}`;
+}
 function buildHosts(heartbeats, events, cloud) {
   const now = Date.now();
   const rows = HOSTS.map((h) => {
@@ -1237,7 +1278,7 @@ function buildHosts(heartbeats, events, cloud) {
       key: "unknown",
       label: "No heartbeat",
       at: ev ? ev.at : "",
-      detail: ev ? `Last mentioned: ${clip(ev.text, 110)}` : "Nothing reported yet.",
+      detail: ev ? hostClause(ev, h.match) : "Nothing reported yet.",
       source: "memory",
     };
   });
@@ -1398,7 +1439,7 @@ async function loadHome() {
         .map(
           (t) => `
       <div class="home-todo">
-        <span class="status">${esc(t.status || "open")}</span>
+        <button type="button" class="tick" data-list="${esc(t.list_id || "")}" data-row="${esc(t.row_id || "")}" aria-label="Mark done: ${esc(t.item || "")}"></button>
         <div>
           <div>${esc(t.item || "(untitled)")}</div>
           <div class="owner">${esc(t.list || "")}${t.owner ? " · " + esc(t.owner) : ""}</div>

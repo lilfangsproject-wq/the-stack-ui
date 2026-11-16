@@ -2095,3 +2095,14 @@ body {
 .rail .new-channel input { flex: 1 1 auto; min-width: 0; width: auto; }
 .rail .new-channel button { flex: 0 0 auto; width: 2.75rem; height: 2.75rem; border-radius: 50%; padding: 0; }
 .rail { overflow-x: hidden; }
+/* v27 polish */
+.home-empty code, .host-detail code { word-break: break-all; }
+.link-btn { font-weight: 600; color: var(--accent); }
+.home-todo { grid-template-columns: auto 1fr auto; align-items: center; }
+.home-todo .tick {
+  width: 1.6rem; height: 1.6rem; min-height: 0; padding: 0;
+  border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.35);
+  background: transparent;
+}
+.home-todo.ticked { opacity: 0.45; }
+.home-todo.ticked .tick { background: var(--accent); border-color: var(--accent); }
