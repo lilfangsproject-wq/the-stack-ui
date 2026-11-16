@@ -13,6 +13,9 @@ const state = {
   deferredInstall: null,
   channels: [],
   unreads: {},
+  /** Last rendered Computers cards keyed by id (mac / windows). */
+  hostCards: {},
+  openHostId: null,
 };
 
 // Older iOS Safari: avoid raw TypeError: x is not a function.
@@ -296,7 +299,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v31.7";
+const STACK_VERSION = "v31.8";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
@@ -1651,6 +1654,13 @@ async function onJobsClick(e) {
     return;
   }
 
+  const openHost = e.target.closest("[data-open-host]");
+  if (openHost && !e.target.closest("[data-stop-nav]")) {
+    e.preventDefault();
+    openHostSheet(openHost.dataset.openHost);
+    return;
+  }
+
   const openAgent = e.target.closest("[data-open-agent]");
   if (openAgent && !e.target.closest("[data-stop-nav], .model-pick, select")) {
     e.preventDefault();
@@ -2139,10 +2149,27 @@ document.getElementById("notes-list")?.addEventListener("click", async (e) => {
   }
 });
 
-/* Hosts: heartbeat branch first, shared memory as fallback. */
+/* Hosts: heartbeat branch first, shared memory as fallback.
+ * v31.8: tap a computer → detail sheet (install cmd, Tailscale, mentions, refresh). */
 const HOSTS = [
-  { name: "Windows PC", role: "Always-on host", ids: ["desktop-kg22uf0", "windows", "win"], match: /DESKTOP-KG22UF0|\bWindows (PC|host|DC|box|machine)\b/i },
-  { name: "Mac", role: "MacBook (advisor)", ids: ["mac", "macbook", "seths-macbook"], match: /\bMacBook\b|\bMac (asleep|sleep|awake|wake|offline|online|not listed|DC|host)\b|\bwake Mac\b/i },
+  {
+    id: "windows",
+    name: "Windows PC",
+    role: "Always-on host",
+    ids: ["desktop-kg22uf0", "windows", "win"],
+    match: /DESKTOP-KG22UF0|\bWindows (PC|host|DC|box|machine)\b/i,
+    install: "powershell -ExecutionPolicy Bypass -File Projects\\The-Stack\\heartbeat\\install-windows.ps1",
+    runs: "Desktop Commander · Hermes · Ollama line-bridge",
+  },
+  {
+    id: "mac",
+    name: "Mac",
+    role: "MacBook (advisor)",
+    ids: ["mac", "macbook", "seths-macbook"],
+    match: /\bMacBook\b|\bMac (asleep|sleep|awake|wake|offline|online|not listed|DC|host)\b|\bwake Mac\b/i,
+    install: "bash Projects/The-Stack/heartbeat/install-mac.sh",
+    runs: "Cursor · Claude CLI · Wispr · Obsidian vault",
+  },
 ];
 function hostClause(ev, re) {
   // Pull just the fragment about this PC out of a longer shared-memory line.
@@ -2151,35 +2178,65 @@ function hostClause(ev, re) {
   const who = canonicalAgent(ev.agent) || ev.agent || "";
   return `${who ? who + ": " : ""}${clip(hit, 90)}`;
 }
+function hostMentions(events, re, limit = 3) {
+  return [...(events || [])]
+    .filter((x) => re.test(x.text || ""))
+    .sort((x, y) => String(y.at).localeCompare(String(x.at)))
+    .slice(0, limit)
+    .map((ev) => ({
+      at: ev.at || "",
+      agent: canonicalAgent(ev.agent) || ev.agent || "",
+      text: hostClause(ev, re),
+    }));
+}
 function buildHosts(heartbeats, events, cloud) {
   const now = Date.now();
   const rows = HOSTS.map((h) => {
     const hb = (heartbeats || []).find((b) =>
       h.ids.some((id) => String(b.host || b.file || "").toLowerCase().replace(/\.json$/, "").includes(id))
     );
+    const mentions = hostMentions(events, h.match);
     if (hb && hb.at) {
       const age = now - new Date(hb.at).getTime();
       const key = age < 15 * 60000 ? "online" : age < 2 * 3600000 ? "stale" : "offline";
       const label = { online: "Online", stale: "Quiet", offline: "Offline" }[key];
       const bits = [hb.tailscale ? `Tailscale ${hb.tailscale}` : "", hb.uptime ? `up ${hb.uptime}` : "", hb.battery || ""].filter(Boolean).join(" · ");
-      return { ...h, key, label, at: hb.at, detail: bits || "Heartbeat received", source: "heartbeat" };
+      return {
+        ...h,
+        key,
+        label,
+        at: hb.at,
+        detail: bits || "Heartbeat received",
+        source: "heartbeat",
+        tailscale: hb.tailscale || "",
+        uptime: hb.uptime || "",
+        battery: hb.battery || "",
+        os: hb.os || "",
+        hostName: hb.host || "",
+        mentions,
+      };
     }
-    const ev = [...(events || [])]
-      .filter((x) => h.match.test(x.text || ""))
-      .sort((x, y) => String(y.at).localeCompare(String(x.at)))[0];
+    const ev = mentions[0];
     return {
       ...h,
       key: "unknown",
       label: "No heartbeat",
       at: ev ? ev.at : "",
-      detail: ev ? hostClause(ev, h.match) : "Nothing reported yet.",
+      detail: ev ? ev.text : "Nothing reported yet.",
       source: "memory",
+      tailscale: "",
+      uptime: "",
+      battery: "",
+      os: "",
+      hostName: "",
+      mentions,
     };
   });
+  state.hostCards = Object.fromEntries(rows.map((h) => [h.id, h]));
   return `<div class="host-row">${rows
     .map(
       (h) => `
-    <article class="host host-${h.key}" aria-label="${esc(h.name)} · ${esc(h.label)}">
+    <button type="button" class="host host-${h.key} home-tap" data-open-host="${esc(h.id)}" aria-label="${esc(h.name)} · ${esc(h.label)}. Open details.">
       <div class="host-top">
         <span class="host-ico" aria-hidden="true">${h.name === "Mac" ? "⌘" : "⊞"}</span>
         <div class="host-id"><strong>${esc(h.name)}</strong><span>${esc(h.role)}</span></div>
@@ -2187,7 +2244,7 @@ function buildHosts(heartbeats, events, cloud) {
       </div>
       <p class="host-detail">${esc(h.detail)}</p>
       ${h.at ? `<time title="${esc(fmtTimeFull(h.at))}">${h.source === "heartbeat" ? "Heartbeat" : "Seen"} ${esc(fmtTime(h.at))}</time>` : ""}
-    </article>`
+    </button>`
     )
     .join("")}</div>${
     cloud && !(heartbeats || []).length
@@ -2195,6 +2252,89 @@ function buildHosts(heartbeats, events, cloud) {
       : ""
   }`;
 }
+
+async function copyText(text, okMsg) {
+  const value = String(text || "");
+  if (!value) {
+    toast("Nothing to copy", "err");
+    return false;
+  }
+  try {
+    await navigator.clipboard.writeText(value);
+    toast(okMsg || "Copied");
+    return true;
+  } catch {
+    toast("Could not copy on this phone", "err");
+    return false;
+  }
+}
+
+function closeHostSheet() {
+  state.openHostId = null;
+  const sheet = document.getElementById("host-sheet");
+  if (!sheet) return;
+  sheet.hidden = true;
+  sheet.classList.remove("open");
+  document.getElementById("shell")?.classList.remove("host-sheet-open");
+}
+
+function openHostSheet(id) {
+  const host = state.hostCards?.[id];
+  const sheet = document.getElementById("host-sheet");
+  if (!host || !sheet) return;
+  state.openHostId = id;
+  document.getElementById("host-sheet-title").textContent = host.name;
+  document.getElementById("host-sheet-sub").textContent = host.role;
+  const pill = document.getElementById("host-sheet-pill");
+  pill.className = `aw-pill host-${host.key}`;
+  pill.innerHTML = `<span class="dot"></span>${esc(host.label)}`;
+
+  const facts = [
+    host.hostName ? ["Host", host.hostName] : null,
+    host.os ? ["OS", host.os] : null,
+    host.at ? ["Last beat", fmtTimeFull(host.at)] : null,
+    host.uptime ? ["Uptime", host.uptime] : null,
+    host.battery ? ["Battery", host.battery] : null,
+    host.tailscale ? ["Tailscale", host.tailscale] : null,
+    ["Source", host.source === "heartbeat" ? "Heartbeat branch" : "Shared memory fallback"],
+    host.runs ? ["Usually runs", host.runs] : null,
+  ].filter(Boolean);
+
+  const mentions = (host.mentions || [])
+    .map(
+      (m) => `<li>
+        <strong>${esc(m.agent || "agent")}</strong>
+        <span>${esc(m.text)}</span>
+        ${m.at ? `<time>${esc(fmtTime(m.at))}</time>` : ""}
+      </li>`
+    )
+    .join("");
+
+  document.getElementById("host-sheet-body").innerHTML = `
+    <p class="host-sheet-lead">${esc(host.detail)}</p>
+    <dl class="host-facts">${facts
+      .map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`)
+      .join("")}</dl>
+    ${
+      mentions
+        ? `<div class="host-mentions"><h3>Recent mentions</h3><ul>${mentions}</ul></div>`
+        : `<p class="home-empty small">No recent shared-memory lines about this PC.</p>`
+    }
+  `;
+
+  const needsInstall = host.key === "unknown" || host.key === "offline";
+  document.getElementById("host-sheet-actions").innerHTML = `
+    <button type="button" class="act act-primary" data-host-act="copy-install">${needsInstall ? "Copy install command" : "Copy heartbeat install"}</button>
+    ${host.tailscale ? `<button type="button" class="act" data-host-act="copy-tailscale">Copy Tailscale IP</button>` : ""}
+    <button type="button" class="act" data-host-act="refresh">Refresh status</button>
+    <button type="button" class="act ghost" data-host-act="close">Close</button>
+  `;
+
+  sheet.hidden = false;
+  sheet.classList.add("open");
+  document.getElementById("shell")?.classList.add("host-sheet-open");
+}
+
 
 /* Digest v30: what changed since Seth last tapped "Got it", with a per-agent breakdown. */
 function buildDigest({ events, pulls, commits, needs, done }) {
@@ -2914,12 +3054,44 @@ document.getElementById("home-body")?.addEventListener("click", (e) => {
 });
 document.getElementById("home-body")?.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" && e.key !== " ") return;
-  const tap = e.target.closest("[data-open-agent], [data-open-channel], [data-open-list], [data-goto-agents], [data-scroll-to]");
+  const tap = e.target.closest("[data-open-agent], [data-open-host], [data-open-channel], [data-open-list], [data-goto-agents], [data-scroll-to]");
   if (!tap || e.target.closest("input, textarea, select, button.tick")) return;
   e.preventDefault();
   tap.click();
 });
 document.getElementById("rail-backdrop").addEventListener("click", () => setRailOpen(false));
+
+document.getElementById("host-sheet-close")?.addEventListener("click", () => closeHostSheet());
+document.getElementById("host-sheet")?.addEventListener("click", async (e) => {
+  const act = e.target.closest("[data-host-act]");
+  if (!act) return;
+  const host = state.hostCards?.[state.openHostId];
+  const kind = act.dataset.hostAct;
+  if (kind === "close") {
+    closeHostSheet();
+    return;
+  }
+  if (kind === "copy-install") {
+    await copyText(host?.install, "Install command copied");
+    return;
+  }
+  if (kind === "copy-tailscale") {
+    await copyText(host?.tailscale, "Tailscale IP copied");
+    return;
+  }
+  if (kind === "refresh") {
+    act.disabled = true;
+    try {
+      await loadHome();
+      if (state.openHostId) openHostSheet(state.openHostId);
+      toast("Computer status refreshed");
+    } catch (err) {
+      toast(friendlyError(err), "err");
+    } finally {
+      act.disabled = false;
+    }
+  }
+});
 
 /* Bottom tab bar (phone): Home · Chats · Agents · Notes. Desktop keeps the rail. */
 function setActiveTab(tab) {
@@ -2933,6 +3105,7 @@ document.getElementById("tabbar")?.addEventListener("click", (e) => {
   const tab = btn.dataset.tab;
   document.getElementById("lists-pane").classList.remove("open");
   setRailOpen(false);
+  if (tab !== "home") closeHostSheet();
   if (tab === "home") {
     if (isPhoneShell() && document.getElementById("chat-pane")?.classList.contains("sheet-open")) {
       closeChatSheet({ to: "home" });
