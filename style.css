@@ -1315,7 +1315,8 @@ button.primary-btn,
     position: fixed;
     left: 0.75rem;
     right: 0.75rem;
-    bottom: calc(0.6rem + var(--safe-bottom));
+    /* v33 — was calc(0.6rem + safe-bottom), floated too high above the home indicator. */
+    bottom: calc(0.2rem + var(--safe-bottom));
     height: var(--tabbar-h);
     z-index: 12;
     border-radius: 22px;
@@ -2227,14 +2228,40 @@ body {
   background-size: 220% 100%;
   color: var(--on-accent);
 }
+/* v33 Holo Foil — same iridescent palette, different application. The gradient used to fill
+   active surfaces (buttons, bubbles, status cards) edge to edge; Seth found that too much once the
+   UI was busy with real content. Now the colour only lives in thin foil-like edges, dividers and a
+   couple of small accent marks — like light catching a hologram strip — while surfaces themselves
+   stay on the same dark glass as the rest of the app. Kept to anchor elements (primary actions, the
+   tab bar, headline cards) rather than every row, so it reads as a deliberate accent, not wallpaper. */
 :root[data-iris] .act-primary, :root[data-iris] .composer button[type="submit"], :root[data-iris] .session-chip.active,
-:root[data-iris] .msg.mine .body, :root[data-iris] button.primary-btn, :root[data-iris] .cloud-connect button[type="submit"] {
+:root[data-iris] button.primary-btn, :root[data-iris] .cloud-connect button[type="submit"] {
+  position: relative;
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--text);
+  box-shadow: none;
+  animation: none;
+}
+:root[data-iris] .act-primary::before, :root[data-iris] .composer button[type="submit"]::before,
+:root[data-iris] .session-chip.active::before, :root[data-iris] button.primary-btn::before,
+:root[data-iris] .cloud-connect button[type="submit"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: var(--accent-grad);
+  background-size: 220% 100%;
   animation: iris-shift 9s ease-in-out infinite alternate;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 6px 22px rgba(205, 189, 255, 0.25);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
 }
 @keyframes iris-shift { from { background-position: 0% 50%; } to { background-position: 100% 50%; } }
 @media (prefers-reduced-motion: reduce) { :root[data-iris] * { animation: none !important; } }
-:root[data-iris] .tabbar button.active .tab-ico,
+/* .msg.mine .body keeps a flat tint rather than a foil edge — a sent bubble reads best filled. */
+:root[data-iris] .msg.mine .body { background: color-mix(in srgb, var(--accent) 16%, var(--chrome-strong)); }
 :root[data-iris] .stat.live strong {
   background: linear-gradient(115deg, #f3b8e6, #cdbdff, #a9dcff, #b9f5dc);
   -webkit-background-clip: text;
@@ -2243,16 +2270,45 @@ body {
 }
 :root[data-iris] .agent-pill.st-active .sdot, :root[data-iris] .live-pill .dot { background: linear-gradient(135deg, #f3b8e6, #a9dcff, #b9f5dc); box-shadow: 0 0 8px rgba(205, 189, 255, 0.7); }
 :root[data-iris] .agent-window.status-active, :root[data-iris] .digest {
-  background: linear-gradient(160deg, rgba(243, 184, 230, 0.12), rgba(169, 220, 255, 0.08) 45%, rgba(185, 245, 220, 0.06) 75%, rgba(255, 255, 255, 0.02));
-  box-shadow: inset 0 0 0 1px rgba(205, 189, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 0 30px rgba(205, 189, 255, 0.1);
+  position: relative;
+  background: rgba(255, 255, 255, 0.03);
+  box-shadow: none;
 }
-/* v31.8 — iris is one soft film, not five corner glows. */
-:root[data-iris] body {
-  background:
-    radial-gradient(78% 42% at 50% -10%, rgba(205, 189, 255, 0.3), transparent 68%),
-    #0b0c0e;
-  background-attachment: fixed;
+:root[data-iris] .agent-window.status-active::before, :root[data-iris] .digest::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.3px;
+  background: var(--accent-grad);
+  background-size: 220% 100%;
+  opacity: 0.8;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
 }
+/* v33 — tab bar's active tab gets a thin foil ring instead of a flat accent wash. */
+:root[data-iris] .tabbar button.active {
+  position: relative;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: none;
+}
+:root[data-iris] .tabbar button.active::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.3px;
+  background: var(--accent-grad);
+  background-size: 220% 100%;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+/* Body stays plain dark glass — the old soft radial wash was the biggest source of "too much". */
+:root[data-iris] body { background: #0b0c0e; }
 .look-swatch { background: var(--swatch); }
 .agents-controls { background: linear-gradient(180deg, rgba(11, 12, 14, 0.97), rgba(11, 12, 14, 0.95)); }
 
