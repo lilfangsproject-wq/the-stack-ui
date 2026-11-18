@@ -856,7 +856,7 @@ async function ghStackWakeFromMessage(channel, row) {
   };
 }
 
-async function ghAppendMessage(slug, { body, author, parent_id, attachments }) {
+async function ghAppendMessage(slug, { body, author, parent_id, attachments, instant_gemini }) {
   const channels = await ghListChannels();
   let ch = channels.find((c) => c.slug === slug);
   if (!ch) throw new Error("channel_not_found");
@@ -870,6 +870,7 @@ async function ghAppendMessage(slug, { body, author, parent_id, attachments }) {
     body: text,
     mentions: ghExtractMentions(text),
     ...(Array.isArray(attachments) && attachments.length ? { attachments } : {}),
+    ...(instant_gemini ? { instant_gemini: true } : {}),
     created_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
   };
   const label = ch.kind === "dm" ? `dm ${slug}` : `#${slug}`;

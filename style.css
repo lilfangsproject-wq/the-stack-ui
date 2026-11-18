@@ -2089,8 +2089,15 @@ body {
 .list-done summary::-webkit-details-marker { display: none; }
 .list-done { display: grid; gap: 0.5rem; }
 .list-done[open] { gap: 0.5rem; }
-/* v26 layout fixes: chat pane rows (head, sessions, messages, photo tray, composer, hint); rail forms unboxed. */
-#chat-pane { grid-template-rows: auto auto minmax(0, 1fr) auto auto auto; background: transparent; }
+/* v36 layout fixes: flex-column chat pane avoids CSS grid track mismatches when strips toggle; rail forms unboxed. */
+#chat-pane { display: flex; flex-direction: column; background: transparent; }
+#chat-pane .main-head,
+#chat-pane .session-strip,
+#chat-pane .photo-tray,
+#chat-pane .quick-chips,
+#chat-pane .composer,
+#chat-pane .composer-hint { flex-shrink: 0; }
+#chat-pane .messages { flex: 1 1 0%; min-height: 0; }
 .session-strip { align-self: start; align-items: center; }
 .session-chip { align-self: center; height: 2.4rem; }
 .new-channel { background: transparent; box-shadow: none; }
@@ -3054,9 +3061,10 @@ button.host:focus-visible {
 }
 .quick-chips {
   display: flex;
+  flex-shrink: 0;
   gap: 0.38rem;
   overflow-x: auto;
-  padding: 0.3rem 0.85rem 0.15rem;
+  padding: 0.35rem 0.85rem 0.15rem;
   scrollbar-width: none;
 }
 .quick-chips::-webkit-scrollbar {
@@ -3092,4 +3100,84 @@ button.host:focus-visible {
   font-size: 0.72rem;
   font-weight: 500;
   color: var(--muted);
+}
+
+/* v36 — Direct Gemini Interactions streaming + Look & connection key UI */
+.gemini-settings {
+  margin: 0.55rem 0.6rem 0.25rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--separator);
+  display: grid;
+  gap: 0.45rem;
+}
+.gemini-field {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.gemini-field > span {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.4rem;
+}
+.gemini-status {
+  font-style: normal;
+  font-weight: 650;
+  font-size: 0.68rem;
+  padding: 0.1rem 0.42rem;
+  border-radius: 999px;
+  background: var(--fill);
+  color: var(--muted);
+}
+.gemini-status.on {
+  background: var(--accent-soft);
+  color: var(--accent-strong, var(--accent));
+}
+.gemini-key-row {
+  display: flex;
+  gap: 0.32rem;
+  align-items: center;
+}
+.gemini-key-row input,
+.gemini-field select {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--fill);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 0.36rem 0.5rem;
+  font: inherit;
+  font-size: 0.76rem;
+}
+.gemini-key-row button {
+  flex: 0 0 auto;
+  padding: 0.34rem 0.56rem;
+  font-size: 0.74rem;
+}
+.msg.streaming .meta time::before {
+  content: "";
+  display: inline-block;
+  width: 0.42rem;
+  height: 0.42rem;
+  margin-right: 0.35rem;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: geminiPulse 1.1s ease-in-out infinite;
+}
+.stream-caret {
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.95em;
+  vertical-align: text-bottom;
+  margin-left: 0.16rem;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: geminiPulse 0.85s ease-in-out infinite;
+}
+@keyframes geminiPulse {
+  0%, 100% { opacity: 0.28; }
+  50% { opacity: 1; }
 }

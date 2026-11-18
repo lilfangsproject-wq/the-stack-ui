@@ -22,7 +22,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>our app · zero spend · <span data-stack-version>v35.0</span></small>
+          <small>our app · zero spend · <span data-stack-version>v36.0</span></small>
         </div>
       </div>
       <p id="boot-status">Opening the vault…</p>
@@ -55,7 +55,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>agent command centre · <span data-stack-version>v35.0</span></small>
+          <small>agent command centre · <span data-stack-version>v36.0</span></small>
         </div>
       </div>
       <div class="live-pill" id="live-pill" title="Hub connection">
@@ -84,6 +84,25 @@
         <summary>Look &amp; connection</summary>
         <div id="look-picker" class="look-picker" role="radiogroup" aria-label="Accent colour"></div>
         <p class="look-hint">Accent colour stays on this phone.</p>
+        <div class="gemini-settings">
+          <label class="gemini-field">
+            <span>Gemini API key <em id="gemini-key-status" class="gemini-status">off</em></span>
+            <div class="gemini-key-row">
+              <input id="gemini-key-input" type="password" autocomplete="off" placeholder="Optional · enables live streaming" />
+              <button type="button" id="gemini-key-save" class="ghost">Save</button>
+              <button type="button" id="gemini-key-clear" class="ghost" hidden>Clear</button>
+            </div>
+          </label>
+          <label class="gemini-field">
+            <span>Model</span>
+            <select id="gemini-model-select">
+              <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Fast · Free Tier)</option>
+              <option value="gemini-3.8-flash">gemini-3.8-flash (Balanced)</option>
+              <option value="gemini-4-hydrogen">gemini-4-hydrogen (Deep · auto-fallback)</option>
+            </select>
+          </label>
+          <p class="look-hint">Saved on this device only. Streams via v1/interactions in Gemini DM or @Gemini mentions.</p>
+        </div>
         <p id="token-hint" class="token-hint"></p>
         <p id="phone-hint" class="token-hint phone-hint" hidden></p>
       </details>

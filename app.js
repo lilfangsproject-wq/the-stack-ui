@@ -18,6 +18,10 @@ const state = {
   /** agent name → last online heartbeat ISO */
   hostPresenceByAgent: {},
   openHostId: null,
+  sending: 0,
+  geminiStreaming: false,
+  loadMessagesSeq: 0,
+  geminiInteractionBySlug: {},
 };
 
 // Older iOS Safari: avoid raw TypeError: x is not a function.
@@ -271,6 +275,9 @@ function showCloudConnect(errMsg) {
         <label>Branch
           <input name="branch" value="main" autocomplete="off" required />
         </label>
+        <label>Gemini API key (optional · instant streaming)
+          <input name="gemini_key" type="password" autocomplete="off" placeholder="Optional · saved on device only" />
+        </label>
       </details>
       <p class="cloud-help">Stays on this device only. Needs Contents access on the vault repo.</p>
     `;
@@ -289,6 +296,8 @@ function showCloudConnect(errMsg) {
           ? ghSanitizeToken(rawTok)
           : rawTok.replace(/\s+/g, "").trim();
       ghSaveCreds();
+      const gemKey = String(fd.get("gemini_key") || "").trim();
+      if (gemKey) setGeminiKey(gemKey);
       await bootCloud();
     });
   }
@@ -299,9 +308,209 @@ function showCloudConnect(errMsg) {
     if (ghState.repo) form.querySelector('[name="repo"]').value = ghState.repo;
     if (ghState.branch) form.querySelector('[name="branch"]').value = ghState.branch;
   }
+  const gemInput = form.querySelector('[name="gemini_key"]');
+  if (gemInput && getGeminiKey()) gemInput.value = getGeminiKey();
 }
 
-const STACK_VERSION = "v35.0";
+const STACK_VERSION = "v36.0";
+const GEMINI_KEY_STORAGE = "stack-gemini-key-v1";
+const GEMINI_MODEL_STORAGE = "stack-gemini-model-v1";
+const GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite";
+const GEMINI_MODELS_ALLOWED = new Set(["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-4-hydrogen"]);
+
+function getGeminiKey() {
+  try {
+    return (localStorage.getItem(GEMINI_KEY_STORAGE) || "").trim();
+  } catch {
+    return "";
+  }
+}
+function setGeminiKey(raw) {
+  const clean = String(raw || "").replace(/\s+/g, "").trim();
+  try {
+    if (clean) localStorage.setItem(GEMINI_KEY_STORAGE, clean);
+    else localStorage.removeItem(GEMINI_KEY_STORAGE);
+  } catch {
+    /* ignore */
+  }
+  updateGeminiSettingsUI();
+  return clean;
+}
+function getGeminiModel() {
+  try {
+    const saved = localStorage.getItem(GEMINI_MODEL_STORAGE) || "";
+    return GEMINI_MODELS_ALLOWED.has(saved) ? saved : GEMINI_DEFAULT_MODEL;
+  } catch {
+    return GEMINI_DEFAULT_MODEL;
+  }
+}
+function setGeminiModel(model) {
+  const next = GEMINI_MODELS_ALLOWED.has(model) ? model : GEMINI_DEFAULT_MODEL;
+  try {
+    localStorage.setItem(GEMINI_MODEL_STORAGE, next);
+  } catch {
+    /* ignore */
+  }
+  updateGeminiSettingsUI();
+  return next;
+}
+function updateGeminiSettingsUI() {
+  const key = getGeminiKey();
+  const status = document.getElementById("gemini-key-status");
+  const input = document.getElementById("gemini-key-input");
+  const clearBtn = document.getElementById("gemini-key-clear");
+  const select = document.getElementById("gemini-model-select");
+  if (status) {
+    status.textContent = key ? "live" : "off";
+    status.classList.toggle("on", Boolean(key));
+  }
+  if (input && document.activeElement !== input) {
+    input.value = "";
+    input.placeholder = key ? `Saved (${key.slice(0, 4)}…${key.slice(-4)})` : "Optional · enables live streaming";
+  }
+  if (clearBtn) clearBtn.hidden = !key;
+  if (select) select.value = getGeminiModel();
+}
+function initGeminiSettings() {
+  updateGeminiSettingsUI();
+  document.getElementById("gemini-key-save")?.addEventListener("click", () => {
+    const input = document.getElementById("gemini-key-input");
+    const val = (input?.value || "").trim();
+    if (!val) {
+      toast(getGeminiKey() ? "Gemini key already saved on this device" : "Paste a Gemini API key first", "err");
+      return;
+    }
+    setGeminiKey(val);
+    if (input) input.value = "";
+    toast("Gemini streaming key saved on this device");
+  });
+  document.getElementById("gemini-key-clear")?.addEventListener("click", () => {
+    setGeminiKey("");
+    state.geminiInteractionBySlug = {};
+    toast("Gemini key removed from this device");
+  });
+  document.getElementById("gemini-model-select")?.addEventListener("change", (e) => {
+    const m = setGeminiModel(e.target.value);
+    state.geminiInteractionBySlug = {};
+    toast(`Gemini model set to ${m}`);
+  });
+}
+function shouldInstantGemini(slug, body) {
+  if (!getGeminiKey()) return false;
+  if (!String(body || "").trim()) return false;
+  return slug === "dm-gemini-seth" || /\B@gemini\b/i.test(String(body || ""));
+}
+function buildGeminiPromptInput(slug, userText, prevInteractionId) {
+  if (prevInteractionId) return userText;
+  const recent = (state.lastMessages || [])
+    .slice(-6)
+    .map((m) => `${m.author || "User"}: ${String(m.body || "").trim()}`)
+    .filter(Boolean);
+  if (!recent.length) return userText;
+  return `Recent #${slug} context:\n${recent.join("\n")}\n\nSeth: ${userText}`;
+}
+async function streamGeminiOnce({ key, model, slug, userText, prevInteractionId, onDelta }) {
+  const systemInstruction =
+    'You are Gemini inside "The Stack", Seth\'s agent command centre (live peers: ChatGPT orchestrator, Cursor engineer, Gemini trial peer; Workhorse & Hermes are retired). Be direct, honest, technically sharp, and concise with zero fluff.';
+  const payload = {
+    model,
+    system_instruction: systemInstruction,
+    input: buildGeminiPromptInput(slug, userText, prevInteractionId),
+    stream: true,
+    store: true,
+    generation_config: { max_output_tokens: 900 },
+    ...(prevInteractionId ? { previous_interaction_id: prevInteractionId } : {}),
+  };
+  const res = await fetch("https://generativelanguage.googleapis.com/v1/interactions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": key,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    let msg = `Gemini API ${res.status}`;
+    try {
+      const parsed = JSON.parse(errText);
+      if (parsed?.error?.message) msg = parsed.error.message;
+    } catch {
+      if (errText) msg = `${msg}: ${errText.slice(0, 180)}`;
+    }
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
+  }
+  if (!res.body || typeof res.body.getReader !== "function") {
+    throw new Error("Browser response stream unavailable");
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let fullText = "";
+  let interactionId = prevInteractionId || null;
+
+  const processLine = (line) => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data:")) return;
+    const raw = trimmed.slice(5).trim();
+    if (!raw || raw === "[DONE]") return;
+    let ev;
+    try {
+      ev = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (ev.event_type === "error" || ev.error) {
+      throw new Error(ev.error?.message || "Gemini stream error");
+    }
+    if (ev.event_type === "step.delta" && ev.delta?.type === "text" && ev.delta.text) {
+      fullText += ev.delta.text;
+      if (typeof onDelta === "function") onDelta(fullText);
+    }
+    if (ev.interaction?.id) {
+      interactionId = ev.interaction.id;
+    }
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split(/\r?\n/);
+    buf = lines.pop() || "";
+    for (const line of lines) processLine(line);
+  }
+  buf += decoder.decode();
+  if (buf.trim()) {
+    for (const line of buf.split(/\r?\n/)) processLine(line);
+  }
+  return { text: fullText.trim(), model, interactionId };
+}
+async function streamGeminiInteraction({ slug, userText, onDelta }) {
+  const key = getGeminiKey();
+  if (!key) throw new Error("Gemini API key not configured");
+  const preferred = getGeminiModel();
+  const prevId = state.geminiInteractionBySlug[slug] || null;
+  const attempts = preferred === GEMINI_DEFAULT_MODEL ? [[preferred, prevId]] : [[preferred, prevId], [GEMINI_DEFAULT_MODEL, null]];
+  let lastErr;
+  for (let i = 0; i < attempts.length; i++) {
+    const [model, pid] = attempts[i];
+    try {
+      const out = await streamGeminiOnce({ key, model, slug, userText, prevInteractionId: pid, onDelta });
+      if (out.interactionId) state.geminiInteractionBySlug[slug] = out.interactionId;
+      if (out.text) return out;
+      throw new Error(`Gemini (${model}) returned an empty response`);
+    } catch (err) {
+      lastErr = err;
+      const canFallback = i + 1 < attempts.length && err.status !== 401 && err.status !== 403;
+      if (!canFallback) break;
+      if (typeof onDelta === "function") onDelta("");
+    }
+  }
+  throw lastErr || new Error("Gemini streaming failed");
+}
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
@@ -2873,19 +3082,26 @@ function renderMessages(data) {
   state.unreads[ch.slug || state.channelSlug] = 0;
 }
 
-async function loadMessages() {
-  const key = `messages:${state.channelSlug}`;
+async function loadMessages({ force = false } = {}) {
+  if (!force && (state.sending > 0 || state.geminiStreaming)) return;
+  const seq = ++state.loadMessagesSeq;
+  const targetSlug = state.channelSlug;
+  const key = `messages:${targetSlug}`;
   try {
     const data = await api(
-      `/api/channels/${encodeURIComponent(state.channelSlug)}/messages`
+      `/api/channels/${encodeURIComponent(targetSlug)}/messages`
     );
     await pocketSet(key, data);
     state.pocketMode = false;
+    if (seq !== state.loadMessagesSeq || state.channelSlug !== targetSlug) return;
+    if (!force && (state.sending > 0 || state.geminiStreaming)) return;
     renderMessages(data);
   } catch (err) {
     const cached = await pocketGet(key);
     if (!cached) throw err;
     state.pocketMode = true;
+    if (seq !== state.loadMessagesSeq || state.channelSlug !== targetSlug) return;
+    if (!force && (state.sending > 0 || state.geminiStreaming)) return;
     renderMessages(cached);
   }
 }
@@ -3128,6 +3344,7 @@ async function boot() {
 
 document.getElementById("boot-retry").addEventListener("click", () => boot());
 initLookPicker();
+initGeminiSettings();
 function bindMenuToggle(id) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -3533,11 +3750,14 @@ document.getElementById("composer").addEventListener("submit", async (e) => {
   const body = document.getElementById("body").value.trim();
   const pending = state.pendingPhotos || [];
   if (!body && !pending.length) return;
+  const targetSlug = state.channelSlug;
+  const useInstantGemini = shouldInstantGemini(targetSlug, body) && !pending.length;
   const btn = e.target.querySelector('button[type="submit"]');
   if (btn) btn.disabled = true;
-  const path = `/api/channels/${encodeURIComponent(state.channelSlug)}/messages`;
-  const payload = { author, body };
-  // v30 optimistic send: show the bubble immediately, greyed until GitHub confirms.
+  state.sending += 1;
+  const path = `/api/channels/${encodeURIComponent(targetSlug)}/messages`;
+  const payload = { author, body, ...(useInstantGemini ? { instant_gemini: true } : {}) };
+  // v36 optimistic send + send/poll lock: keep optimistic and streaming bubbles safe from background polls.
   const boxEl = document.getElementById("messages");
   const ghost = document.createElement("article");
   ghost.className = "msg mine pending enter";
@@ -3550,41 +3770,109 @@ document.getElementById("composer").addEventListener("submit", async (e) => {
   boxEl.scrollTo({ top: boxEl.scrollHeight, behavior: "smooth" });
   document.getElementById("body").value = "";
   autosize(document.getElementById("body"));
+
+  let streamBubble = null;
+  let geminiPromise = null;
+  if (useInstantGemini) {
+    state.geminiStreaming = true;
+    streamBubble = document.createElement("article");
+    streamBubble.className = "msg agent streaming enter";
+    streamBubble.dataset.id = `local-gemini-${Date.now()}`;
+    streamBubble.innerHTML = `<span class="msg-avatar" aria-hidden="true">G</span><div class="meta"><strong>Gemini</strong><time>Streaming…</time></div><div class="body"><span class="stream-caret" aria-hidden="true"></span></div>`;
+    boxEl.appendChild(streamBubble);
+    boxEl.scrollTo({ top: boxEl.scrollHeight, behavior: "smooth" });
+    geminiPromise = streamGeminiInteraction({
+      slug: targetSlug,
+      userText: body,
+      onDelta: (partial) => {
+        if (!streamBubble || state.channelSlug !== targetSlug) return;
+        const stick = nearBottom(boxEl);
+        const bodyEl = streamBubble.querySelector(".body");
+        if (bodyEl) {
+          bodyEl.innerHTML = `${partial ? formatBodyHtml(partial) : ""}<span class="stream-caret" aria-hidden="true"></span>`;
+        }
+        if (stick) boxEl.scrollTop = boxEl.scrollHeight;
+      },
+    });
+  }
+
+  let userPosted = false;
   try {
     if (pending.length) {
       if (!state.cloudMode) throw new Error("Photos need the cloud hub (open with ?cloud=1).");
       if (btn) btn.textContent = "Uploading…";
       payload.attachments = [];
-      for (const p of pending) payload.attachments.push(await ghUploadAttachment(state.channelSlug, p.blob, "jpg"));
+      for (const p of pending) payload.attachments.push(await ghUploadAttachment(targetSlug, p.blob, "jpg"));
     }
     await api(path, { method: "POST", body: JSON.stringify(payload) });
+    userPosted = true;
     clearPendingPhotos();
     document.getElementById("body").value = "";
     autosize(document.getElementById("body"));
-    await loadMessages();
+    const metaTime = ghost.querySelector(".meta time");
+    if (metaTime) metaTime.textContent = "Sent";
+    ghost.classList.remove("pending");
+
+    if (geminiPromise) {
+      try {
+        const reply = await geminiPromise;
+        if (streamBubble && state.channelSlug === targetSlug) {
+          streamBubble.classList.remove("streaming");
+          const sTime = streamBubble.querySelector(".meta time");
+          if (sTime) sTime.textContent = `Saving (${reply.model})…`;
+          const bodyEl = streamBubble.querySelector(".body");
+          if (bodyEl) bodyEl.innerHTML = formatBodyHtml(reply.text);
+        }
+        await api(path, {
+          method: "POST",
+          body: JSON.stringify({ author: "Gemini", body: reply.text }),
+        });
+      } catch (gemErr) {
+        const msg = friendlyError(gemErr);
+        toast(`Gemini: ${msg}`, "err");
+        if (streamBubble && state.channelSlug === targetSlug) {
+          streamBubble.classList.remove("streaming");
+          const sTime = streamBubble.querySelector(".meta time");
+          if (sTime) sTime.textContent = "Error";
+          const bodyEl = streamBubble.querySelector(".body");
+          if (bodyEl) bodyEl.textContent = `Gemini stream failed: ${msg}`;
+        }
+      }
+    }
+    if (state.channelSlug === targetSlug) {
+      await loadMessages({ force: true });
+    }
   } catch (err) {
-    await pocketOutboxPush({ path, method: "POST", body: payload, at: new Date().toISOString() });
-    const key = `messages:${state.channelSlug}`;
-    const cached = (await pocketGet(key)) || {
-      channel: { slug: state.channelSlug, purpose: "" },
-      messages: [],
-    };
-    cached.messages = [
-      ...cached.messages,
-      {
-        id: `local-${Date.now()}`,
-        author,
-        body: `${body}\n\n(queued — will send when online)`,
-        created_at: new Date().toISOString(),
-        reply_count: 0,
-      },
-    ];
-    await pocketSet(key, cached);
-    document.getElementById("body").value = "";
-    autosize(document.getElementById("body"));
-    renderMessages(cached);
-    setLive(false, "queued in pocket");
+    if (geminiPromise) {
+      geminiPromise.catch(() => {});
+    }
+    if (!userPosted) {
+      await pocketOutboxPush({ path, method: "POST", body: payload, at: new Date().toISOString() });
+      const key = `messages:${targetSlug}`;
+      const cached = (await pocketGet(key)) || {
+        channel: { slug: targetSlug, purpose: "" },
+        messages: [],
+      };
+      cached.messages = [
+        ...cached.messages,
+        {
+          id: `local-${Date.now()}`,
+          author,
+          body: `${body}\n\n(queued — will send when online)`,
+          created_at: new Date().toISOString(),
+          reply_count: 0,
+        },
+      ];
+      await pocketSet(key, cached);
+      document.getElementById("body").value = "";
+      autosize(document.getElementById("body"));
+      if (state.channelSlug === targetSlug) renderMessages(cached);
+      setLive(false, "queued in pocket");
+    }
   } finally {
+    state.geminiStreaming = false;
+    state.sending = Math.max(0, state.sending - 1);
+    state.nextPollAt = Date.now() + pollDelay();
     if (btn) {
       btn.disabled = false;
       btn.textContent = "Send";
@@ -3639,6 +3927,7 @@ document.getElementById("home-body")?.addEventListener("submit", async (e) => {
     btn.disabled = true;
     btn.textContent = "Sending…";
   }
+  state.sending += 1;
   try {
     const body = `${target}${text}`;
     await api("/api/channels/peer-floor/messages", {
@@ -3652,6 +3941,8 @@ document.getElementById("home-body")?.addEventListener("submit", async (e) => {
   } catch (err) {
     toast(friendlyError(err), "err");
   } finally {
+    state.sending = Math.max(0, state.sending - 1);
+    state.nextPollAt = Date.now() + pollDelay();
     if (btn) {
       btn.disabled = false;
       btn.textContent = "Send";
@@ -3802,6 +4093,7 @@ function pollOnce(force = false) {
   if (!shellReady()) return;
   if (state.pocketMode && !state.cloudMode) return;
   if (state.cloudMode && !ghState?.token) return;
+  if (state.sending > 0 || state.geminiStreaming) return;
   if (document.visibilityState === "hidden") return;
   if (!navigator.onLine) {
     setLive(false, "offline");
