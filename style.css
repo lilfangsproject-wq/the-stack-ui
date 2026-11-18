@@ -1309,30 +1309,26 @@ button.primary-btn,
 /* Bottom tab bar: phone only -------------------------------------------- */
 .tabbar { display: none; }
 @media (max-width: 720px) {
+  :root {
+    --tabbar-h: 2.85rem;
+    --tabbar-safe: max(0.35rem, calc(var(--safe-bottom) - 12px));
+  }
   .tabbar {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     position: fixed;
-    /* v33.1 — was a floating pill inset from all four edges (0.75rem sides, a calc'd bottom gap).
-       Two rounds of "sit lower" / "still floating high" later: stop nudging the gap and dock it —
-       flush to the left/right/bottom edges, rounded top corners only, safe-area as inner padding
-       so content still clears the home indicator without the bar's own background floating above it. */
     left: 0;
     right: 0;
     bottom: 0;
-    /* v33.3: real-device report was "wasted space" below the icons — the safe-area inset itself
-       (the home-indicator gesture zone) can't be shrunk safely, but the chrome around it was
-       padding it out further than it needed to. Tightened --tabbar-h and the top/bottom chrome
-       padding; the safe-area strip below the icons is still there (it has to be), just not
-       padded on top of itself anymore. */
-    height: calc(var(--tabbar-h) + var(--safe-bottom));
+    /* v36.1: compact docked tabbar + reduced bottom safe padding so tabs sit lower near the home bar */
+    height: calc(var(--tabbar-h) + var(--tabbar-safe));
     z-index: 12;
-    border-radius: 22px 22px 0 0;
+    border-radius: 20px 20px 0 0;
     background: var(--chrome);
     -webkit-backdrop-filter: saturate(160%) blur(22px);
     backdrop-filter: saturate(160%) blur(22px);
     box-shadow: var(--shadow-float);
-    padding: 0.2rem 0.3rem calc(0.15rem + var(--safe-bottom));
+    padding: 0.16rem 0.3rem var(--tabbar-safe);
   }
   .tabbar button {
     display: grid;
@@ -2676,8 +2672,8 @@ html, body {
     top: 0;
     left: 0;
     right: 0;
-    /* Leave the floating tab bar reachable — do not cover or disable it. */
-    bottom: calc(var(--tabbar-h) + 0.55rem + var(--safe-bottom));
+    /* v36.1: flush to the docked tab bar — no wasted gap above or below. */
+    bottom: calc(var(--tabbar-h) + var(--tabbar-safe, var(--safe-bottom)));
     z-index: 20;
     width: 100%;
     height: auto;
@@ -2712,8 +2708,8 @@ html, body {
     touch-action: pan-y;
   }
   #chat-pane .composer {
-    /* Keep clearance above the always-visible tab bar */
-    margin-bottom: calc(0.55rem + var(--safe-bottom));
+    /* Dock tight above the tab bar — safe-area already lives inside .tabbar height. */
+    margin-bottom: 0.38rem;
   }
 
   /* v31.7 — tabs stay on screen and tappable while a chat sheet is open.

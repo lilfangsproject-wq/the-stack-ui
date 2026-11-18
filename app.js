@@ -312,7 +312,7 @@ function showCloudConnect(errMsg) {
   if (gemInput && getGeminiKey()) gemInput.value = getGeminiKey();
 }
 
-const STACK_VERSION = "v36.0";
+const STACK_VERSION = "v36.1";
 const GEMINI_KEY_STORAGE = "stack-gemini-key-v1";
 const GEMINI_MODEL_STORAGE = "stack-gemini-model-v1";
 const GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite";

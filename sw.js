@@ -8,7 +8,7 @@
  * registration.update() on focus / every 5 min; controllerchange triggers one reload.
  * Bump CACHE when shipping a shell release so old caches are dropped on activate.
  */
-const CACHE = "the-stack-shell-v36.0";
+const CACHE = "the-stack-shell-v36.1";
 const SHELL = [
   "./index.html",
   "./cloud.html",
