@@ -312,7 +312,7 @@ function showCloudConnect(errMsg) {
   if (gemInput && getGeminiKey()) gemInput.value = getGeminiKey();
 }
 
-const STACK_VERSION = "v36.1";
+const STACK_VERSION = "v37.0";
 const GEMINI_KEY_STORAGE = "stack-gemini-key-v1";
 const GEMINI_MODEL_STORAGE = "stack-gemini-model-v1";
 const GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite";
@@ -1519,6 +1519,9 @@ async function loadCommandCentre() {
           ? (state.ccErrors || []).join(" ") || "Nothing on main yet."
           : "Connect the cloud hub to see git main activity."
       }</p>`;
+  out.feed = feed;
+  out.commits = commits;
+  out.events = events;
   return out;
 }
 
@@ -2725,6 +2728,332 @@ document.getElementById("home-body")?.addEventListener("change", async (e) => {
   }
 });
 
+/* v37.0 — Bento Command Hub + "Got it" Triage + On-Demand Presentation & Voice Debrief */
+const GOT_IT_KEY = "stack-got-it-v1";
+function loadGotItSet() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(GOT_IT_KEY) || "[]");
+    return new Set(Array.isArray(arr) ? arr.slice(-400) : []);
+  } catch {
+    return new Set();
+  }
+}
+function saveGotItSet(set) {
+  try {
+    localStorage.setItem(GOT_IT_KEY, JSON.stringify([...set].slice(-400)));
+  } catch {
+    /* ignore */
+  }
+}
+function collectSinceItems(cc, todos) {
+  const items = [];
+  for (const n of cc.needsList || []) {
+    items.push({
+      key: `need:${n.key || n.title}`,
+      kind: "Needs You",
+      tone: "warn",
+      title: clip(n.title || "Waiting on Seth", 72),
+      text: clip(n.detail || n.action || "", 110),
+      who: n.owner || "Seth",
+      at: n.at || "",
+      slug: n.slug || "peer-floor",
+    });
+  }
+  for (const f of cc.feed || []) {
+    items.push({
+      key: `feed:${f.kind}:${f.at}:${clip(f.title || f.text, 40)}`,
+      kind: f.kind || "Update",
+      tone: f.kind === "Merged" || f.kind === "Result" ? "live" : "",
+      title: clip(f.title || f.text || "Workspace update", 72),
+      text: clip(f.text || "", 110),
+      who: f.who || "Agent",
+      at: f.at || "",
+      slug: "the-digest",
+    });
+  }
+  for (const t of (todos || []).slice(0, 6)) {
+    items.push({
+      key: `todo:${t.list_id}:${t.row_id || t.item}`,
+      kind: "To-do",
+      tone: "",
+      title: clip(t.item || "(untitled)", 72),
+      text: t.list ? `List: ${t.list}` : "",
+      who: t.owner || "Team",
+      at: "",
+      slug: "peer-floor",
+    });
+  }
+  return items;
+}
+function build7DayActivity(cc) {
+  const days = [];
+  const counts = new Array(7).fill(0);
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now.getTime() - i * 86400000);
+    days.push(d.toLocaleDateString(undefined, { weekday: "short" }));
+  }
+  const stamp = (iso) => {
+    if (!iso) return;
+    const t = new Date(iso);
+    if (Number.isNaN(t.getTime())) return;
+    t.setHours(0, 0, 0, 0);
+    const diff = Math.round((now.getTime() - t.getTime()) / 86400000);
+    if (diff >= 0 && diff < 7) counts[6 - diff] += 1;
+  };
+  for (const c of cc.commits || []) stamp(c.at);
+  for (const ev of cc.events || []) stamp(ev.at);
+  const total = counts.reduce((a, b) => a + b, 0);
+  const max = Math.max(1, ...counts);
+  const peakIdx = counts.lastIndexOf(Math.max(...counts));
+  const byAgent = {};
+  for (const ev of cc.events || []) {
+    const name = canonicalAgent(ev.agent) || ev.agent || "Team";
+    byAgent[name] = (byAgent[name] || 0) + 1;
+  }
+  for (const c of cc.commits || []) {
+    const name = canonicalAgent(c.author) || c.author || "Git";
+    byAgent[name] = (byAgent[name] || 0) + 1;
+  }
+  const platforms = Object.entries(byAgent)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4);
+  return { days, counts, total, max, peakIdx, platforms };
+}
+function buildBentoHub({ cc, todos }) {
+  const gotIt = loadGotItSet();
+  const allSince = collectSinceItems(cc, todos);
+  const kept = allSince.filter((it) => !gotIt.has(it.key));
+  const dismissedCount = allSince.length - kept.length;
+  state.lastKeptDebrief = kept;
+
+  const doneCount = (cc.doneList || []).length + (cc.commits || []).slice(0, 20).length;
+  const inProgCount = todos.length + (cc.agents || []).filter((a) => a.status === "active").length;
+  const needsCount = (cc.needsList || []).length;
+  const denom = Math.max(1, doneCount + inProgCount + needsCount);
+  const pct = Math.min(99, Math.max(8, Math.round((doneCount / denom) * 100)));
+  const wDone = Math.round((doneCount / denom) * 100);
+  const wActive = Math.round((inProgCount / denom) * 100);
+  const wNeeds = Math.max(0, 100 - wDone - wActive);
+
+  const act = build7DayActivity(cc);
+  const barsHtml = act.counts
+    .map((v, i) => {
+      const hPct = v ? Math.max(22, Math.round((v / act.max) * 100)) : 14;
+      return `<div class="bento-bar-col" title="${esc(act.days[i])}: ${v} updates">
+        <div class="bento-bar-pill${i === act.peakIdx && v > 0 ? " peak" : ""}" style="height:${hPct}%"></div>
+        <span>${esc(act.days[i].slice(0, 3))}</span>
+      </div>`;
+    })
+    .join("");
+  const platformHtml = act.platforms.length
+    ? act.platforms
+        .map(
+          ([name, cnt]) => `<button type="button" class="bento-platform-row" data-open-agent="${esc(name)}">
+            <strong>${esc(name)}</strong><span>${cnt} updates</span>
+          </button>`
+        )
+        .join("")
+    : `<p class="home-empty">No recent activity yet.</p>`;
+
+  const rosterPills = liveAgentRoster()
+    .map((a) => {
+      const match = (cc.agents || []).find((x) => x.name === a.name);
+      const on = match && (match.status === "active" || match.status === "recent");
+      return `<span class="bento-av${on ? " on" : ""}">${esc(a.name)}</span>`;
+    })
+    .join("");
+
+  const sinceCardsHtml = kept.length
+    ? kept
+        .slice(0, 6)
+        .map(
+          (it) => `<article class="since-card" data-since-key="${esc(it.key)}">
+            <div>
+              <div class="since-card-top">
+                <span class="bento-tag ${esc(it.tone)}">${esc(it.kind)}</span>
+                ${it.at ? `<span class="since-card-who">${esc(fmtTime(it.at))}</span>` : ""}
+              </div>
+              <div class="since-card-title" style="margin-top:0.35rem">${esc(it.title)}</div>
+              ${it.text ? `<div class="since-card-text">${esc(it.text)}</div>` : ""}
+            </div>
+            <div class="since-card-foot">
+              <span class="since-card-who">${esc(it.who)}</span>
+              <button type="button" class="got-it-btn" data-got-it="${esc(it.key)}">✓ Got it</button>
+            </div>
+          </article>`
+        )
+        .join("")
+    : `<p class="home-empty">All caught up — everything reviewed or dismissed.</p>`;
+
+  return `<section class="bento-grid" aria-label="Workforce Command Overview">
+    <article class="bento-card bento-prog">
+      <div class="bento-head">
+        <h2>Progress &amp; Health</h2>
+        <span class="bento-tag live">Live Hub</span>
+      </div>
+      <div class="bento-big"><strong>${pct}%</strong><span>Shipped vs open queue</span></div>
+      <div class="bento-segbar" aria-hidden="true">
+        <span class="seg-done" style="width:${wDone}%"></span>
+        <span class="seg-active" style="width:${wActive}%"></span>
+        <span class="seg-needs" style="width:${wNeeds}%"></span>
+      </div>
+      <div class="bento-mini-stats">
+        <div class="bento-mini-stat"><strong>${inProgCount}</strong><span>In Progress</span></div>
+        <div class="bento-mini-stat"><strong>${doneCount}</strong><span>Shipped</span></div>
+        <div class="bento-mini-stat"><strong>${needsCount}</strong><span>Needs You</span></div>
+      </div>
+    </article>
+
+    <article class="bento-card bento-focus">
+      <div class="bento-head">
+        <span class="bento-tag live">Vision &amp; Clarity</span>
+        <span class="bento-tag${needsCount ? " warn" : ""}">${kept.length} kept · ${dismissedCount} got it</span>
+      </div>
+      <h3 class="bento-focus-title">${needsCount ? `${needsCount} item${needsCount > 1 ? "s" : ""} waiting on Seth` : "Team moving cleanly on main"}</h3>
+      <p class="bento-focus-sub">Tap <strong>Got it</strong> below to skip what you already know, then hit <strong>Debrief me</strong> when you have time.</p>
+      <div class="bento-avatars">${rosterPills}</div>
+      <div class="bento-cta-row">
+        <button type="button" id="bento-debrief-btn" class="act act-primary">✦ Debrief me (${kept.length})</button>
+        ${dismissedCount ? `<button type="button" id="bento-reset-got-it" class="ghost">Reset (${dismissedCount})</button>` : ""}
+      </div>
+    </article>
+
+    <article class="bento-card bento-activity">
+      <div class="bento-head">
+        <h2>Activity</h2>
+        <span class="bento-tag">Last 7 days</span>
+      </div>
+      <div class="bento-big"><strong>${act.total}</strong><span>commits &amp; handovers</span></div>
+      <div class="bento-bars" aria-label="7-day activity chart">${barsHtml}</div>
+      <div class="bento-platform-list">${platformHtml}</div>
+    </article>
+
+    <article class="bento-card bento-since">
+      <div class="bento-head">
+        <h2>Since last you looked</h2>
+        <span class="cc-src">${kept.length} kept for debrief</span>
+      </div>
+      <div class="bento-since-grid">${sinceCardsHtml}</div>
+    </article>
+  </section>`;
+}
+
+function buildLocalSlides(kept, cc, todos) {
+  const needs = cc?.needsList || [];
+  return [
+    {
+      tab: "1 · Vision",
+      title: "Big Picture & Opportunity",
+      bullets: [
+        `${kept.length} kept items queued for your attention (${needs.length} blocked on Seth, ${todos.length} open todos).`,
+        kept[0] ? `Top focus right now: ${kept[0].title} (${kept[0].who}).` : "All caught up — zero unreviewed updates.",
+        `Active team: ${liveAgentRoster().map((a) => a.name).join(" · ")}.`,
+      ],
+    },
+    {
+      tab: "2 · Shipped",
+      title: "What Moved Since Last Visit",
+      bullets: kept.filter((k) => k.kind !== "Needs You").slice(0, 6).map((k) => `${k.kind}: ${k.title}${k.text ? ` — ${k.text}` : ""} (${k.who})`),
+    },
+    {
+      tab: "3 · Clarity",
+      title: "Blocked / Needs Seth",
+      bullets: needs.length
+        ? needs.map((n) => `${n.title || "Decision"}: ${n.detail || n.action || "Needs Seth input"}`)
+        : ["Nothing is blocked waiting on you right now."],
+    },
+    {
+      tab: "4 · Next",
+      title: "Highest-Leverage Next Moves",
+      bullets: [
+        ...(todos.slice(0, 3).map((t) => `Todo: ${t.item}${t.owner ? ` (${t.owner})` : ""}`)),
+        kept.length ? "Tap Mark all Got it below once done reviewing to clear the board." : "Pick the next priority in #peer-floor.",
+      ],
+    },
+  ].map((s) => ({ ...s, bullets: s.bullets.length ? s.bullets : ["Nothing queued in this section."] }));
+}
+
+function renderDebriefSlides(slides, activeIdx = 0) {
+  state.debriefSlides = slides;
+  state.debriefSlideIdx = Math.min(activeIdx, Math.max(0, slides.length - 1));
+  const tabs = document.getElementById("debrief-tabs");
+  const body = document.getElementById("debrief-body");
+  if (!tabs || !body) return;
+  tabs.innerHTML = slides
+    .map((s, i) => `<button type="button" class="debrief-tab${i === state.debriefSlideIdx ? " active" : ""}" data-slide="${i}">${esc(s.tab)}</button>`)
+    .join("");
+  const cur = slides[state.debriefSlideIdx] || slides[0];
+  body.innerHTML = `<article class="debrief-slide">
+    <h3>${esc(cur.title)}</h3>
+    <ul>${(cur.bullets || []).map((b) => `<li>${esc(b)}</li>`).join("")}</ul>
+  </article>`;
+}
+
+function stopDebriefVoice() {
+  if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
+  const btn = document.getElementById("debrief-voice");
+  if (btn) btn.textContent = "▶ Listen";
+}
+
+function parseAiSlides(text, fallbackSlides) {
+  const sections = String(text || "").split(/^##\s+/m).filter(Boolean);
+  if (sections.length < 2) return null;
+  const tabs = ["1 · Vision", "2 · Shipped", "3 · Clarity", "4 · Next"];
+  return sections.slice(0, 4).map((sec, idx) => {
+    const lines = sec.split("\n").map((l) => l.trim()).filter(Boolean);
+    const title = (lines.shift() || fallbackSlides[idx]?.title || `Slide ${idx + 1}`).replace(/^\d+[.)]\s*/, "");
+    const bullets = lines.map((l) => l.replace(/^[-*•]\s*/, "")).filter(Boolean);
+    return { tab: tabs[idx] || `Slide ${idx + 1}`, title, bullets: bullets.length ? bullets : ["No details."] };
+  });
+}
+
+async function openDebriefSheet({ useGemini = true } = {}) {
+  stopDebriefVoice();
+  const sheet = document.getElementById("debrief-sheet");
+  const sub = document.getElementById("debrief-sub");
+  if (!sheet) return;
+  const kept = state.lastKeptDebrief || [];
+  const cc = state.lastCc || {};
+  const todos = state.lastTodos || [];
+  const localSlides = buildLocalSlides(kept, cc, todos);
+  sheet.hidden = false;
+  renderDebriefSlides(localSlides, 0);
+  if (sub) sub.textContent = `${kept.length} kept item${kept.length === 1 ? "" : "s"} · Instant overview`;
+
+  if (!useGemini || !getGeminiKey() || !kept.length) return;
+  if (sub) sub.textContent = `${kept.length} kept · Compiling Gemini presentation…`;
+  try {
+    const summaryInput = [
+      `Kept updates (${kept.length}):`,
+      ...kept.slice(0, 14).map((k) => `- [${k.kind}] ${k.title} (${k.who}): ${k.text}`),
+      `Open Todos (${todos.length}):`,
+      ...todos.slice(0, 6).map((t) => `- ${t.item}`),
+    ].join("\n");
+    const prompt = `Create a crisp 4-section executive presentation debrief strictly from these kept updates. Format ONLY as 4 Markdown sections starting with '## ':
+## Vision & Big Picture
+## What Moved
+## Opportunities & Blockers
+## Next Moves
+Each section must have 2-4 sharp bullets. Zero fluff.\n\n${summaryInput}`;
+    const out = await streamGeminiInteraction({
+      slug: "debrief-presentation",
+      userText: prompt,
+      onDelta: (partial) => {
+        const parsed = parseAiSlides(partial, localSlides);
+        if (parsed) renderDebriefSlides(parsed, state.debriefSlideIdx || 0);
+      },
+    });
+    const finalParsed = parseAiSlides(out.text, localSlides);
+    if (finalParsed) renderDebriefSlides(finalParsed, state.debriefSlideIdx || 0);
+    if (sub) sub.textContent = `${kept.length} kept · Briefed by ${out.model}`;
+  } catch (err) {
+    if (sub) sub.textContent = `${kept.length} kept · Offline slide summary`;
+    toast(`Debrief AI fallback: ${friendlyError(err)}`, "err");
+  }
+}
+
 async function loadHome() {
   let data;
   try {
@@ -2840,6 +3169,8 @@ async function loadHome() {
         .join("")}</div>`
     : `<p class="home-empty">No reports yet. Agents post into #the-digest.</p>`;
   const cc = await loadCommandCentre();
+  state.lastCc = cc;
+  state.lastTodos = todos;
   const running = cc.agents.filter((x) => x.status === "active").length;
   const needs = cc.needsList || [];
   // Stats stay on Home and scroll to the section. Full triage is still on Agents.
@@ -2856,6 +3187,7 @@ async function loadHome() {
   const needsBlock = needs.length
     ? `<div class="job-list">${needs.map(jobCard).join("")}</div>`
     : `<p class="home-empty">${state.cloudMode ? "Nothing waiting on you." : "Connect the cloud hub to see jobs."}</p>`;
+  const bentoHtml = buildBentoHub({ cc, todos });
   const homeHtml = `
     ${emptyBanner}
     <label class="jump">
@@ -2876,6 +3208,7 @@ async function loadHome() {
       </div>
     </form>
     ${state.cloudMode ? pushPromptHtml() : ""}
+    ${bentoHtml}
     <div class="stat-row">${stats}</div>
     <section class="home-section cc-panel" id="cc-needs">
       <div class="cc-head"><h2>Needs you</h2><span class="cc-src">${needs.length} open</span></div>
@@ -4153,4 +4486,71 @@ window.addEventListener("online", () => {
 window.addEventListener("offline", () => {
   setLive(false, "offline");
   toast("No signal — showing what was last loaded", "err");
+});
+
+/* v37.0 — Bento Got-it Triage + Presentation Debrief & Voice handlers */
+document.getElementById("home-body")?.addEventListener("click", (e) => {
+  const got = e.target.closest("[data-got-it]");
+  if (got) {
+    const key = got.dataset.gotIt;
+    if (key) {
+      const set = loadGotItSet();
+      set.add(key);
+      saveGotItSet(set);
+      loadHome().catch(() => {});
+    }
+    return;
+  }
+  if (e.target.closest("#bento-debrief-btn")) {
+    openDebriefSheet({ useGemini: true });
+    return;
+  }
+  if (e.target.closest("#bento-reset-got-it")) {
+    saveGotItSet(new Set());
+    loadHome().catch(() => {});
+  }
+});
+document.getElementById("debrief-close")?.addEventListener("click", () => {
+  stopDebriefVoice();
+  const s = document.getElementById("debrief-sheet");
+  if (s) s.hidden = true;
+});
+document.getElementById("debrief-tabs")?.addEventListener("click", (e) => {
+  const tab = e.target.closest("[data-slide]");
+  if (!tab) return;
+  stopDebriefVoice();
+  renderDebriefSlides(state.debriefSlides || [], Number(tab.dataset.slide) || 0);
+});
+document.getElementById("debrief-voice")?.addEventListener("click", () => {
+  if (typeof speechSynthesis === "undefined") {
+    toast("Voice playback not supported in this browser", "err");
+    return;
+  }
+  if (speechSynthesis.speaking) {
+    stopDebriefVoice();
+    return;
+  }
+  const slides = state.debriefSlides || [];
+  const text = slides.map((s) => `${s.title}. ${(s.bullets || []).join(". ")}`).join(". ");
+  if (!text) return;
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.rate = 1.04;
+  utter.onend = () => stopDebriefVoice();
+  utter.onerror = () => stopDebriefVoice();
+  const btn = document.getElementById("debrief-voice");
+  if (btn) btn.textContent = "⏹ Stop";
+  speechSynthesis.speak(utter);
+});
+document.getElementById("debrief-mark-all")?.addEventListener("click", () => {
+  stopDebriefVoice();
+  const set = loadGotItSet();
+  for (const k of state.lastKeptDebrief || []) set.add(k.key);
+  saveGotItSet(set);
+  const s = document.getElementById("debrief-sheet");
+  if (s) s.hidden = true;
+  toast("Marked kept items as Got it");
+  loadHome().catch(() => {});
+});
+document.getElementById("debrief-refresh")?.addEventListener("click", () => {
+  openDebriefSheet({ useGemini: true });
 });
