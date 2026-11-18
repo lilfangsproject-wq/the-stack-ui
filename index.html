@@ -22,7 +22,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>our app · zero spend · <span data-stack-version>v37.1</span></small>
+          <small>our app · zero spend · <span data-stack-version>v38.0</span></small>
         </div>
       </div>
       <p id="boot-status">Opening the vault…</p>
@@ -55,7 +55,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>agent command centre · <span data-stack-version>v37.1</span></small>
+          <small>agent command centre · <span data-stack-version>v38.0</span></small>
         </div>
       </div>
       <div class="live-pill" id="live-pill" title="Hub connection">
@@ -177,7 +177,9 @@
       <div id="quick-chips" class="quick-chips" aria-label="Quick prompts">
         <button type="button" class="q-chip" data-insert="@ChatGPT ">@ChatGPT</button>
         <button type="button" class="q-chip" data-insert="@Cursor ">@Cursor</button>
+        <button type="button" class="q-chip" data-insert="@Grokbot ">@Grokbot</button>
         <button type="button" class="q-chip" data-insert="@Gemini ">@Gemini</button>
+        <button type="button" class="q-chip" data-insert="@Real-Claude ">@Claude</button>
         <button type="button" class="q-chip" data-send="Status check — what is open, blocked, or ready to merge right now?">⚡ Status check</button>
         <button type="button" class="q-chip" data-send="Run E2E verification and drop the receipt.">✅ Verify E2E</button>
         <button type="button" class="q-chip" data-send="Challenge the last claim with repo paths — what works, what's fucked, exact fix.">🔥 Challenge</button>
@@ -246,7 +248,21 @@
       <footer class="host-sheet-actions" id="debrief-actions">
         <button type="button" id="debrief-mark-all" class="act act-primary">✓ Mark all Got it</button>
         <button type="button" id="debrief-refresh" class="act">↻ Re-brief with Gemini</button>
+        <a id="debrief-slides-link" class="act" target="_blank" rel="noopener" hidden>📽️ Slides</a>
+        <a id="debrief-sheet-link" class="act" target="_blank" rel="noopener" hidden>📊 Sheet</a>
       </footer>
+    </aside>
+    <aside class="host-sheet" id="workstream-sheet" hidden>
+      <header class="main-head host-sheet-head">
+        <button type="button" id="ws-sheet-close" class="icon-btn" aria-label="Close">‹</button>
+        <div class="main-head-text">
+          <h1 id="ws-sheet-title">Workstream</h1>
+          <p class="purpose" id="ws-sheet-sub">Status &amp; Clarity</p>
+        </div>
+        <span class="bento-tag live" id="ws-sheet-pct">0%</span>
+      </header>
+      <section class="host-sheet-body" id="ws-sheet-body"></section>
+      <footer class="host-sheet-actions" id="ws-sheet-actions"></footer>
     </aside>
     <nav class="tabbar" id="tabbar" aria-label="Sections">
       <button type="button" data-tab="home" class="active"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z"/></svg><span>Home</span></button>

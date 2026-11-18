@@ -3396,6 +3396,140 @@ button.bento-av {
     scroll-snap-align: start;
   }
 }
+
+/* v38.0 — Workstream Progress Bars, Google Workspace Pills & Sub-tabs */
+.ws-bars {
+  display: grid;
+  gap: 0.45rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--separator);
+}
+.ws-bar-row {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.32rem 0.42rem;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ws-bar-row:hover,
+.ws-bar-row:active {
+  background: rgba(255, 255, 255, 0.075);
+}
+.ws-bar-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.74rem;
+}
+.ws-bar-top strong {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ws-bar-top span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 650;
+  flex-shrink: 0;
+}
+.ws-track {
+  height: 0.32rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.ws-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), #34d399);
+}
+.ws-fill.warn {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+}
+.bento-ws-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.ws-ext-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.26rem 0.56rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  font-size: 0.71rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+.ws-ext-pill:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.bento-seg-tabs {
+  display: inline-flex;
+  gap: 0.25rem;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.18rem;
+  border-radius: 999px;
+  flex-wrap: wrap;
+}
+.bento-seg-tab {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.22rem 0.58rem;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 650;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.bento-seg-tab.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.since-card-tap {
+  cursor: pointer;
+}
+.since-card-tap:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.debrief-chart-bars {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+}
+.ws-detail-card {
+  border-radius: 16px;
+  padding: 0.9rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  display: grid;
+  gap: 0.55rem;
+}
+.ws-detail-kv {
+  font-size: 0.82rem;
+  line-height: 1.42;
+}
+.ws-detail-kv strong {
+  display: block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 0.12rem;
+}
 .bento-bar-pill {
   width: 100%;
   max-width: 1.55rem;

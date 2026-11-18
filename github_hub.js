@@ -590,6 +590,11 @@ async function ghSaveNotes(mutate, message = "stack: notes") {
   );
 }
 
+async function ghLoadWorkstreams() {
+  const data = await ghReadJson("workstreams.json", { workstreams: [], opportunities: [], links: {}, vision: {} });
+  return data && typeof data === "object" ? data : { workstreams: [], opportunities: [], links: {}, vision: {} };
+}
+
 async function ghLoadAgentPrefs() {
   const data = await ghReadJson("agents.json", { agents: {} });
   return data && data.agents ? data : { agents: {} };
@@ -746,10 +751,12 @@ const GH_WAKEABLE = {
   cursor: "Cursor",
   "cursor-cloud": "Cursor",
   chatgpt: "ChatGPT",
+  gemini: "Gemini",
+  grokbot: "Grokbot",
+  grok: "Grokbot",
+  nori: "Grokbot",
 };
 const GH_RETIRED_OR_EXCLUDED = new Set([
-  "nori",
-  "grok",
   "codex",
   "openclaw",
   "workhorse",
@@ -1214,6 +1221,9 @@ async function ghRoute(path, options = {}) {
     const lst = await ghGetList(decodeURIComponent(listMatch[1]));
     if (!lst) throw new Error("list_not_found");
     return lst;
+  }
+  if (p === "/api/workstreams" && method === "GET") {
+    return ghLoadWorkstreams();
   }
   const rowMatch = p.match(/^\/api\/lists\/([^/]+)\/rows$/);
   if (rowMatch && method === "POST") {

@@ -22,6 +22,7 @@ const state = {
   geminiStreaming: false,
   loadMessagesSeq: 0,
   geminiInteractionBySlug: {},
+  bentoTab: "since",
 };
 
 // Older iOS Safari: avoid raw TypeError: x is not a function.
@@ -312,7 +313,7 @@ function showCloudConnect(errMsg) {
   if (gemInput && getGeminiKey()) gemInput.value = getGeminiKey();
 }
 
-const STACK_VERSION = "v37.1";
+const STACK_VERSION = "v38.0";
 const GEMINI_KEY_STORAGE = "stack-gemini-key-v1";
 const GEMINI_MODEL_STORAGE = "stack-gemini-model-v1";
 const GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite";
@@ -1247,25 +1248,25 @@ function closeChatSheetImmediate() {
 
 /* ---- Command centre (v34.0): live agents, model pickers, git-main feed ---- */
 const AGENT_ROSTER = [
-  { name: "ChatGPT", role: "Orchestrator + verify", aliases: ["chatgpt"] },
+  { name: "ChatGPT", role: "Orchestrator + backlog filter", aliases: ["chatgpt"] },
   { name: "Cursor", role: "Build + integrate", aliases: ["cursor"] },
   { name: "Cursor-Cloud", role: "Cloud coordinator", aliases: ["cursor-cloud", "cursor cloud"] },
-  { name: "Gemini", role: "Trial peer (Antigravity)", aliases: ["gemini"] },
-  { name: "Real-Claude", role: "The Stack collaborator (manual)", aliases: ["real-claude", "claude", "claude pro"] },
+  { name: "Gemini", role: "Vision + live streaming + Workspace", aliases: ["gemini"] },
+  { name: "Grokbot", role: "Challenger + trend/social", aliases: ["grokbot", "grok", "nori"] },
+  { name: "Real-Claude", role: "High-burst architect + Stack", aliases: ["real-claude", "claude", "claude pro"] },
   { name: "Workhorse", role: "Retired (19 Nov 2026) — former CLI grind", aliases: ["workhorse"], archived: true },
   { name: "Hermes", role: "Wiped / parked (19 Nov 2026)", aliases: ["hermes", "windows-migration"], archived: true },
-  { name: "Nori", role: "Separate Grok lane (archived)", aliases: ["nori", "grok"], archived: true },
 ];
 const DM_WIRE_SHARE = { "Real-Claude": "Claude", Workhorse: "Claude", "Cursor-Cloud": "Cursor" };
 const MODEL_OPTIONS = {
   ChatGPT: ["Default", "Fast", "Deep reasoning"],
   Cursor: ["Auto", "Claude Opus 5.5", "Claude Sonnet 5.5", "GPT (latest)", "Gemini (latest)"],
   "Cursor-Cloud": ["Auto", "Claude Opus 5.5", "Claude Sonnet 5.5", "GPT (latest)"],
-  Gemini: ["Gemini 4 Argon (Medium)", "Gemini 4 Carbon", "Gemini 4 Hydrogen"],
+  Gemini: ["Gemini 4 Hydrogen (XHigh)", "Gemini 4 Hydrogen (Medium)", "Gemini 3.8 Flash (Medium)", "Gemini 3.5 Flash-Lite"],
+  Grokbot: ["Grok (latest)", "Grok fast"],
   "Real-Claude": ["Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Haiku 5.5"],
   Workhorse: ["retired"],
   Hermes: ["wiped"],
-  Nori: ["Grok (latest)", "Grok fast"],
 };
 const AGENT_ACTIVE_MS = 2 * 3600 * 1000;
 const AGENT_RECENT_MS = 24 * 3600 * 1000;
@@ -1328,6 +1329,12 @@ async function loadCommandCentre() {
   let heartbeats = [];
   let handovers = [];
   let needsSeth = [];
+  let workstreamsData = { workstreams: [], opportunities: [], links: {}, vision: {} };
+  try {
+    workstreamsData = await api("/api/workstreams");
+  } catch {
+    /* optional in offline/pocket mode */
+  }
   if (cloud) {
     const [mem, com, pref, prs, hb, js, hos, ns] = await Promise.allSettled([
       ghSharedMemory(),
@@ -1522,6 +1529,7 @@ async function loadCommandCentre() {
   out.feed = feed;
   out.commits = commits;
   out.events = events;
+  out.workstreamsData = workstreamsData;
   return out;
 }
 
@@ -1955,12 +1963,29 @@ async function onJobsClick(e) {
     return;
   }
 
+async function setTodoRowStatus(listId, rowId, nextStatus) {
+  if (state.cloudMode && typeof ghSetRowStatus === "function") {
+    return ghSetRowStatus(listId, rowId, nextStatus);
+  }
+  const lst = await api(`/api/lists/${encodeURIComponent(listId)}`);
+  const cols = (lst.columns || []).map((c) => String(c).toLowerCase());
+  const statusIdx = cols.includes("status") ? cols.indexOf("status") : 0;
+  const row = (lst.rows || []).find((r) => r.id === rowId);
+  if (!row) throw new Error("row_not_found");
+  const cells = [...(row.cells || [])];
+  cells[statusIdx] = nextStatus;
+  return api(`/api/lists/${encodeURIComponent(listId)}/rows/${encodeURIComponent(rowId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ cells }),
+  });
+}
+
   const homeTick = e.target.closest(".home-todo .tick[data-row]");
   if (homeTick) {
     homeTick.disabled = true;
     homeTick.closest(".home-todo")?.classList.add("ticked");
     try {
-      await ghSetRowStatus(homeTick.dataset.list, homeTick.dataset.row, "done");
+      await setTodoRowStatus(homeTick.dataset.list, homeTick.dataset.row, "done");
       toast("Ticked off");
       setTimeout(() => refreshJobsView(), 350);
     } catch (err) {
@@ -2828,11 +2853,23 @@ function buildBentoHub({ cc, todos }) {
   const dismissedCount = allSince.length - kept.length;
   state.lastKeptDebrief = kept;
 
+  const wsData = cc.workstreamsData || {};
+  const workstreams = Array.isArray(wsData.workstreams) ? wsData.workstreams : [];
+  const opps = Array.isArray(wsData.opportunities) ? wsData.opportunities : [];
+  const wsLinks = wsData.links && typeof wsData.links === "object" ? wsData.links : {};
+  state.lastWorkstreams = workstreams;
+  state.lastWorkspaceLinks = wsLinks;
+
+  const activeWs = workstreams.filter((w) => !/no-go|archived|closed/i.test(String(w.status || "")));
+  const avgWsPct = activeWs.length
+    ? Math.round(activeWs.reduce((s, w) => s + Number(w.progress_pct || 0), 0) / activeWs.length)
+    : null;
+
   const doneCount = (cc.doneList || []).length + (cc.commits || []).slice(0, 20).length;
   const inProgCount = todos.length + (cc.agents || []).filter((a) => a.status === "active").length;
   const needsCount = (cc.needsList || []).length;
   const denom = Math.max(1, doneCount + inProgCount + needsCount);
-  const pct = Math.min(99, Math.max(8, Math.round((doneCount / denom) * 100)));
+  const pct = avgWsPct !== null ? avgWsPct : Math.min(99, Math.max(8, Math.round((doneCount / denom) * 100)));
   const wDone = Math.round((doneCount / denom) * 100);
   const wActive = Math.round((inProgCount / denom) * 100);
   const wNeeds = Math.max(0, 100 - wDone - wActive);
@@ -2860,50 +2897,125 @@ function buildBentoHub({ cc, todos }) {
     : `<p class="home-empty">No recent activity yet.</p>`;
 
   const rosterPills = liveAgentRoster()
+    .filter((a) => a.name !== "Cursor-Cloud")
     .map((a) => {
       const match = (cc.agents || []).find((x) => x.name === a.name);
       const on = match && (match.status === "active" || match.status === "recent");
-      return `<button type="button" class="bento-av${on ? " on" : ""}" data-open-agent="${esc(a.name)}">${esc(a.name)}</button>`;
+      const label = a.name === "Real-Claude" ? "Claude" : a.name;
+      return `<button type="button" class="bento-av${on ? " on" : ""}" data-open-agent="${esc(a.name)}">${esc(label)}</button>`;
     })
     .join("");
 
-  const sinceCardsHtml = kept.length
-    ? kept
-        .slice(0, 6)
+  const wsMiniBarsHtml = workstreams.length
+    ? `<div class="ws-bars">${workstreams
+        .slice(0, 4)
         .map(
-          (it) => `<article class="since-card" data-since-key="${esc(it.key)}">
-            <div>
-              <div class="since-card-top">
-                <span class="bento-tag ${esc(it.tone)}">${esc(it.kind)}</span>
-                ${it.at ? `<span class="since-card-who">${esc(fmtTime(it.at))}</span>` : ""}
-              </div>
-              <div class="since-card-title" style="margin-top:0.35rem">${esc(it.title)}</div>
-              ${it.text ? `<div class="since-card-text">${esc(it.text)}</div>` : ""}
-            </div>
-            <div class="since-card-foot">
-              <span class="since-card-who">${esc(it.who)}</span>
-              <button type="button" class="got-it-btn" data-got-it="${esc(it.key)}">✓ Got it</button>
-            </div>
-          </article>`
+          (w) => `<button type="button" class="ws-bar-row" data-open-ws="${esc(w.id)}">
+            <span class="ws-bar-top"><strong>${esc(w.name)}</strong><span>${Number(w.progress_pct || 0)}%</span></span>
+            <span class="ws-track"><span class="ws-fill${w.tone === "warn" ? " warn" : ""}" style="width:${Math.min(100, Math.max(5, Number(w.progress_pct || 0)))}%"></span></span>
+          </button>`
         )
-        .join("")
-    : `<p class="home-empty">All caught up — everything reviewed or dismissed.</p>`;
+        .join("")}</div>`
+    : "";
 
+  const extLinksHtml = [
+    wsLinks.sheet_url ? `<a class="ws-ext-pill" href="${esc(wsLinks.sheet_url)}" target="_blank" rel="noopener">📊 Master Sheet</a>` : "",
+    wsLinks.slides_url ? `<a class="ws-ext-pill" href="${esc(wsLinks.slides_url)}" target="_blank" rel="noopener">📽️ Slides Deck</a>` : "",
+    wsLinks.doc_url ? `<a class="ws-ext-pill" href="${esc(wsLinks.doc_url)}" target="_blank" rel="noopener">📄 Exec Brief</a>` : "",
+  ]
+    .filter(Boolean)
+    .join("");
+
+  const activeTab = state.bentoTab || "since";
+  let trayTitle = "Since last you looked";
+  let trayHtml = "";
+  if (activeTab === "workstreams") {
+    trayTitle = "Active Workstreams";
+    trayHtml = workstreams.length
+      ? workstreams
+          .map(
+            (w) => `<article class="since-card since-card-tap" data-open-ws="${esc(w.id)}">
+              <div>
+                <div class="since-card-top">
+                  <span class="bento-tag ${esc(w.tone || "")}">${esc(w.status)}</span>
+                  <span class="since-card-who">${Number(w.progress_pct || 0)}%</span>
+                </div>
+                <div class="since-card-title" style="margin-top:0.35rem">${esc(w.name)}</div>
+                <div class="ws-track" style="margin:0.35rem 0"><span class="ws-fill${w.tone === "warn" ? " warn" : ""}" style="width:${Math.min(100, Math.max(5, Number(w.progress_pct || 0)))}%"></span></div>
+                <div class="since-card-text">${esc(w.next_action || w.blocker || "")}</div>
+              </div>
+              <div class="since-card-foot">
+                <span class="since-card-who">${esc((w.owners || []).join(" · "))}</span>
+                <span class="bento-tag">${esc(w.deadline ? `Due ${w.deadline}` : `Score ${w.opportunity_score || "-"}`)}</span>
+              </div>
+            </article>`
+          )
+          .join("")
+      : `<p class="home-empty">No workstream snapshot loaded.</p>`;
+  } else if (activeTab === "opps") {
+    trayTitle = "Ranked Opportunities";
+    trayHtml = opps.length
+      ? opps
+          .map(
+            (o) => `<article class="since-card">
+              <div>
+                <div class="since-card-top">
+                  <span class="bento-tag live">#${esc(String(o.rank))} · ${esc(String(o.score))}</span>
+                </div>
+                <div class="since-card-title" style="margin-top:0.35rem">${esc(o.title)}</div>
+                <div class="since-card-text">${esc(o.hook || "")}</div>
+              </div>
+              <div class="since-card-foot">
+                <span class="since-card-who">${esc(clip(o.doc_path || "", 34))}</span>
+              </div>
+            </article>`
+          )
+          .join("")
+      : `<p class="home-empty">No opportunities ranked yet.</p>`;
+  } else {
+    trayHtml = kept.length
+      ? kept
+          .slice(0, 6)
+          .map(
+            (it) => `<article class="since-card" data-since-key="${esc(it.key)}">
+              <div>
+                <div class="since-card-top">
+                  <span class="bento-tag ${esc(it.tone)}">${esc(it.kind)}</span>
+                  ${it.at ? `<span class="since-card-who">${esc(fmtTime(it.at))}</span>` : ""}
+                </div>
+                <div class="since-card-title" style="margin-top:0.35rem">${esc(it.title)}</div>
+                ${it.text ? `<div class="since-card-text">${esc(it.text)}</div>` : ""}
+              </div>
+              <div class="since-card-foot">
+                <span class="since-card-who">${esc(it.who)}</span>
+                <button type="button" class="got-it-btn" data-got-it="${esc(it.key)}">✓ Got it</button>
+              </div>
+            </article>`
+          )
+          .join("")
+      : `<p class="home-empty">All caught up — switch to Workstreams or Opportunities above.</p>`;
+  }
+
+  const urgentWs = workstreams.find((w) => w.deadline);
   const leadItem = kept[0];
   const focusHeadline = needsCount
     ? `${needsCount} item${needsCount > 1 ? "s" : ""} waiting on Seth`
+    : urgentWs
+    ? `${urgentWs.name} · Due ${urgentWs.deadline}`
     : leadItem
     ? leadItem.title
     : "All clear on main";
-  const focusCopy = leadItem
-    ? `${leadItem.who}${leadItem.text ? ` — ${clip(leadItem.text, 90)}` : ""}`
+  const focusCopy = urgentWs && !needsCount
+    ? `${urgentWs.next_action} (${kept.length} kept for debrief)`
+    : leadItem
+    ? `${leadItem.who}${leadItem.text ? ` — ${clip(leadItem.text, 85)}` : ""}`
     : "Tap Got it on updates you know, or hit Debrief me anytime you have spare time.";
 
   return `<section class="bento-grid" aria-label="Workforce Command Overview">
     <article class="bento-card bento-prog">
       <div class="bento-head">
-        <h2>Progress &amp; Health</h2>
-        <span class="bento-tag live">${pct}% Done</span>
+        <h2>Progress &amp; Workstreams</h2>
+        <span class="bento-tag live">${pct}% Avg</span>
       </div>
       <div class="bento-big"><strong>${pct}%</strong><span>${doneCount} shipped · ${inProgCount} active</span></div>
       <div class="bento-segbar" aria-hidden="true">
@@ -2916,16 +3028,18 @@ function buildBentoHub({ cc, todos }) {
         <button type="button" class="bento-mini-stat home-tap" data-scroll-to="cc-feed"><i class="bento-dot c0"></i><strong>${doneCount}</strong><span>Shipped</span></button>
         <button type="button" class="bento-mini-stat home-tap" data-scroll-to="cc-needs"><i class="bento-dot c2"></i><strong>${needsCount}</strong><span>Needs You</span></button>
       </div>
+      ${wsMiniBarsHtml}
     </article>
 
     <article class="bento-card bento-focus">
       <div class="bento-head">
         <span class="bento-tag live">Vision &amp; Opportunity</span>
-        <span class="bento-tag${needsCount ? " warn" : ""}">${kept.length} kept · ${dismissedCount} got it</span>
+        <span class="bento-tag${needsCount || urgentWs ? " warn" : ""}">${kept.length} kept · ${dismissedCount} got it</span>
       </div>
       <h3 class="bento-focus-title">${esc(focusHeadline)}</h3>
       <p class="bento-focus-sub">${esc(focusCopy)}</p>
       <div class="bento-avatars">${rosterPills}</div>
+      ${extLinksHtml ? `<div class="bento-ws-links">${extLinksHtml}</div>` : ""}
       <div class="bento-cta-row">
         <button type="button" id="bento-debrief-btn" class="act act-primary">✦ Debrief me (${kept.length})</button>
         <button type="button" id="bento-quick-voice" class="act" title="Speak quick summary">▶ Voice</button>
@@ -2945,12 +3059,49 @@ function buildBentoHub({ cc, todos }) {
 
     <article class="bento-card bento-since">
       <div class="bento-head">
-        <h2>Since last you looked</h2>
-        <span class="cc-src">${kept.length} kept for debrief</span>
+        <h2>${esc(trayTitle)}</h2>
+        <div class="bento-seg-tabs" role="tablist" aria-label="Dashboard tray view">
+          <button type="button" class="bento-seg-tab${activeTab === "since" ? " active" : ""}" data-bento-tab="since">Since (${kept.length})</button>
+          <button type="button" class="bento-seg-tab${activeTab === "workstreams" ? " active" : ""}" data-bento-tab="workstreams">Workstreams (${workstreams.length})</button>
+          <button type="button" class="bento-seg-tab${activeTab === "opps" ? " active" : ""}" data-bento-tab="opps">Opps (${opps.length})</button>
+        </div>
       </div>
-      <div class="bento-since-grid">${sinceCardsHtml}</div>
+      <div class="bento-since-grid">${trayHtml}</div>
     </article>
   </section>`;
+}
+
+function openWorkstreamSheet(wsId) {
+  const ws = (state.lastWorkstreams || []).find((w) => w.id === wsId);
+  const sheet = document.getElementById("workstream-sheet");
+  if (!ws || !sheet) return;
+  document.getElementById("ws-sheet-title").textContent = ws.name;
+  document.getElementById("ws-sheet-sub").textContent = `${ws.category || "Workstream"} · ${ws.status || ""}`;
+  const pctBadge = document.getElementById("ws-sheet-pct");
+  if (pctBadge) {
+    pctBadge.textContent = `${Number(ws.progress_pct || 0)}%`;
+    pctBadge.className = `bento-tag ${ws.tone || "live"}`;
+  }
+  const body = document.getElementById("ws-sheet-body");
+  if (body) {
+    body.innerHTML = `<div class="ws-detail-card">
+      <div class="ws-track" style="height:0.5rem"><span class="ws-fill${ws.tone === "warn" ? " warn" : ""}" style="width:${Math.min(100, Math.max(5, Number(ws.progress_pct || 0)))}%"></span></div>
+      <div class="ws-detail-kv"><strong>Owners</strong>${esc((ws.owners || []).join(" · ") || "Seth")}</div>
+      <div class="ws-detail-kv"><strong>Next Concrete Move</strong>${esc(ws.next_action || "—")}</div>
+      <div class="ws-detail-kv"><strong>Current Blocker / Gate</strong>${esc(ws.blocker || "None")}</div>
+      ${ws.deadline ? `<div class="ws-detail-kv"><strong>Deadline</strong>${esc(ws.deadline)}</div>` : ""}
+      ${ws.doc_path ? `<div class="ws-detail-kv"><strong>Source Path</strong><code>${esc(ws.doc_path)}</code></div>` : ""}
+    </div>`;
+  }
+  const actions = document.getElementById("ws-sheet-actions");
+  if (actions) {
+    const links = state.lastWorkspaceLinks || {};
+    actions.innerHTML = `
+      ${ws.channel_slug ? `<button type="button" class="act act-primary" data-ws-chat="${esc(ws.channel_slug)}">Open #${esc(ws.channel_slug)}</button>` : ""}
+      ${links.sheet_url ? `<a class="act" href="${esc(links.sheet_url)}" target="_blank" rel="noopener">📊 Open Master Sheet</a>` : ""}
+    `;
+  }
+  sheet.hidden = false;
 }
 
 function buildLocalSlides(kept, cc, todos) {
@@ -2998,9 +3149,19 @@ function renderDebriefSlides(slides, activeIdx = 0) {
     .map((s, i) => `<button type="button" class="debrief-tab${i === state.debriefSlideIdx ? " active" : ""}" data-slide="${i}">${esc(s.tab)}</button>`)
     .join("");
   const cur = slides[state.debriefSlideIdx] || slides[0];
+  const chartHtml =
+    state.debriefSlideIdx === 0 && (state.lastWorkstreams || []).length
+      ? `<div class="debrief-chart-bars">${(state.lastWorkstreams || [])
+          .slice(0, 5)
+          .map(
+            (w) => `<div class="ws-bar-row"><span class="ws-bar-top"><strong>${esc(w.name)}</strong><span>${Number(w.progress_pct || 0)}%</span></span><span class="ws-track"><span class="ws-fill${w.tone === "warn" ? " warn" : ""}" style="width:${Math.min(100, Math.max(5, Number(w.progress_pct || 0)))}%"></span></span></div>`
+          )
+          .join("")}</div>`
+      : "";
   body.innerHTML = `<article class="debrief-slide">
     <h3>${esc(cur.title)}</h3>
     <ul>${(cur.bullets || []).map((b) => `<li>${esc(b)}</li>`).join("")}</ul>
+    ${chartHtml}
   </article>`;
 }
 
@@ -3032,6 +3193,17 @@ async function openDebriefSheet({ useGemini = true } = {}) {
   const todos = state.lastTodos || [];
   const localSlides = buildLocalSlides(kept, cc, todos);
   sheet.hidden = false;
+  const links = state.lastWorkspaceLinks || {};
+  const slidesLink = document.getElementById("debrief-slides-link");
+  const sheetLink = document.getElementById("debrief-sheet-link");
+  if (slidesLink) {
+    slidesLink.hidden = !links.slides_url;
+    if (links.slides_url) slidesLink.href = links.slides_url;
+  }
+  if (sheetLink) {
+    sheetLink.hidden = !links.sheet_url;
+    if (links.sheet_url) sheetLink.href = links.sheet_url;
+  }
   renderDebriefSlides(localSlides, 0);
   if (sub) sub.textContent = `${kept.length} kept item${kept.length === 1 ? "" : "s"} · Instant overview`;
 
@@ -3207,10 +3379,12 @@ async function loadHome() {
     <form id="home-quick-dispatch" class="home-dispatch" aria-label="Quick command to #peer-floor">
       <div class="hd-row">
         <select id="hd-target" aria-label="Target agent">
-          <option value="@ChatGPT @Cursor ">@All live</option>
+          <option value="@ChatGPT @Cursor @Grokbot ">@All live</option>
           <option value="@ChatGPT ">@ChatGPT</option>
           <option value="@Cursor ">@Cursor</option>
+          <option value="@Grokbot ">@Grokbot</option>
           <option value="@Gemini ">@Gemini</option>
+          <option value="@Real-Claude ">@Claude</option>
         </select>
         <input id="hd-input" type="text" placeholder="Drop a task or question to #peer-floor…" autocomplete="off" enterkeyhint="send" />
         <button type="submit" class="act act-primary">Send</button>
@@ -3556,7 +3730,7 @@ document.getElementById("list-table")?.addEventListener("click", async (e) => {
   b.disabled = true;
   b.closest(".list-row")?.classList.toggle("done", b.dataset.next === "done");
   try {
-    await ghSetRowStatus(state.listId, b.dataset.row, b.dataset.next);
+    await setTodoRowStatus(state.listId, b.dataset.row, b.dataset.next);
     await loadListDetail();
     loadHome().catch(() => {});
   } catch (err) {
@@ -4535,7 +4709,30 @@ document.getElementById("home-body")?.addEventListener("click", (e) => {
   if (e.target.closest("#bento-reset-got-it")) {
     saveGotItSet(new Set());
     loadHome().catch(() => {});
+    return;
   }
+  const segTab = e.target.closest("[data-bento-tab]");
+  if (segTab) {
+    state.bentoTab = segTab.dataset.bentoTab || "since";
+    loadHome().catch(() => {});
+    return;
+  }
+  const openWs = e.target.closest("[data-open-ws]");
+  if (openWs) {
+    openWorkstreamSheet(openWs.dataset.openWs);
+  }
+});
+document.getElementById("ws-sheet-close")?.addEventListener("click", () => {
+  const s = document.getElementById("workstream-sheet");
+  if (s) s.hidden = true;
+});
+document.getElementById("workstream-sheet")?.addEventListener("click", (e) => {
+  const wsChat = e.target.closest("[data-ws-chat]");
+  if (!wsChat) return;
+  const s = document.getElementById("workstream-sheet");
+  if (s) s.hidden = true;
+  state.channelSlug = wsChat.dataset.wsChat;
+  showView("channel");
 });
 document.getElementById("debrief-close")?.addEventListener("click", () => {
   stopDebriefVoice();
