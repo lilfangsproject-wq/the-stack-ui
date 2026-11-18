@@ -312,7 +312,7 @@ function showCloudConnect(errMsg) {
   if (gemInput && getGeminiKey()) gemInput.value = getGeminiKey();
 }
 
-const STACK_VERSION = "v37.0";
+const STACK_VERSION = "v37.1";
 const GEMINI_KEY_STORAGE = "stack-gemini-key-v1";
 const GEMINI_MODEL_STORAGE = "stack-gemini-model-v1";
 const GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite";
@@ -2841,8 +2841,10 @@ function buildBentoHub({ cc, todos }) {
   const barsHtml = act.counts
     .map((v, i) => {
       const hPct = v ? Math.max(22, Math.round((v / act.max) * 100)) : 14;
+      const isPeak = i === act.peakIdx && v > 0;
       return `<div class="bento-bar-col" title="${esc(act.days[i])}: ${v} updates">
-        <div class="bento-bar-pill${i === act.peakIdx && v > 0 ? " peak" : ""}" style="height:${hPct}%"></div>
+        ${isPeak ? `<em class="bento-peak-badge">${v}</em>` : ""}
+        <div class="bento-bar-pill${isPeak ? " peak" : ""}" style="height:${hPct}%"></div>
         <span>${esc(act.days[i].slice(0, 3))}</span>
       </div>`;
     })
@@ -2850,8 +2852,8 @@ function buildBentoHub({ cc, todos }) {
   const platformHtml = act.platforms.length
     ? act.platforms
         .map(
-          ([name, cnt]) => `<button type="button" class="bento-platform-row" data-open-agent="${esc(name)}">
-            <strong>${esc(name)}</strong><span>${cnt} updates</span>
+          ([name, cnt], idx) => `<button type="button" class="bento-platform-row" data-open-agent="${esc(name)}">
+            <span><i class="bento-dot c${idx % 4}" aria-hidden="true"></i><strong>${esc(name)}</strong></span><span>${cnt} updates</span>
           </button>`
         )
         .join("")
@@ -2861,7 +2863,7 @@ function buildBentoHub({ cc, todos }) {
     .map((a) => {
       const match = (cc.agents || []).find((x) => x.name === a.name);
       const on = match && (match.status === "active" || match.status === "recent");
-      return `<span class="bento-av${on ? " on" : ""}">${esc(a.name)}</span>`;
+      return `<button type="button" class="bento-av${on ? " on" : ""}" data-open-agent="${esc(a.name)}">${esc(a.name)}</button>`;
     })
     .join("");
 
@@ -2887,35 +2889,46 @@ function buildBentoHub({ cc, todos }) {
         .join("")
     : `<p class="home-empty">All caught up — everything reviewed or dismissed.</p>`;
 
+  const leadItem = kept[0];
+  const focusHeadline = needsCount
+    ? `${needsCount} item${needsCount > 1 ? "s" : ""} waiting on Seth`
+    : leadItem
+    ? leadItem.title
+    : "All clear on main";
+  const focusCopy = leadItem
+    ? `${leadItem.who}${leadItem.text ? ` — ${clip(leadItem.text, 90)}` : ""}`
+    : "Tap Got it on updates you know, or hit Debrief me anytime you have spare time.";
+
   return `<section class="bento-grid" aria-label="Workforce Command Overview">
     <article class="bento-card bento-prog">
       <div class="bento-head">
         <h2>Progress &amp; Health</h2>
-        <span class="bento-tag live">Live Hub</span>
+        <span class="bento-tag live">${pct}% Done</span>
       </div>
-      <div class="bento-big"><strong>${pct}%</strong><span>Shipped vs open queue</span></div>
+      <div class="bento-big"><strong>${pct}%</strong><span>${doneCount} shipped · ${inProgCount} active</span></div>
       <div class="bento-segbar" aria-hidden="true">
         <span class="seg-done" style="width:${wDone}%"></span>
         <span class="seg-active" style="width:${wActive}%"></span>
         <span class="seg-needs" style="width:${wNeeds}%"></span>
       </div>
       <div class="bento-mini-stats">
-        <div class="bento-mini-stat"><strong>${inProgCount}</strong><span>In Progress</span></div>
-        <div class="bento-mini-stat"><strong>${doneCount}</strong><span>Shipped</span></div>
-        <div class="bento-mini-stat"><strong>${needsCount}</strong><span>Needs You</span></div>
+        <button type="button" class="bento-mini-stat home-tap" data-scroll-to="cc-todos"><i class="bento-dot c1"></i><strong>${inProgCount}</strong><span>In Progress</span></button>
+        <button type="button" class="bento-mini-stat home-tap" data-scroll-to="cc-feed"><i class="bento-dot c0"></i><strong>${doneCount}</strong><span>Shipped</span></button>
+        <button type="button" class="bento-mini-stat home-tap" data-scroll-to="cc-needs"><i class="bento-dot c2"></i><strong>${needsCount}</strong><span>Needs You</span></button>
       </div>
     </article>
 
     <article class="bento-card bento-focus">
       <div class="bento-head">
-        <span class="bento-tag live">Vision &amp; Clarity</span>
+        <span class="bento-tag live">Vision &amp; Opportunity</span>
         <span class="bento-tag${needsCount ? " warn" : ""}">${kept.length} kept · ${dismissedCount} got it</span>
       </div>
-      <h3 class="bento-focus-title">${needsCount ? `${needsCount} item${needsCount > 1 ? "s" : ""} waiting on Seth` : "Team moving cleanly on main"}</h3>
-      <p class="bento-focus-sub">Tap <strong>Got it</strong> below to skip what you already know, then hit <strong>Debrief me</strong> when you have time.</p>
+      <h3 class="bento-focus-title">${esc(focusHeadline)}</h3>
+      <p class="bento-focus-sub">${esc(focusCopy)}</p>
       <div class="bento-avatars">${rosterPills}</div>
       <div class="bento-cta-row">
         <button type="button" id="bento-debrief-btn" class="act act-primary">✦ Debrief me (${kept.length})</button>
+        <button type="button" id="bento-quick-voice" class="act" title="Speak quick summary">▶ Voice</button>
         ${dismissedCount ? `<button type="button" id="bento-reset-got-it" class="ghost">Reset (${dismissedCount})</button>` : ""}
       </div>
     </article>
@@ -3190,11 +3203,7 @@ async function loadHome() {
   const bentoHtml = buildBentoHub({ cc, todos });
   const homeHtml = `
     ${emptyBanner}
-    <label class="jump">
-      <span class="jump-icon" aria-hidden="true">⌕</span>
-      <input id="jump-input" type="search" placeholder="Search chats & messages" autocomplete="off" enterkeyhint="go" />
-    </label>
-    <div id="jump-results" class="jump-results" hidden></div>
+    ${bentoHtml}
     <form id="home-quick-dispatch" class="home-dispatch" aria-label="Quick command to #peer-floor">
       <div class="hd-row">
         <select id="hd-target" aria-label="Target agent">
@@ -3207,28 +3216,28 @@ async function loadHome() {
         <button type="submit" class="act act-primary">Send</button>
       </div>
     </form>
+    <label class="jump">
+      <span class="jump-icon" aria-hidden="true">⌕</span>
+      <input id="jump-input" type="search" placeholder="Search chats & messages" autocomplete="off" enterkeyhint="go" />
+    </label>
+    <div id="jump-results" class="jump-results" hidden></div>
     ${state.cloudMode ? pushPromptHtml() : ""}
-    ${bentoHtml}
-    <div class="stat-row">${stats}</div>
-    <section class="home-section cc-panel" id="cc-needs">
-      <div class="cc-head"><h2>Needs you</h2><span class="cc-src">${needs.length} open</span></div>
-      ${needsBlock}
-    </section>
-    ${cc.digestHtml || ""}
-    <section class="home-section cc-panel" id="cc-roster">
-      <div class="cc-head"><h2>Agents</h2><span class="cc-src">${running ? `${running} running` : "all quiet"}</span></div>
-      <div class="agent-lines">${cc.rosterHtml || ""}</div>
-    </section>
-    <section class="home-section cc-panel" id="cc-todos">
-      <div class="cc-head"><h2>To-dos</h2><span class="cc-src">${todos.length} open</span></div>
-      <div class="home-cards">${todoHtml}</div>
-    </section>
-    <section class="home-section cc-panel" id="cc-hosts">
-      <div class="cc-head"><h2>Computers</h2><span class="cc-src">tap for actions · heartbeat</span></div>
-      ${cc.hostsHtml || ""}
-    </section>
+    ${needs.length ? `<section class="home-section cc-panel" id="cc-needs"><div class="cc-head"><h2>Needs you</h2><span class="cc-src">${needs.length} open</span></div>${needsBlock}</section>` : ""}
     <details class="home-more">
-      <summary>Models and the feed</summary>
+      <summary>To-dos (${todos.length}), Agents, Computers &amp; Feed</summary>
+      ${cc.digestHtml || ""}
+      <section class="home-section cc-panel" id="cc-roster">
+        <div class="cc-head"><h2>Agents</h2><span class="cc-src">${running ? `${running} running` : "all quiet"}</span></div>
+        <div class="agent-lines">${cc.rosterHtml || ""}</div>
+      </section>
+      <section class="home-section cc-panel" id="cc-todos">
+        <div class="cc-head"><h2>To-dos</h2><span class="cc-src">${todos.length} open</span></div>
+        <div class="home-cards">${todoHtml}</div>
+      </section>
+      <section class="home-section cc-panel" id="cc-hosts">
+        <div class="cc-head"><h2>Computers</h2><span class="cc-src">tap for actions · heartbeat</span></div>
+        ${cc.hostsHtml || ""}
+      </section>
       <section class="home-section cc-panel" id="cc-agents">
         <div class="cc-head"><h2>Models</h2><span class="cc-src">${esc(cc.agentsSource)}</span></div>
         ${cc.agentsHtml}
@@ -4503,6 +4512,24 @@ document.getElementById("home-body")?.addEventListener("click", (e) => {
   }
   if (e.target.closest("#bento-debrief-btn")) {
     openDebriefSheet({ useGemini: true });
+    return;
+  }
+  if (e.target.closest("#bento-quick-voice")) {
+    if (typeof speechSynthesis === "undefined") {
+      toast("Voice not supported in this browser", "err");
+      return;
+    }
+    if (speechSynthesis.speaking) {
+      stopDebriefVoice();
+      return;
+    }
+    const kept = state.lastKeptDebrief || [];
+    const text = kept.length
+      ? `${kept.length} kept updates. ` + kept.slice(0, 5).map((k) => `${k.kind} from ${k.who}: ${k.title}`).join(". ")
+      : "Everything is caught up right now.";
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.04;
+    speechSynthesis.speak(u);
     return;
   }
   if (e.target.closest("#bento-reset-got-it")) {
