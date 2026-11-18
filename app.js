@@ -301,7 +301,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v34.0";
+const STACK_VERSION = "v35.0";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
@@ -632,7 +632,11 @@ function refreshUnreadBadges() {
 function paintChannelNav() {
   const viewer = currentViewer();
   const pubs = state.channels.filter((c) => c.kind !== "dm");
-  const dms = state.channels.filter((c) => c.kind === "dm");
+  const dms = state.channels.filter((c) => {
+    if (c.kind !== "dm") return false;
+    const label = String(dmLabel(c, viewer)).toLowerCase();
+    return !ARCHIVED_AGENTS.has(label);
+  });
   const nav = document.getElementById("channel-list");
   const dmNav = document.getElementById("dm-list");
   refreshUnreadBadges();
@@ -748,14 +752,16 @@ function paintChatsInbox() {
     .map((c) => {
       const dm = c.kind === "dm";
       const label = dm ? dmLabel(c, viewer) : `#${c.slug}`;
-      const preview = c.purpose || (dm ? "Direct messages" : "Channel");
+      const last = (state.lastPreviewBySlug && state.lastPreviewBySlug[c.slug]) || "";
+      const preview = last || c.purpose || (dm ? "Direct messages" : "Channel");
+      const time = c.updated_at ? `<time class="chat-inbox-time">${esc(fmtTime(c.updated_at))}</time>` : "";
       const unread = state.unreads[c.slug]
         ? `<span class="chat-inbox-unread" aria-label="unread"></span>`
         : "";
       return `<button type="button" class="chat-inbox-row" data-slug="${esc(c.slug)}">
         <span class="chat-inbox-av" aria-hidden="true">${esc(initialOf(label))}</span>
         <span class="chat-inbox-main">
-          <strong>${esc(label)}</strong>
+          <strong>${esc(label)}${time}</strong>
           <span>${esc(preview)}</span>
         </span>
         ${unread}
@@ -2648,6 +2654,18 @@ async function loadHome() {
       <input id="jump-input" type="search" placeholder="Search chats & messages" autocomplete="off" enterkeyhint="go" />
     </label>
     <div id="jump-results" class="jump-results" hidden></div>
+    <form id="home-quick-dispatch" class="home-dispatch" aria-label="Quick command to #peer-floor">
+      <div class="hd-row">
+        <select id="hd-target" aria-label="Target agent">
+          <option value="@ChatGPT @Cursor ">@All live</option>
+          <option value="@ChatGPT ">@ChatGPT</option>
+          <option value="@Cursor ">@Cursor</option>
+          <option value="@Gemini ">@Gemini</option>
+        </select>
+        <input id="hd-input" type="text" placeholder="Drop a task or question to #peer-floor…" autocomplete="off" enterkeyhint="send" />
+        <button type="submit" class="act act-primary">Send</button>
+      </div>
+    </form>
     ${state.cloudMode ? pushPromptHtml() : ""}
     <div class="stat-row">${stats}</div>
     <section class="home-section cc-panel" id="cc-needs">
@@ -2847,6 +2865,10 @@ function renderMessages(data) {
     if (stick) box.scrollTo({ top: box.scrollHeight, behavior: "smooth" });
   }
   const last = data.messages[data.messages.length - 1];
+  if (last) {
+    state.lastPreviewBySlug = state.lastPreviewBySlug || {};
+    state.lastPreviewBySlug[ch.slug || state.channelSlug] = `${last.author}: ${clip(last.body || "📷 Photo", 68)}`;
+  }
   if (last?.created_at) markChannelRead(ch.slug || state.channelSlug, last.created_at);
   state.unreads[ch.slug || state.channelSlug] = 0;
 }
@@ -3580,6 +3602,62 @@ document.getElementById("body").addEventListener("keydown", (e) => {
 });
 document.getElementById("body").addEventListener("input", (e) => autosize(e.target));
 document.getElementById("thread-body").addEventListener("input", (e) => autosize(e.target));
+
+/* v35.0: One-tap Quick Prompt pills in chat + Home Quick Dispatch bar */
+document.getElementById("quick-chips")?.addEventListener("click", (e) => {
+  const chip = e.target.closest(".q-chip");
+  if (!chip) return;
+  const input = document.getElementById("body");
+  if (!input) return;
+  if (chip.dataset.insert) {
+    const prefix = chip.dataset.insert;
+    if (!input.value.includes(prefix.trim())) {
+      input.value = `${prefix}${input.value}`;
+    }
+    autosize(input);
+    input.focus();
+    return;
+  }
+  if (chip.dataset.send) {
+    input.value = chip.dataset.send;
+    autosize(input);
+    const form = document.getElementById("composer");
+    if (typeof form?.requestSubmit === "function") form.requestSubmit();
+    else form?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+  }
+});
+
+document.getElementById("home-body")?.addEventListener("submit", async (e) => {
+  if (e.target.id !== "home-quick-dispatch") return;
+  e.preventDefault();
+  const target = document.getElementById("hd-target")?.value || "@ChatGPT @Cursor ";
+  const input = document.getElementById("hd-input");
+  const text = (input?.value || "").trim();
+  if (!text) return;
+  const btn = e.target.querySelector('button[type="submit"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Sending…";
+  }
+  try {
+    const body = `${target}${text}`;
+    await api("/api/channels/peer-floor/messages", {
+      method: "POST",
+      body: JSON.stringify({ author: currentViewer(), body }),
+    });
+    if (input) input.value = "";
+    toast("Dispatched to #peer-floor");
+    state.channelSlug = "peer-floor";
+    showView("channel");
+  } catch (err) {
+    toast(friendlyError(err), "err");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Send";
+    }
+  }
+});
 
 document.getElementById("thread-composer").addEventListener("submit", async (e) => {
   e.preventDefault();

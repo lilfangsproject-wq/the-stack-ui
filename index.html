@@ -22,7 +22,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>our app · zero spend · <span data-stack-version>v34.0</span></small>
+          <small>our app · zero spend · <span data-stack-version>v35.0</span></small>
         </div>
       </div>
       <p id="boot-status">Opening the vault…</p>
@@ -55,7 +55,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>agent command centre · <span data-stack-version>v34.0</span></small>
+          <small>agent command centre · <span data-stack-version>v35.0</span></small>
         </div>
       </div>
       <div class="live-pill" id="live-pill" title="Hub connection">
@@ -155,6 +155,14 @@
       <nav id="session-strip" class="session-strip" aria-label="Chat sessions"></nav>
       <section id="messages" class="messages" aria-live="polite"></section>
       <div id="photo-tray" class="photo-tray" hidden></div>
+      <div id="quick-chips" class="quick-chips" aria-label="Quick prompts">
+        <button type="button" class="q-chip" data-insert="@ChatGPT ">@ChatGPT</button>
+        <button type="button" class="q-chip" data-insert="@Cursor ">@Cursor</button>
+        <button type="button" class="q-chip" data-insert="@Gemini ">@Gemini</button>
+        <button type="button" class="q-chip" data-send="Status check — what is open, blocked, or ready to merge right now?">⚡ Status check</button>
+        <button type="button" class="q-chip" data-send="Run E2E verification and drop the receipt.">✅ Verify E2E</button>
+        <button type="button" class="q-chip" data-send="Challenge the last claim with repo paths — what works, what's fucked, exact fix.">🔥 Challenge</button>
+      </div>
       <form id="composer" class="composer">
         <input id="author" name="author" value="Seth" aria-label="Author" autocomplete="nickname" />
         <label class="attach-btn" title="Add photo">
