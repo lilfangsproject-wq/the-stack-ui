@@ -301,7 +301,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v33.2";
+const STACK_VERSION = "v33.3";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
@@ -1031,16 +1031,25 @@ function closeChatSheetImmediate() {
 }
 
 /* ---- Command centre (v23): agents running, model pickers, git-main feed ---- */
+// v33.3: this list had drifted from hub/agents.json — Workhorse (the FreeLLM/Ollama CLI grind
+// worker, split out from "Claude" as its own named identity in CLAUDE.md on 2026-11-17) was never
+// added here, so it never showed up in the Agents tab at all despite having its own entry and
+// model preference in the hub. Keep this in sync with hub/agents.json's agent keys going forward.
 const AGENT_ROSTER = [
   { name: "Claude", role: "Engineering grind", aliases: ["claude"] },
+  { name: "Workhorse", role: "FreeLLM/Ollama CLI grind (wire id: Claude)", aliases: ["workhorse"] },
   { name: "Cursor", role: "Build + integrate", aliases: ["cursor"] },
   { name: "Cursor-Cloud", role: "Cloud coordinator", aliases: ["cursor-cloud", "cursor cloud"] },
   { name: "ChatGPT", role: "Coord + verify", aliases: ["chatgpt"] },
   { name: "Hermes", role: "Standby (when tasked)", aliases: ["hermes", "windows-migration"] },
   { name: "Nori", role: "Archived", aliases: ["nori"], archived: true },
 ];
+// Workhorse shares its wire id with Claude (see hub/agents.json's note), so it has no DM channel
+// of its own — route its "open chat" action to Claude's DM rather than leaving it unclickable.
+const DM_WIRE_SHARE = { Workhorse: "Claude" };
 const MODEL_OPTIONS = {
   Claude: ["Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Haiku 5.5", "Claude Fable 5.2"],
+  Workhorse: ["Claude Opus 5.5", "Claude Sonnet 5.5", "Local (Ollama)", "FreeLLM gateway"],
   Cursor: ["Auto", "Claude Opus 5.5", "Claude Sonnet 5.5", "GPT (latest)", "Gemini (latest)"],
   "Cursor-Cloud": ["Auto", "Claude Opus 5.5", "Claude Sonnet 5.5", "GPT (latest)"],
   ChatGPT: ["Default", "Fast", "Deep reasoning"],
@@ -1088,10 +1097,11 @@ function clip(text, n) {
 
 function dmSlugFor(agent) {
   const viewer = currentViewer().toLowerCase();
+  const lookFor = (DM_WIRE_SHARE[agent] || agent).toLowerCase();
   const ch = (state.channels || []).find(
     (c) =>
       c.kind === "dm" &&
-      (c.members || []).some((m) => String(m).toLowerCase() === agent.toLowerCase()) &&
+      (c.members || []).some((m) => String(m).toLowerCase() === lookFor) &&
       (c.members || []).some((m) => String(m).toLowerCase() === viewer)
   );
   return ch ? ch.slug : "";
@@ -2526,12 +2536,16 @@ async function loadHome() {
       : 0) ||
     data.summary?.dms ||
     0;
+  // v33.3: this used to show dmCount as "agents" — the number of 1:1 DM channels that happen to
+  // exist, not the number of actual agents (Workhorse had none, so it silently undercounted).
+  // Use the real roster so this always matches what the Agents tab shows.
+  const agentCount = liveAgentRoster().length;
   const branchLabel =
     state.cloudMode && typeof ghState !== "undefined"
       ? `${ghState.repo}@${ghState.branch}`
       : state.hostLabel;
   document.getElementById("home-headline").textContent = state.cloudMode
-    ? `Live · ${channelCount - dmCount} channels · ${dmCount} agents`
+    ? `Live · ${channelCount - dmCount} channels · ${agentCount} agents`
     : data.summary?.headline || "Agent hub";
   const body = document.getElementById("home-body");
   const todos = data.todos || [];
