@@ -920,7 +920,7 @@ button:active, .ghost:active, .icon-btn:active {
   --warn: #ff9500;
   --radius: 18px;
   --radius-lg: 24px;
-  --tabbar-h: 3.7rem;
+  --tabbar-h: 3.3rem;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -1320,6 +1320,11 @@ button.primary-btn,
     left: 0;
     right: 0;
     bottom: 0;
+    /* v33.3: real-device report was "wasted space" below the icons — the safe-area inset itself
+       (the home-indicator gesture zone) can't be shrunk safely, but the chrome around it was
+       padding it out further than it needed to. Tightened --tabbar-h and the top/bottom chrome
+       padding; the safe-area strip below the icons is still there (it has to be), just not
+       padded on top of itself anymore. */
     height: calc(var(--tabbar-h) + var(--safe-bottom));
     z-index: 12;
     border-radius: 22px 22px 0 0;
@@ -1327,7 +1332,7 @@ button.primary-btn,
     -webkit-backdrop-filter: saturate(160%) blur(22px);
     backdrop-filter: saturate(160%) blur(22px);
     box-shadow: var(--shadow-float);
-    padding: 0.3rem 0.3rem calc(0.3rem + var(--safe-bottom));
+    padding: 0.2rem 0.3rem calc(0.15rem + var(--safe-bottom));
   }
   .tabbar button {
     display: grid;
