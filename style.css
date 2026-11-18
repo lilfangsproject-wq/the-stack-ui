@@ -1313,18 +1313,21 @@ button.primary-btn,
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     position: fixed;
-    left: 0.75rem;
-    right: 0.75rem;
-    /* v33 — was calc(0.6rem + safe-bottom), floated too high above the home indicator. */
-    bottom: calc(0.2rem + var(--safe-bottom));
-    height: var(--tabbar-h);
+    /* v33.1 — was a floating pill inset from all four edges (0.75rem sides, a calc'd bottom gap).
+       Two rounds of "sit lower" / "still floating high" later: stop nudging the gap and dock it —
+       flush to the left/right/bottom edges, rounded top corners only, safe-area as inner padding
+       so content still clears the home indicator without the bar's own background floating above it. */
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: calc(var(--tabbar-h) + var(--safe-bottom));
     z-index: 12;
-    border-radius: 22px;
+    border-radius: 22px 22px 0 0;
     background: var(--chrome);
     -webkit-backdrop-filter: saturate(160%) blur(22px);
     backdrop-filter: saturate(160%) blur(22px);
     box-shadow: var(--shadow-float);
-    padding: 0.3rem;
+    padding: 0.3rem 0.3rem calc(0.3rem + var(--safe-bottom));
   }
   .tabbar button {
     display: grid;
@@ -2228,37 +2231,32 @@ body {
   background-size: 220% 100%;
   color: var(--on-accent);
 }
-/* v33 Holo Foil — same iridescent palette, different application. The gradient used to fill
+/* v33.1 Holo Foil — same iridescent palette, different application. The gradient used to fill
    active surfaces (buttons, bubbles, status cards) edge to edge; Seth found that too much once the
-   UI was busy with real content. Now the colour only lives in thin foil-like edges, dividers and a
-   couple of small accent marks — like light catching a hologram strip — while surfaces themselves
-   stay on the same dark glass as the rest of the app. Kept to anchor elements (primary actions, the
-   tab bar, headline cards) rather than every row, so it reads as a deliberate accent, not wallpaper. */
+   UI was busy with real content. Now the colour only lives in thin foil-like edges and a couple of
+   small accent marks, kept to anchor elements (primary actions, the tab bar, headline cards) rather
+   than every row, so it reads as a deliberate accent, not wallpaper.
+   v33.1: the first cut built the edge with a ::before + mask-composite (xor/exclude together) —
+   that combination has known rendering bugs in real Safari/WebKit (a visible solid sliver at one
+   edge, usually the top, instead of a clean ring) even though it looked fine in Chromium screenshots.
+   Replaced with the double-background-layer technique (solid fill painted to padding-box, gradient
+   painted to border-box, via a real `border: solid transparent`) — no mask-composite anywhere, and
+   it's the standard well-supported way to do a gradient border with rounded corners. */
 :root[data-iris] .act-primary, :root[data-iris] .composer button[type="submit"], :root[data-iris] .session-chip.active,
 :root[data-iris] button.primary-btn, :root[data-iris] .cloud-connect button[type="submit"] {
-  position: relative;
-  background: rgba(255, 255, 255, 0.055);
+  border: 1.5px solid transparent;
+  /* v33.2: the padding-box fill has to be an opaque surface colour, not a few-percent-alpha wash —
+     at low alpha the border-box gradient layer bleeds straight through the interior instead of
+     staying confined to the border, which is what was actually filling every button solid. */
+  background:
+    linear-gradient(var(--chrome-strong), var(--chrome-strong)) padding-box,
+    var(--accent-grad) border-box;
+  background-size: auto, 220% 100%;
   color: var(--text);
   box-shadow: none;
-  animation: none;
-}
-:root[data-iris] .act-primary::before, :root[data-iris] .composer button[type="submit"]::before,
-:root[data-iris] .session-chip.active::before, :root[data-iris] button.primary-btn::before,
-:root[data-iris] .cloud-connect button[type="submit"]::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1.5px;
-  background: var(--accent-grad);
-  background-size: 220% 100%;
   animation: iris-shift 9s ease-in-out infinite alternate;
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
 }
-@keyframes iris-shift { from { background-position: 0% 50%; } to { background-position: 100% 50%; } }
+@keyframes iris-shift { from { background-position: 0 0, 0% 50%; } to { background-position: 0 0, 100% 50%; } }
 @media (prefers-reduced-motion: reduce) { :root[data-iris] * { animation: none !important; } }
 /* .msg.mine .body keeps a flat tint rather than a foil edge — a sent bubble reads best filled. */
 :root[data-iris] .msg.mine .body { background: color-mix(in srgb, var(--accent) 16%, var(--chrome-strong)); }
@@ -2270,42 +2268,22 @@ body {
 }
 :root[data-iris] .agent-pill.st-active .sdot, :root[data-iris] .live-pill .dot { background: linear-gradient(135deg, #f3b8e6, #a9dcff, #b9f5dc); box-shadow: 0 0 8px rgba(205, 189, 255, 0.7); }
 :root[data-iris] .agent-window.status-active, :root[data-iris] .digest {
-  position: relative;
-  background: rgba(255, 255, 255, 0.03);
+  border: 1.3px solid transparent;
+  background:
+    linear-gradient(var(--chrome-strong), var(--chrome-strong)) padding-box,
+    var(--accent-grad) border-box;
+  background-size: auto, 220% 100%;
+  opacity: 0.92;
   box-shadow: none;
-}
-:root[data-iris] .agent-window.status-active::before, :root[data-iris] .digest::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1.3px;
-  background: var(--accent-grad);
-  background-size: 220% 100%;
-  opacity: 0.8;
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
 }
 /* v33 — tab bar's active tab gets a thin foil ring instead of a flat accent wash. */
 :root[data-iris] .tabbar button.active {
-  position: relative;
-  background: rgba(255, 255, 255, 0.04);
+  border: 1.3px solid transparent;
+  background:
+    linear-gradient(var(--chrome-strong), var(--chrome-strong)) padding-box,
+    var(--accent-grad) border-box;
+  background-size: auto, 220% 100%;
   box-shadow: none;
-}
-:root[data-iris] .tabbar button.active::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1.3px;
-  background: var(--accent-grad);
-  background-size: 220% 100%;
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
 }
 /* Body stays plain dark glass — the old soft radial wash was the biggest source of "too much". */
 :root[data-iris] body { background: #0b0c0e; }
@@ -2527,11 +2505,13 @@ button.stat { font: inherit; text-align: left; border: 0; color: var(--text); cu
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 1px 2px rgba(0, 0, 0, 0.22);
   }
 
-  /* Tab bar: quieter active state, same glass language as composer dock */
+  /* Tab bar: quieter active state, same glass language as composer dock.
+     v33.2: this block used to repeat left/right/bottom with its own floating-pill numbers —
+     a second, later source of truth for the bar's position that silently overrode the flush
+     edge-to-edge fix above it in the cascade (same selector, same specificity, later wins).
+     Position now lives in one place only (the main .tabbar rule); this block just layers the
+     glass background/shadow treatment on top of it. */
   .tabbar {
-    left: 0.75rem;
-    right: 0.75rem;
-    bottom: calc(0.55rem + var(--safe-bottom));
     background: linear-gradient(160deg, rgba(42, 44, 48, 0.78), rgba(18, 19, 22, 0.82));
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.12), var(--shadow-float);
   }
