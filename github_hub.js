@@ -742,6 +742,120 @@ function ghDmSlug(a, b) {
   return "dm-" + [...new Set(parts)].join("-");
 }
 
+const GH_WAKEABLE = {
+  cursor: "Cursor",
+  "cursor-cloud": "Cursor",
+  chatgpt: "ChatGPT",
+};
+const GH_RETIRED_OR_EXCLUDED = new Set([
+  "nori",
+  "grok",
+  "codex",
+  "openclaw",
+  "workhorse",
+  "claude",
+  "real-claude",
+  "hermes",
+]);
+const GH_HUMAN = new Set(["seth", "viewer", "me", "you"]);
+
+function ghResolveWakeTargets(channel, author, mentions) {
+  const authorL = String(author || "").toLowerCase();
+  const out = [];
+  const seen = new Set();
+  const add = (raw) => {
+    const key = String(raw || "").trim().toLowerCase();
+    if (!key || GH_HUMAN.has(key) || key === authorL) return;
+    if (GH_RETIRED_OR_EXCLUDED.has(key)) return;
+    const target = GH_WAKEABLE[key] || String(raw).trim();
+    const sk = target.toLowerCase();
+    if (seen.has(sk)) return;
+    seen.add(sk);
+    out.push(target);
+  };
+  if (channel && channel.kind === "dm") {
+    for (const m of channel.members || []) add(m);
+  }
+  for (const m of mentions || []) add(m);
+  return out;
+}
+
+async function ghPutRepoFile(repoPath, text, message) {
+  const path = String(repoPath).replace(/^\/+/, "");
+  const url = `/repos/${ghState.repo}/contents/${path}`;
+  let sha;
+  try {
+    const cur = await ghApi(`${url}?ref=${encodeURIComponent(ghState.branch)}`);
+    sha = cur && cur.sha;
+  } catch (err) {
+    if (!(err && err.status === 404)) throw err;
+  }
+  const content = btoa(unescape(encodeURIComponent(text)));
+  const body = { message, content, branch: ghState.branch };
+  if (sha) body.sha = sha;
+  return ghApi(url, { method: "PUT", body: JSON.stringify(body) });
+}
+
+/** Cloud Pages path: durable Cloud Wake + repository_dispatch (no Slack). */
+async function ghStackWakeFromMessage(channel, row) {
+  const targets = ghResolveWakeTargets(channel, row.author, row.mentions);
+  if (!targets.length) return { targets: [], deliveries: [] };
+  const wakeId = crypto.randomUUID();
+  const created = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  const slug = (channel && channel.slug) || row.channel_slug || "?";
+  const subject = `Stack · #${slug}`;
+  const body =
+    `${row.body || ""}\n\n— via The Stack cloud bus (not Slack)\n` +
+    `channel=\`${slug}\` message=\`${row.id}\` author=\`${row.author}\``;
+  const ev = {
+    id: wakeId,
+    created_at: created,
+    from: row.author || "Seth",
+    to: targets,
+    subject,
+    body,
+    status: "open",
+    handled_by: null,
+    handled_at: null,
+    note: null,
+    via: "stack-cloud",
+    channel_slug: slug,
+    message_id: row.id,
+  };
+  await ghPutRepoFile(
+    `Cloud/wake/events/${wakeId}.json`,
+    JSON.stringify(ev, null, 2) + "\n",
+    `stack-wake: ${subject} → ${targets.join(",")}`
+  );
+  try {
+    await ghApi(`/repos/${ghState.repo}/dispatches`, {
+      method: "POST",
+      body: JSON.stringify({
+        event_type: "cloud-wake",
+        client_payload: {
+          to: targets.length >= 3 ? "all" : targets.join(","),
+          subject,
+          body,
+          wake_id: wakeId,
+          from_agent: row.author || "Seth",
+        },
+      }),
+    });
+  } catch (err) {
+    console.warn("repository_dispatch cloud-wake failed", err);
+  }
+  return {
+    targets,
+    deliveries: targets.map((t) => ({
+      target: t,
+      mode: "cloud_wake+dispatch",
+      ok: true,
+      id: wakeId,
+      detail: "Cloud/wake event + repository_dispatch",
+    })),
+  };
+}
+
 async function ghAppendMessage(slug, { body, author, parent_id, attachments }) {
   const channels = await ghListChannels();
   let ch = channels.find((c) => c.slug === slug);
@@ -785,6 +899,16 @@ async function ghAppendMessage(slug, { body, author, parent_id, attachments }) {
     },
     `stack: activity ${label}`
   );
+  // Direct Stack→agent (cloud): Cloud Wake + Actions fan-out. Not Slack.
+  try {
+    const authorL = String(row.author || "").toLowerCase();
+    if (authorL === "seth" || authorL === "viewer") {
+      row.delivery = await ghStackWakeFromMessage(ch, row);
+    }
+  } catch (err) {
+    console.warn("stack wake failed", err);
+    row.delivery = { targets: [], deliveries: [], error: String((err && err.message) || err) };
+  }
   return row;
 }
 

@@ -301,7 +301,7 @@ function showCloudConnect(errMsg) {
   }
 }
 
-const STACK_VERSION = "v33.3";
+const STACK_VERSION = "v34.0";
 function paintVersion() {
   document.querySelectorAll("[data-stack-version]").forEach((el) => (el.textContent = STACK_VERSION));
 }
@@ -644,10 +644,10 @@ function paintChannelNav() {
   paintChatsInbox();
 }
 
-/* v26: session strip on the chat screen — agents first (Claude on top), then channels. */
+/* v26: session strip on the chat screen — live agents first, then channels. */
 const LAST_CHAT_KEY = "stack-last-chat-v1";
-const AGENT_ORDER = ["claude", "cursor", "chatgpt", "hermes"];
-const ARCHIVED_AGENTS = new Set(["nori"]);
+const AGENT_ORDER = ["chatgpt", "cursor", "gemini", "claude"];
+const ARCHIVED_AGENTS = new Set(["nori", "workhorse", "hermes"]);
 function sessionList() {
   const viewer = currentViewer();
   const dms = (state.channels || []).filter((c) => {
@@ -1030,30 +1030,26 @@ function closeChatSheetImmediate() {
   if (box) box.style.overflow = "";
 }
 
-/* ---- Command centre (v23): agents running, model pickers, git-main feed ---- */
-// v33.3: this list had drifted from hub/agents.json — Workhorse (the FreeLLM/Ollama CLI grind
-// worker, split out from "Claude" as its own named identity in CLAUDE.md on 2026-11-17) was never
-// added here, so it never showed up in the Agents tab at all despite having its own entry and
-// model preference in the hub. Keep this in sync with hub/agents.json's agent keys going forward.
+/* ---- Command centre (v34.0): live agents, model pickers, git-main feed ---- */
 const AGENT_ROSTER = [
-  { name: "Claude", role: "Engineering grind", aliases: ["claude"] },
-  { name: "Workhorse", role: "FreeLLM/Ollama CLI grind (wire id: Claude)", aliases: ["workhorse"] },
+  { name: "ChatGPT", role: "Orchestrator + verify", aliases: ["chatgpt"] },
   { name: "Cursor", role: "Build + integrate", aliases: ["cursor"] },
   { name: "Cursor-Cloud", role: "Cloud coordinator", aliases: ["cursor-cloud", "cursor cloud"] },
-  { name: "ChatGPT", role: "Coord + verify", aliases: ["chatgpt"] },
-  { name: "Hermes", role: "Standby (when tasked)", aliases: ["hermes", "windows-migration"] },
-  { name: "Nori", role: "Archived", aliases: ["nori"], archived: true },
+  { name: "Gemini", role: "Trial peer (Antigravity)", aliases: ["gemini"] },
+  { name: "Real-Claude", role: "The Stack collaborator (manual)", aliases: ["real-claude", "claude", "claude pro"] },
+  { name: "Workhorse", role: "Retired (19 Nov 2026) — former CLI grind", aliases: ["workhorse"], archived: true },
+  { name: "Hermes", role: "Wiped / parked (19 Nov 2026)", aliases: ["hermes", "windows-migration"], archived: true },
+  { name: "Nori", role: "Separate Grok lane (archived)", aliases: ["nori", "grok"], archived: true },
 ];
-// Workhorse shares its wire id with Claude (see hub/agents.json's note), so it has no DM channel
-// of its own — route its "open chat" action to Claude's DM rather than leaving it unclickable.
-const DM_WIRE_SHARE = { Workhorse: "Claude" };
+const DM_WIRE_SHARE = { "Real-Claude": "Claude", Workhorse: "Claude", "Cursor-Cloud": "Cursor" };
 const MODEL_OPTIONS = {
-  Claude: ["Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Haiku 5.5", "Claude Fable 5.2"],
-  Workhorse: ["Claude Opus 5.5", "Claude Sonnet 5.5", "Local (Ollama)", "FreeLLM gateway"],
+  ChatGPT: ["Default", "Fast", "Deep reasoning"],
   Cursor: ["Auto", "Claude Opus 5.5", "Claude Sonnet 5.5", "GPT (latest)", "Gemini (latest)"],
   "Cursor-Cloud": ["Auto", "Claude Opus 5.5", "Claude Sonnet 5.5", "GPT (latest)"],
-  ChatGPT: ["Default", "Fast", "Deep reasoning"],
-  Hermes: ["Local (Ollama)", "FreeLLM gateway", "Claude Sonnet 5.5"],
+  Gemini: ["Gemini 4 Argon (Medium)", "Gemini 4 Carbon", "Gemini 4 Hydrogen"],
+  "Real-Claude": ["Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Haiku 5.5"],
+  Workhorse: ["retired"],
+  Hermes: ["wiped"],
   Nori: ["Grok (latest)", "Grok fast"],
 };
 const AGENT_ACTIVE_MS = 2 * 3600 * 1000;
@@ -2199,24 +2195,24 @@ document.getElementById("notes-list")?.addEventListener("click", async (e) => {
  * v31.8: tap a computer → detail sheet (install cmd, Tailscale, mentions, refresh). */
 const HOSTS = [
   {
-    id: "windows",
-    name: "Windows PC",
-    role: "Always-on host",
-    ids: ["desktop-kg22uf0", "windows", "win"],
-    match: /DESKTOP-KG22UF0|\bWindows (PC|host|DC|box|machine)\b/i,
-    install: "powershell -ExecutionPolicy Bypass -File Projects\\The-Stack\\heartbeat\\install-windows.ps1",
-    runs: "Desktop Commander · Hermes · Ollama line-bridge",
-    agents: ["Hermes", "Claude"],
-  },
-  {
     id: "mac",
     name: "Mac",
-    role: "MacBook (advisor)",
+    role: "MacBook Pro (live build host)",
     ids: ["mac", "macbook", "seths-macbook"],
     match: /\bMacBook\b|\bMac (asleep|sleep|awake|wake|offline|online|not listed|DC|host)\b|\bwake Mac\b/i,
     install: "bash Projects/The-Stack/heartbeat/install-mac.sh",
-    runs: "Cursor · Claude CLI · Wispr · Obsidian vault",
-    agents: ["Cursor", "Claude"],
+    runs: "Cursor · Gemini (Antigravity) · Obsidian vault",
+    agents: ["Cursor", "Gemini"],
+  },
+  {
+    id: "windows",
+    name: "Windows PC",
+    role: "Parked (Hermes wiped 19 Nov)",
+    ids: ["desktop-kg22uf0", "windows", "win"],
+    match: /DESKTOP-KG22UF0|\bWindows (PC|host|DC|box|machine)\b/i,
+    install: "powershell -ExecutionPolicy Bypass -File Projects\\The-Stack\\heartbeat\\install-windows.ps1",
+    runs: "Parked — Hermes runtime offline until rebuilt",
+    agents: [],
   },
 ];
 function hostClause(ev, re) {
