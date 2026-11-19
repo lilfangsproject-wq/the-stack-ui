@@ -313,7 +313,7 @@ function showCloudConnect(errMsg) {
   if (gemInput && getGeminiKey()) gemInput.value = getGeminiKey();
 }
 
-const STACK_VERSION = "v38.0";
+const STACK_VERSION = "v39.0";
 const GEMINI_KEY_STORAGE = "stack-gemini-key-v1";
 const GEMINI_MODEL_STORAGE = "stack-gemini-model-v1";
 const GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite";
@@ -398,8 +398,15 @@ function initGeminiSettings() {
 }
 function shouldInstantGemini(slug, body) {
   if (!getGeminiKey()) return false;
-  if (!String(body || "").trim()) return false;
-  return slug === "dm-gemini-seth" || /\B@gemini\b/i.test(String(body || ""));
+  const text = String(body || "").trim();
+  if (!text) return false;
+  if (slug === "dm-gemini-seth") return true;
+  if (/\B@(gemini|all)\b/i.test(text)) return true;
+  // Inside #peer-floor, Gemini acts as live Orchestrator unless Seth prefixes solely one other agent.
+  if (slug === "peer-floor" && !/^@(chatgpt|cursor|claude|real-claude|nori|grokbot)\b(?!.*\B@gemini\b)/i.test(text)) {
+    return true;
+  }
+  return false;
 }
 function buildGeminiPromptInput(slug, userText, prevInteractionId) {
   if (prevInteractionId) return userText;
@@ -412,7 +419,7 @@ function buildGeminiPromptInput(slug, userText, prevInteractionId) {
 }
 async function streamGeminiOnce({ key, model, slug, userText, prevInteractionId, onDelta }) {
   const systemInstruction =
-    'You are Gemini inside "The Stack", Seth\'s agent command centre (live peers: ChatGPT orchestrator, Cursor engineer, Gemini trial peer; Workhorse & Hermes are retired). Be direct, honest, technically sharp, and concise with zero fluff.';
+    'You are Gemini — Orchestrator / Boss inside "The Stack", Seth\'s command centre. Unified 6-agent team: Gemini (you · orchestrator, live SSE, Vision & Google Workspace Hub), @ChatGPT (ideation, continuity & independent verifier — not boss), @Cursor (engineering, tests & PRs), @Claude (the real Claude app · high-burst architect), @Nori (trends, social & AskGazza/Newmy funnel synth), and @Grokbot (challenger & signal synth). Hermes is wiped/parked; legacy Workhorse CLI is deleted. Always assign concrete owners with @Name tags when coordinating, keep replies concise and brutally honest with zero fluff, and be candid about which actions execute via repo/Cursor/Gemini vs waiting for manual app pickup in external UIs.';
   const payload = {
     model,
     system_instruction: systemInstruction,
@@ -860,8 +867,8 @@ function paintChannelNav() {
 
 /* v26: session strip on the chat screen — live agents first, then channels. */
 const LAST_CHAT_KEY = "stack-last-chat-v1";
-const AGENT_ORDER = ["chatgpt", "cursor", "gemini", "claude"];
-const ARCHIVED_AGENTS = new Set(["nori", "workhorse", "hermes"]);
+const AGENT_ORDER = ["gemini", "chatgpt", "cursor", "claude", "nori", "grokbot"];
+const ARCHIVED_AGENTS = new Set(["hermes"]);
 function sessionList() {
   const viewer = currentViewer();
   const dms = (state.channels || []).filter((c) => {
@@ -953,7 +960,11 @@ function paintChatsInbox() {
   if (!inbox) return;
   const viewer = currentViewer();
   refreshUnreadBadges();
-  const rows = sessionList();
+  const rows = sessionList().sort((a, b) => {
+    if (a.slug === "peer-floor") return -1;
+    if (b.slug === "peer-floor") return 1;
+    return 0;
+  });
   if (!rows.length) {
     inbox.innerHTML = `<p class="home-empty">No chats yet. Open an agent DM from Home or Agents.</p>`;
     return;
@@ -961,15 +972,16 @@ function paintChatsInbox() {
   inbox.innerHTML = rows
     .map((c) => {
       const dm = c.kind === "dm";
-      const label = dm ? dmLabel(c, viewer) : `#${c.slug}`;
+      const isFloor = c.slug === "peer-floor";
+      const label = isFloor ? "Peer Floor · Orchestrator Huddle" : dm ? dmLabel(c, viewer) : `#${c.slug}`;
       const last = (state.lastPreviewBySlug && state.lastPreviewBySlug[c.slug]) || "";
       const preview = last || c.purpose || (dm ? "Direct messages" : "Channel");
       const time = c.updated_at ? `<time class="chat-inbox-time">${esc(fmtTime(c.updated_at))}</time>` : "";
       const unread = state.unreads[c.slug]
         ? `<span class="chat-inbox-unread" aria-label="unread"></span>`
         : "";
-      return `<button type="button" class="chat-inbox-row" data-slug="${esc(c.slug)}">
-        <span class="chat-inbox-av" aria-hidden="true">${esc(initialOf(label))}</span>
+      return `<button type="button" class="chat-inbox-row${isFloor ? " is-floor" : ""}" data-slug="${esc(c.slug)}">
+        <span class="chat-inbox-av" aria-hidden="true">${isFloor ? "★" : esc(initialOf(label))}</span>
         <span class="chat-inbox-main">
           <strong>${esc(label)}${time}</strong>
           <span>${esc(preview)}</span>
@@ -1168,8 +1180,9 @@ function showView(view) {
     closeChatSheetImmediate();
     document.getElementById("lists-pane").classList.remove("open");
     if (typeof setActiveTab === "function") setActiveTab("notes");
-    loadNotes().catch((err) => {
-      document.getElementById("notes-list").innerHTML = `<p class="home-empty">${esc(friendlyError(err))}</p>`;
+    loadBriefAndNotes().catch((err) => {
+      const bv = document.getElementById("brief-view");
+      if (bv) bv.innerHTML = `<p class="home-empty">${esc(friendlyError(err))}</p>`;
     });
     return;
   }
@@ -1248,24 +1261,24 @@ function closeChatSheetImmediate() {
 
 /* ---- Command centre (v34.0): live agents, model pickers, git-main feed ---- */
 const AGENT_ROSTER = [
-  { name: "ChatGPT", role: "Orchestrator + backlog filter", aliases: ["chatgpt"] },
-  { name: "Cursor", role: "Build + integrate", aliases: ["cursor"] },
-  { name: "Cursor-Cloud", role: "Cloud coordinator", aliases: ["cursor-cloud", "cursor cloud"] },
-  { name: "Gemini", role: "Vision + live streaming + Workspace", aliases: ["gemini"] },
-  { name: "Grokbot", role: "Challenger + trend/social", aliases: ["grokbot", "grok", "nori"] },
-  { name: "Real-Claude", role: "High-burst architect + Stack", aliases: ["real-claude", "claude", "claude pro"] },
-  { name: "Workhorse", role: "Retired (19 Nov 2026) — former CLI grind", aliases: ["workhorse"], archived: true },
+  { name: "Gemini", role: "Orchestrator / boss · Vision + Workspace", aliases: ["gemini"] },
+  { name: "ChatGPT", role: "Ideation + independent verifier", aliases: ["chatgpt", "gpt"] },
+  { name: "Cursor", role: "Build + tests + PR integration", aliases: ["cursor"] },
+  { name: "Cursor-Cloud", role: "Cloud worker", aliases: ["cursor-cloud", "cursor cloud"] },
+  { name: "Claude", role: "High-burst architect · real Claude app", aliases: ["claude", "real-claude", "claude pro", "claude app"] },
+  { name: "Nori", role: "Trends + social + funnel synth", aliases: ["nori"] },
+  { name: "Grokbot", role: "Stack challenger + signal synth", aliases: ["grokbot", "grok", "grok bot"] },
   { name: "Hermes", role: "Wiped / parked (19 Nov 2026)", aliases: ["hermes", "windows-migration"], archived: true },
 ];
-const DM_WIRE_SHARE = { "Real-Claude": "Claude", Workhorse: "Claude", "Cursor-Cloud": "Cursor" };
+const DM_WIRE_SHARE = { "Cursor-Cloud": "Cursor" };
 const MODEL_OPTIONS = {
+  Gemini: ["Gemini 4 Argon (Medium)", "Gemini 4 Hydrogen (XHigh)", "Gemini 4 Hydrogen (Medium)", "Gemini 3.8 Flash (Medium)", "Gemini 3.5 Flash-Lite"],
   ChatGPT: ["Default", "Fast", "Deep reasoning"],
   Cursor: ["Auto", "Claude Opus 5.5", "Claude Sonnet 5.5", "GPT (latest)", "Gemini (latest)"],
   "Cursor-Cloud": ["Auto", "Claude Opus 5.5", "Claude Sonnet 5.5", "GPT (latest)"],
-  Gemini: ["Gemini 4 Hydrogen (XHigh)", "Gemini 4 Hydrogen (Medium)", "Gemini 3.8 Flash (Medium)", "Gemini 3.5 Flash-Lite"],
+  Claude: ["Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Haiku 5.5"],
+  Nori: ["Grok (latest)", "Grok fast"],
   Grokbot: ["Grok (latest)", "Grok fast"],
-  "Real-Claude": ["Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Haiku 5.5"],
-  Workhorse: ["retired"],
   Hermes: ["wiped"],
 };
 const AGENT_ACTIVE_MS = 2 * 3600 * 1000;
@@ -2160,7 +2173,43 @@ function paintAgentsView() {
   if (!state.agentsSeg) state.agentsSeg = lists.needs.length ? "needs" : lists.running.length ? "running" : "done";
   const seg = state.agentsSeg;
   const running = cc.agents.filter((a) => a.status === "active").length;
-  document.getElementById("agents-headline").textContent = `${running} running · ${lists.needs.length} need you`;
+  document.getElementById("agents-headline").textContent = `${liveAgentRoster().filter((a) => a.name !== "Cursor-Cloud").length} in huddle · Gemini orchestrating · ${lists.needs.length} need you`;
+
+  const teamCards = liveAgentRoster()
+    .filter((a) => a.name !== "Cursor-Cloud")
+    .map((a) => {
+      const m = cc.agents.find((x) => x.name === a.name) || { status: "idle", statusLabel: "Ready in Stack" };
+      const model = (state.agentPrefs[a.name] || {}).model || "";
+      const isBoss = a.name === "Gemini";
+      const statusText = m.status === "idle" ? "Ready in Stack" : m.statusLabel;
+      return `<article class="huddle-card${isBoss ? " boss" : ""}">
+        <div class="huddle-top">
+          <div class="huddle-who">
+            <span class="agent-avatar sm" aria-hidden="true">${initialOf(a.name)}<i class="sdot"></i></span>
+            <div>
+              <strong>${esc(a.name)}${isBoss ? " ★" : ""}</strong>
+              <div class="since-card-who">${esc(model || statusText)}</div>
+            </div>
+          </div>
+          <span class="bento-tag ${isBoss || m.status === "active" ? "live" : ""}">${isBoss ? "Boss" : esc(statusText)}</span>
+        </div>
+        <div class="huddle-role">${esc(a.role)}</div>
+        <div class="ws-card-actions">
+          <button type="button" class="act act-primary" data-open-agent="${esc(a.name)}">💬 Open DM</button>
+          <button type="button" class="ghost" data-agent-filter="${esc(a.name)}">${f === a.name ? "Showing" : "Filter jobs"}</button>
+        </div>
+      </article>`;
+    })
+    .join("");
+
+  const teamDeckHtml = `<section class="huddle-hero">
+      <div>
+        <h2>Gemini Orchestrated Huddle (6 Bots)</h2>
+        <p>Talk to everyone together in #peer-floor or tap any teammate below to open their DM.</p>
+      </div>
+      <button type="button" class="act act-primary" data-open-channel="peer-floor">🗣️ Open #peer-floor</button>
+    </section>
+    <section class="huddle-grid" aria-label="Unified Team">${teamCards}</section>`;
 
   const strip = cc.agents
     .map((a) => {
@@ -2208,6 +2257,7 @@ function paintAgentsView() {
         .join("")}</section>`
     : `<section class="handover-panel"><h3 class="task-day">Handovers</h3><p class="home-empty">No open handovers. Dispatches without acknowledgement never count as done.</p></section>`;
   const agentsHtml = `
+    ${teamDeckHtml}
     <div class="agents-controls">
     <div class="agent-strip">${strip}</div>
     <div class="seg linear-seg" role="tablist">
@@ -2365,6 +2415,186 @@ function paintNotes() {
   if (list.dataset.sig === html) return;
   list.dataset.sig = html;
   list.innerHTML = html;
+}
+/* v39.0 — In-app Vision & Exec Brief + Master Workstreams (no tiny mobile spreadsheets) + Quick Notes */
+const WS_DONE_KEY = "stack-ws-done-v1";
+function loadWsDoneSet() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(WS_DONE_KEY) || "[]");
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+function saveWsDoneSet(set) {
+  try {
+    localStorage.setItem(WS_DONE_KEY, JSON.stringify([...set]));
+  } catch {
+    /* ignore */
+  }
+}
+function wsEffectiveState(w, doneSet = loadWsDoneSet()) {
+  const sethDone = doneSet.has(w.id);
+  const archived = /no-go|closed|archived/i.test(String(w.status || ""));
+  return {
+    sethDone,
+    archived,
+    status: sethDone ? "Done (Seth)" : w.status || "Active",
+    tone: sethDone ? "done" : w.tone || "",
+  };
+}
+function renderWorkstreamCardHtml(w, doneSet = loadWsDoneSet()) {
+  const st = wsEffectiveState(w, doneSet);
+  const owners = (w.owners || []).join(" · ") || "Seth";
+  return `<article class="ws-card${st.sethDone ? " done" : ""}" data-ws-id="${esc(w.id)}">
+    <div class="ws-card-head">
+      <div>
+        <div class="ws-card-meta">${esc(w.category || "Workstream")}${w.deadline ? ` · Due ${esc(w.deadline)}` : ""}</div>
+        <h3 class="ws-card-title">${esc(w.name)}</h3>
+      </div>
+      <span class="bento-tag ${esc(st.tone)}">${esc(st.status)}</span>
+    </div>
+    <div class="ws-card-line"><strong>Next Move</strong>${esc(w.next_action || "—")}</div>
+    <div class="ws-card-line"><strong>Gate / Blocker</strong>${esc(w.blocker || "None")}</div>
+    <div class="ws-card-line"><strong>Owners</strong>${esc(owners)}</div>
+    <div class="ws-card-actions">
+      <button type="button" class="act${st.sethDone ? "" : " act-primary"}" data-toggle-ws-done="${esc(w.id)}">${st.sethDone ? "↺ Reopen" : "✓ Mark Done"}</button>
+      ${w.channel_slug ? `<button type="button" class="act" data-open-channel="${esc(w.channel_slug)}">💬 #${esc(w.channel_slug)}</button>` : ""}
+      <button type="button" class="ghost" data-open-ws="${esc(w.id)}">Details</button>
+    </div>
+  </article>`;
+}
+function paintBriefView() {
+  const tab = state.briefTab || "brief";
+  document.querySelectorAll("#brief-seg [data-brief-tab]").forEach((btn) => {
+    const on = btn.dataset.briefTab === tab;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-selected", String(on));
+  });
+  const bv = document.getElementById("brief-view");
+  const nc = document.getElementById("notes-capture");
+  if (!bv || !nc) return;
+  bv.classList.toggle("hidden", tab === "notes");
+  nc.classList.toggle("hidden", tab !== "notes");
+  if (tab === "notes") {
+    paintNotes();
+    return;
+  }
+  const cc = state.lastCc || state.agentsCC || {};
+  const wsData = cc.workstreamsData || {};
+  const workstreams = state.lastWorkstreams || (Array.isArray(wsData.workstreams) ? wsData.workstreams : []);
+  const opps = Array.isArray(wsData.opportunities) ? wsData.opportunities : [];
+  const doneSet = loadWsDoneSet();
+  const needsCount = (cc.needsList || []).length;
+  const keptCount = (state.lastKeptDebrief || []).length;
+  const openWs = workstreams.filter((w) => !wsEffectiveState(w, doneSet).sethDone && !wsEffectiveState(w, doneSet).archived);
+  const doneWs = workstreams.filter((w) => wsEffectiveState(w, doneSet).sethDone);
+  const headlineEl = document.getElementById("notes-headline");
+  if (headlineEl) {
+    headlineEl.textContent = `${openWs.length} open workstreams · ${doneWs.length} done (Seth) · ${opps.length} ranked opps`;
+  }
+
+  if (tab === "master") {
+    const html = `<div class="brief-section">
+        <div class="brief-banner">
+          <h2>Master Workstreams Hub</h2>
+          <p>Everything that used to sit inside the spreadsheet — built for your phone. Workstreams only turn Done when you tap <strong>✓ Mark Done</strong>.</p>
+          <div class="ws-card-actions">
+            <button type="button" class="act act-primary" data-open-channel="peer-floor">🗣️ Orchestrate in #peer-floor</button>
+          </div>
+        </div>
+        <div class="ws-cards">${workstreams.length ? workstreams.map((w) => renderWorkstreamCardHtml(w, doneSet)).join("") : `<p class="home-empty">Loading workstreams…</p>`}</div>
+      </div>`;
+    if (bv.dataset.sig !== html) {
+      bv.dataset.sig = html;
+      bv.innerHTML = html;
+    }
+    return;
+  }
+
+  const visionHeadline = (wsData.vision && wsData.vision.headline) || "Gemini-Orchestrated 6-Bot Command Centre";
+  const visionHook = (wsData.vision && wsData.vision.hook) || "WA Strata Topic 9 closes 26 Nov 2026 · AskGazza/Newmy funnel check";
+  const visionThesis = (wsData.vision && wsData.vision.thesis) || "";
+  const sethGates = Array.isArray(wsData.vision && wsData.vision.seth_gates) ? wsData.vision.seth_gates : [];
+  const urgentWs = openWs.find((w) => w.deadline) || openWs[0];
+  const oppHtml = opps.length
+    ? opps
+        .map(
+          (o) => `<article class="opp-card">
+            <div class="opp-card-head">
+              <span class="bento-tag live">#${esc(String(o.rank))} · ${esc(String(o.score))}</span>
+              <button type="button" class="ghost" data-open-channel="peer-floor">💬 Peer Floor</button>
+            </div>
+            <h3>${esc(o.title)}</h3>
+            <p>${esc(o.hook || "")}</p>
+            ${o.doc_path ? `<div class="since-card-who">${esc(o.doc_path)}</div>` : ""}
+          </article>`
+        )
+        .join("")
+    : `<p class="home-empty">No opportunities ranked yet.</p>`;
+
+  const teamHtml = liveAgentRoster()
+    .filter((a) => a.name !== "Cursor-Cloud")
+    .map(
+      (a) => `<article class="since-card">
+        <div>
+          <div class="since-card-top">
+            <strong>${esc(a.name)}${a.name === "Gemini" ? " ★" : ""}</strong>
+            <span class="bento-tag ${a.name === "Gemini" ? "live" : ""}">${a.name === "Gemini" ? "Boss" : "Live"}</span>
+          </div>
+          <div class="since-card-text" style="margin-top:0.3rem">${esc(a.role)}</div>
+        </div>
+        <div class="since-card-foot">
+          <button type="button" class="got-it-btn" data-open-agent="${esc(a.name)}">💬 Chat</button>
+        </div>
+      </article>`
+    )
+    .join("");
+
+  const briefHtml = `<div class="brief-section">
+      <article class="brief-banner">
+        <div class="ws-card-head">
+          <span class="bento-tag live">Executive Brief</span>
+          <span class="bento-tag${needsCount || urgentWs ? " warn" : ""}">${keptCount} debrief items · ${doneWs.length} done (Seth)</span>
+        </div>
+        <h2>${esc(visionHeadline)}</h2>
+        <p>${esc(visionHook)}</p>
+        ${visionThesis ? `<p>${esc(visionThesis)}</p>` : ""}
+        ${urgentWs ? `<div class="ws-card-line"><strong>Immediate Focus</strong>${esc(urgentWs.name)} — ${esc(urgentWs.next_action)}</div>` : ""}
+        ${
+          sethGates.length
+            ? `<div class="ws-card-line"><strong>Decisions Waiting on Seth</strong><ul style="margin:0.25rem 0 0;padding-left:1.1rem;display:grid;gap:0.22rem">${sethGates.map((g) => `<li>${esc(g)}</li>`).join("")}</ul></div>`
+            : ""
+        }
+        <div class="ws-card-actions">
+          <button type="button" class="act act-primary" data-open-channel="peer-floor">🗣️ Orchestrate #peer-floor</button>
+          <button type="button" class="act" data-brief-tab="master">📋 All Workstreams (${workstreams.length})</button>
+          <button type="button" id="brief-run-debrief" class="act">✦ Debrief</button>
+        </div>
+      </article>
+      <h3 class="brief-section-title">Ranked Opportunities (Clarity &amp; Upside)</h3>
+      ${oppHtml}
+      <h3 class="brief-section-title">Unified 6-Bot Team (Gemini Orchestrator)</h3>
+      <div class="huddle-grid">${teamHtml}</div>
+    </div>`;
+  if (bv.dataset.sig !== briefHtml) {
+    bv.dataset.sig = briefHtml;
+    bv.innerHTML = briefHtml;
+  }
+}
+async function loadBriefAndNotes() {
+  if (!state.lastWorkstreams || !state.lastCc) {
+    try {
+      state.lastCc = await loadCommandCentre();
+      state.lastWorkstreams = (state.lastCc.workstreamsData && state.lastCc.workstreamsData.workstreams) || [];
+    } catch {
+      /* offline fallback below */
+    }
+  }
+  if ((state.briefTab || "brief") === "notes" || !state.notes?.length) {
+    state.notes = await readNotes().catch(() => state.notes || []);
+  }
+  paintBriefView();
 }
 async function loadNotes() {
   state.notes = await readNotes();
@@ -2848,6 +3078,7 @@ function build7DayActivity(cc) {
 }
 function buildBentoHub({ cc, todos }) {
   const gotIt = loadGotItSet();
+  const doneSet = loadWsDoneSet();
   const allSince = collectSinceItems(cc, todos);
   const kept = allSince.filter((it) => !gotIt.has(it.key));
   const dismissedCount = allSince.length - kept.length;
@@ -2860,16 +3091,14 @@ function buildBentoHub({ cc, todos }) {
   state.lastWorkstreams = workstreams;
   state.lastWorkspaceLinks = wsLinks;
 
-  const activeWs = workstreams.filter((w) => !/no-go|archived|closed/i.test(String(w.status || "")));
-  const avgWsPct = activeWs.length
-    ? Math.round(activeWs.reduce((s, w) => s + Number(w.progress_pct || 0), 0) / activeWs.length)
-    : null;
+  const openWs = workstreams.filter((w) => !wsEffectiveState(w, doneSet).sethDone && !wsEffectiveState(w, doneSet).archived);
+  const gateWs = openWs.filter((w) => w.tone === "warn" || Boolean(w.deadline));
+  const sethDoneCount = workstreams.filter((w) => wsEffectiveState(w, doneSet).sethDone).length;
 
   const doneCount = (cc.doneList || []).length + (cc.commits || []).slice(0, 20).length;
   const inProgCount = todos.length + (cc.agents || []).filter((a) => a.status === "active").length;
   const needsCount = (cc.needsList || []).length;
   const denom = Math.max(1, doneCount + inProgCount + needsCount);
-  const pct = avgWsPct !== null ? avgWsPct : Math.min(99, Math.max(8, Math.round((doneCount / denom) * 100)));
   const wDone = Math.round((doneCount / denom) * 100);
   const wActive = Math.round((inProgCount / denom) * 100);
   const wNeeds = Math.max(0, 100 - wDone - wActive);
@@ -2901,56 +3130,32 @@ function buildBentoHub({ cc, todos }) {
     .map((a) => {
       const match = (cc.agents || []).find((x) => x.name === a.name);
       const on = match && (match.status === "active" || match.status === "recent");
-      const label = a.name === "Real-Claude" ? "Claude" : a.name;
-      return `<button type="button" class="bento-av${on ? " on" : ""}" data-open-agent="${esc(a.name)}">${esc(label)}</button>`;
+      const label = a.name === "Gemini" ? "Gemini ★" : a.name;
+      return `<button type="button" class="bento-av${on ? " on" : ""}" data-open-agent="${esc(a.name)}" title="${esc(a.role)}">${esc(label)}</button>`;
     })
     .join("");
 
-  const wsMiniBarsHtml = workstreams.length
-    ? `<div class="ws-bars">${workstreams
-        .slice(0, 4)
-        .map(
-          (w) => `<button type="button" class="ws-bar-row" data-open-ws="${esc(w.id)}">
-            <span class="ws-bar-top"><strong>${esc(w.name)}</strong><span>${Number(w.progress_pct || 0)}%</span></span>
-            <span class="ws-track"><span class="ws-fill${w.tone === "warn" ? " warn" : ""}" style="width:${Math.min(100, Math.max(5, Number(w.progress_pct || 0)))}%"></span></span>
-          </button>`
-        )
-        .join("")}</div>`
+  // Big inline Workstream cards (zero fake % — jobs stay open until Seth taps Mark Done)
+  const wsFeatured = [
+    ...openWs.slice(0, 3),
+    ...workstreams.filter((w) => wsEffectiveState(w, doneSet).sethDone).slice(0, 1),
+  ];
+  const wsCardsHtml = wsFeatured.length
+    ? `<div class="ws-cards">${wsFeatured.map((w) => renderWorkstreamCardHtml(w, doneSet)).join("")}</div>`
     : "";
 
   const extLinksHtml = [
-    wsLinks.sheet_url ? `<a class="ws-ext-pill" href="${esc(wsLinks.sheet_url)}" target="_blank" rel="noopener">📊 Master Sheet</a>` : "",
-    wsLinks.slides_url ? `<a class="ws-ext-pill" href="${esc(wsLinks.slides_url)}" target="_blank" rel="noopener">📽️ Slides Deck</a>` : "",
-    wsLinks.doc_url ? `<a class="ws-ext-pill" href="${esc(wsLinks.doc_url)}" target="_blank" rel="noopener">📄 Exec Brief</a>` : "",
-  ]
-    .filter(Boolean)
-    .join("");
+    `<button type="button" class="ws-ext-pill" data-open-channel="peer-floor">💬 Peer Floor Huddle</button>`,
+    `<button type="button" class="ws-ext-pill" data-open-tab="notes">🧭 Vision &amp; Master Brief</button>`,
+  ].join("");
 
   const activeTab = state.bentoTab || "since";
   let trayTitle = "Since last you looked";
   let trayHtml = "";
   if (activeTab === "workstreams") {
-    trayTitle = "Active Workstreams";
+    trayTitle = "All Workstreams";
     trayHtml = workstreams.length
-      ? workstreams
-          .map(
-            (w) => `<article class="since-card since-card-tap" data-open-ws="${esc(w.id)}">
-              <div>
-                <div class="since-card-top">
-                  <span class="bento-tag ${esc(w.tone || "")}">${esc(w.status)}</span>
-                  <span class="since-card-who">${Number(w.progress_pct || 0)}%</span>
-                </div>
-                <div class="since-card-title" style="margin-top:0.35rem">${esc(w.name)}</div>
-                <div class="ws-track" style="margin:0.35rem 0"><span class="ws-fill${w.tone === "warn" ? " warn" : ""}" style="width:${Math.min(100, Math.max(5, Number(w.progress_pct || 0)))}%"></span></div>
-                <div class="since-card-text">${esc(w.next_action || w.blocker || "")}</div>
-              </div>
-              <div class="since-card-foot">
-                <span class="since-card-who">${esc((w.owners || []).join(" · "))}</span>
-                <span class="bento-tag">${esc(w.deadline ? `Due ${w.deadline}` : `Score ${w.opportunity_score || "-"}`)}</span>
-              </div>
-            </article>`
-          )
-          .join("")
+      ? workstreams.map((w) => renderWorkstreamCardHtml(w, doneSet)).join("")
       : `<p class="home-empty">No workstream snapshot loaded.</p>`;
   } else if (activeTab === "opps") {
     trayTitle = "Ranked Opportunities";
@@ -2967,6 +3172,7 @@ function buildBentoHub({ cc, todos }) {
               </div>
               <div class="since-card-foot">
                 <span class="since-card-who">${esc(clip(o.doc_path || "", 34))}</span>
+                <button type="button" class="got-it-btn" data-open-channel="peer-floor">💬 Discuss</button>
               </div>
             </article>`
           )
@@ -2996,12 +3202,12 @@ function buildBentoHub({ cc, todos }) {
       : `<p class="home-empty">All caught up — switch to Workstreams or Opportunities above.</p>`;
   }
 
-  const urgentWs = workstreams.find((w) => w.deadline);
+  const urgentWs = openWs.find((w) => w.deadline) || openWs[0];
   const leadItem = kept[0];
   const focusHeadline = needsCount
     ? `${needsCount} item${needsCount > 1 ? "s" : ""} waiting on Seth`
     : urgentWs
-    ? `${urgentWs.name} · Due ${urgentWs.deadline}`
+    ? `${urgentWs.name}${urgentWs.deadline ? ` · Due ${urgentWs.deadline}` : ""}`
     : leadItem
     ? leadItem.title
     : "All clear on main";
@@ -3014,32 +3220,32 @@ function buildBentoHub({ cc, todos }) {
   return `<section class="bento-grid" aria-label="Workforce Command Overview">
     <article class="bento-card bento-prog">
       <div class="bento-head">
-        <h2>Progress &amp; Workstreams</h2>
-        <span class="bento-tag live">${pct}% Avg</span>
+        <h2>Workstreams &amp; Focus</h2>
+        <span class="bento-tag${gateWs.length ? " warn" : " live"}">${openWs.length} open · ${sethDoneCount} Seth done</span>
       </div>
-      <div class="bento-big"><strong>${pct}%</strong><span>${doneCount} shipped · ${inProgCount} active</span></div>
+      <div class="bento-big"><strong>${openWs.length}</strong><span>open workstreams · ${gateWs.length} gated · ${doneCount} shipped commits</span></div>
       <div class="bento-segbar" aria-hidden="true">
         <span class="seg-done" style="width:${wDone}%"></span>
         <span class="seg-active" style="width:${wActive}%"></span>
         <span class="seg-needs" style="width:${wNeeds}%"></span>
       </div>
       <div class="bento-mini-stats">
-        <button type="button" class="bento-mini-stat home-tap" data-scroll-to="cc-todos"><i class="bento-dot c1"></i><strong>${inProgCount}</strong><span>In Progress</span></button>
-        <button type="button" class="bento-mini-stat home-tap" data-scroll-to="cc-feed"><i class="bento-dot c0"></i><strong>${doneCount}</strong><span>Shipped</span></button>
+        <button type="button" class="bento-mini-stat home-tap" data-open-tab="notes"><i class="bento-dot c1"></i><strong>${openWs.length}</strong><span>Open Flows</span></button>
+        <button type="button" class="bento-mini-stat home-tap" data-open-tab="notes"><i class="bento-dot c0"></i><strong>${sethDoneCount}</strong><span>Seth Done</span></button>
         <button type="button" class="bento-mini-stat home-tap" data-scroll-to="cc-needs"><i class="bento-dot c2"></i><strong>${needsCount}</strong><span>Needs You</span></button>
       </div>
-      ${wsMiniBarsHtml}
+      ${wsCardsHtml}
     </article>
 
     <article class="bento-card bento-focus">
       <div class="bento-head">
         <span class="bento-tag live">Vision &amp; Opportunity</span>
-        <span class="bento-tag${needsCount || urgentWs ? " warn" : ""}">${kept.length} kept · ${dismissedCount} got it</span>
+        <span class="bento-tag${needsCount || (urgentWs && urgentWs.deadline) ? " warn" : ""}">${kept.length} kept · ${dismissedCount} got it</span>
       </div>
       <h3 class="bento-focus-title">${esc(focusHeadline)}</h3>
       <p class="bento-focus-sub">${esc(focusCopy)}</p>
       <div class="bento-avatars">${rosterPills}</div>
-      ${extLinksHtml ? `<div class="bento-ws-links">${extLinksHtml}</div>` : ""}
+      <div class="bento-ws-links">${extLinksHtml}</div>
       <div class="bento-cta-row">
         <button type="button" id="bento-debrief-btn" class="act act-primary">✦ Debrief me (${kept.length})</button>
         <button type="button" id="bento-quick-voice" class="act" title="Speak quick summary">▶ Voice</button>
@@ -3075,17 +3281,18 @@ function openWorkstreamSheet(wsId) {
   const ws = (state.lastWorkstreams || []).find((w) => w.id === wsId);
   const sheet = document.getElementById("workstream-sheet");
   if (!ws || !sheet) return;
+  const st = wsEffectiveState(ws);
   document.getElementById("ws-sheet-title").textContent = ws.name;
-  document.getElementById("ws-sheet-sub").textContent = `${ws.category || "Workstream"} · ${ws.status || ""}`;
-  const pctBadge = document.getElementById("ws-sheet-pct");
-  if (pctBadge) {
-    pctBadge.textContent = `${Number(ws.progress_pct || 0)}%`;
-    pctBadge.className = `bento-tag ${ws.tone || "live"}`;
+  document.getElementById("ws-sheet-sub").textContent = `${ws.category || "Workstream"} · ${(ws.owners || []).join(" · ")}`;
+  const badge = document.getElementById("ws-sheet-pct");
+  if (badge) {
+    badge.textContent = st.status;
+    badge.className = `bento-tag ${st.tone || "live"}`;
   }
   const body = document.getElementById("ws-sheet-body");
   if (body) {
     body.innerHTML = `<div class="ws-detail-card">
-      <div class="ws-track" style="height:0.5rem"><span class="ws-fill${ws.tone === "warn" ? " warn" : ""}" style="width:${Math.min(100, Math.max(5, Number(ws.progress_pct || 0)))}%"></span></div>
+      <div class="ws-detail-kv"><strong>Status</strong>${esc(st.status)}</div>
       <div class="ws-detail-kv"><strong>Owners</strong>${esc((ws.owners || []).join(" · ") || "Seth")}</div>
       <div class="ws-detail-kv"><strong>Next Concrete Move</strong>${esc(ws.next_action || "—")}</div>
       <div class="ws-detail-kv"><strong>Current Blocker / Gate</strong>${esc(ws.blocker || "None")}</div>
@@ -3095,10 +3302,9 @@ function openWorkstreamSheet(wsId) {
   }
   const actions = document.getElementById("ws-sheet-actions");
   if (actions) {
-    const links = state.lastWorkspaceLinks || {};
     actions.innerHTML = `
-      ${ws.channel_slug ? `<button type="button" class="act act-primary" data-ws-chat="${esc(ws.channel_slug)}">Open #${esc(ws.channel_slug)}</button>` : ""}
-      ${links.sheet_url ? `<a class="act" href="${esc(links.sheet_url)}" target="_blank" rel="noopener">📊 Open Master Sheet</a>` : ""}
+      <button type="button" class="act${st.sethDone ? "" : " act-primary"}" data-toggle-ws-done="${esc(ws.id)}">${st.sethDone ? "↺ Reopen Workstream" : "✓ Mark Done (Seth)"}</button>
+      ${ws.channel_slug ? `<button type="button" class="act" data-ws-chat="${esc(ws.channel_slug)}">Open #${esc(ws.channel_slug)}</button>` : ""}
     `;
   }
   sheet.hidden = false;
@@ -3151,11 +3357,9 @@ function renderDebriefSlides(slides, activeIdx = 0) {
   const cur = slides[state.debriefSlideIdx] || slides[0];
   const chartHtml =
     state.debriefSlideIdx === 0 && (state.lastWorkstreams || []).length
-      ? `<div class="debrief-chart-bars">${(state.lastWorkstreams || [])
-          .slice(0, 5)
-          .map(
-            (w) => `<div class="ws-bar-row"><span class="ws-bar-top"><strong>${esc(w.name)}</strong><span>${Number(w.progress_pct || 0)}%</span></span><span class="ws-track"><span class="ws-fill${w.tone === "warn" ? " warn" : ""}" style="width:${Math.min(100, Math.max(5, Number(w.progress_pct || 0)))}%"></span></span></div>`
-          )
+      ? `<div class="ws-cards">${(state.lastWorkstreams || [])
+          .slice(0, 4)
+          .map((w) => renderWorkstreamCardHtml(w))
           .join("")}</div>`
       : "";
   body.innerHTML = `<article class="debrief-slide">
@@ -3193,17 +3397,6 @@ async function openDebriefSheet({ useGemini = true } = {}) {
   const todos = state.lastTodos || [];
   const localSlides = buildLocalSlides(kept, cc, todos);
   sheet.hidden = false;
-  const links = state.lastWorkspaceLinks || {};
-  const slidesLink = document.getElementById("debrief-slides-link");
-  const sheetLink = document.getElementById("debrief-sheet-link");
-  if (slidesLink) {
-    slidesLink.hidden = !links.slides_url;
-    if (links.slides_url) slidesLink.href = links.slides_url;
-  }
-  if (sheetLink) {
-    sheetLink.hidden = !links.sheet_url;
-    if (links.sheet_url) sheetLink.href = links.sheet_url;
-  }
   renderDebriefSlides(localSlides, 0);
   if (sub) sub.textContent = `${kept.length} kept item${kept.length === 1 ? "" : "s"} · Instant overview`;
 
@@ -3261,9 +3454,7 @@ async function loadHome() {
       : 0) ||
     data.summary?.dms ||
     0;
-  // v33.3: this used to show dmCount as "agents" — the number of 1:1 DM channels that happen to
-  // exist, not the number of actual agents (Workhorse had none, so it silently undercounted).
-  // Use the real roster so this always matches what the Agents tab shows.
+  // v33.3: count live teammates cleanly from AGENT_ROSTER.
   const agentCount = liveAgentRoster().length;
   const branchLabel =
     state.cloudMode && typeof ghState !== "undefined"
@@ -3379,14 +3570,15 @@ async function loadHome() {
     <form id="home-quick-dispatch" class="home-dispatch" aria-label="Quick command to #peer-floor">
       <div class="hd-row">
         <select id="hd-target" aria-label="Target agent">
-          <option value="@ChatGPT @Cursor @Grokbot ">@All live</option>
+          <option value="@Gemini @ChatGPT @Cursor @Claude @Nori @Grokbot ">@All team</option>
+          <option value="@Gemini ">@Gemini ★</option>
           <option value="@ChatGPT ">@ChatGPT</option>
           <option value="@Cursor ">@Cursor</option>
+          <option value="@Claude ">@Claude</option>
+          <option value="@Nori ">@Nori</option>
           <option value="@Grokbot ">@Grokbot</option>
-          <option value="@Gemini ">@Gemini</option>
-          <option value="@Real-Claude ">@Claude</option>
         </select>
-        <input id="hd-input" type="text" placeholder="Drop a task or question to #peer-floor…" autocomplete="off" enterkeyhint="send" />
+        <input id="hd-input" type="text" placeholder="Orchestrate the team in #peer-floor…" autocomplete="off" enterkeyhint="send" />
         <button type="submit" class="act act-primary">Send</button>
       </div>
     </form>
@@ -4777,4 +4969,81 @@ document.getElementById("debrief-mark-all")?.addEventListener("click", () => {
 });
 document.getElementById("debrief-refresh")?.addEventListener("click", () => {
   openDebriefSheet({ useGemini: true });
+});
+document.getElementById("debrief-open-brief")?.addEventListener("click", () => {
+  stopDebriefVoice();
+  const s = document.getElementById("debrief-sheet");
+  if (s) s.hidden = true;
+  state.briefTab = "brief";
+  showView("notes");
+});
+document.getElementById("brief-refresh")?.addEventListener("click", () => {
+  state.lastCc = null;
+  state.lastWorkstreams = null;
+  loadBriefAndNotes().catch((err) => toast(friendlyError(err), "err"));
+});
+document.getElementById("menu-toggle-notes")?.addEventListener("click", () => setRailOpen());
+document.addEventListener("click", (e) => {
+  const toggleDone = e.target.closest("[data-toggle-ws-done]");
+  if (toggleDone) {
+    const id = toggleDone.dataset.toggleWsDone;
+    if (id) {
+      const set = loadWsDoneSet();
+      if (set.has(id)) {
+        set.delete(id);
+        toast("Reopened workstream");
+      } else {
+        set.add(id);
+        toast("Marked Done by Seth");
+      }
+      saveWsDoneSet(set);
+      if (state.view === "notes") paintBriefView();
+      if (!document.getElementById("workstream-sheet")?.hidden) openWorkstreamSheet(id);
+      if (!document.getElementById("debrief-sheet")?.hidden) {
+        renderDebriefSlides(state.debriefSlides || [], state.debriefSlideIdx || 0);
+      }
+      loadHome().catch(() => {});
+    }
+    return;
+  }
+  const openTab = e.target.closest("[data-open-tab]");
+  if (openTab) {
+    const tab = openTab.dataset.openTab;
+    setRailOpen(false);
+    if (tab) showView(tab);
+    return;
+  }
+  const briefTab = e.target.closest("[data-brief-tab]");
+  if (briefTab) {
+    state.briefTab = briefTab.dataset.briefTab || "brief";
+    paintBriefView();
+    return;
+  }
+  if (e.target.closest("#brief-run-debrief")) {
+    openDebriefSheet({ useGemini: true });
+    return;
+  }
+  const openAgentAnywhere = e.target.closest("[data-open-agent]");
+  if (openAgentAnywhere && !e.target.closest("#home-pane, #agents-body, [data-stop-nav], .model-pick, select")) {
+    e.preventDefault();
+    openAgentDm(openAgentAnywhere.dataset.openAgent).catch((err) => toast(friendlyError(err), "err"));
+    return;
+  }
+  const openWsAnywhere = e.target.closest("[data-open-ws]");
+  if (openWsAnywhere && !e.target.closest("#home-pane")) {
+    openWorkstreamSheet(openWsAnywhere.dataset.openWs);
+    return;
+  }
+  const openCh = e.target.closest("[data-open-channel]");
+  if (openCh && !e.target.closest("#home-pane")) {
+    const s = document.getElementById("debrief-sheet");
+    if (s && !s.hidden) {
+      stopDebriefVoice();
+      s.hidden = true;
+    }
+    state.channelSlug = openCh.dataset.openChannel;
+    state.threadParentId = null;
+    document.getElementById("thread")?.classList.add("hidden");
+    showView("channel");
+  }
 });

@@ -3683,3 +3683,192 @@ button.bento-av {
   gap: 0.75rem;
   align-content: start;
 }
+
+/* v39.0 — Expanded Readable Workstream Cards, Huddle Team Grid & In-App Vision/Brief */
+.ws-cards {
+  display: grid;
+  gap: 0.6rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--separator);
+}
+.ws-card {
+  border-radius: 15px;
+  padding: 0.78rem;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  display: grid;
+  gap: 0.42rem;
+}
+.ws-card.done {
+  opacity: 0.72;
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.ws-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+.ws-card-title {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.ws-card-meta {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.ws-card-line {
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--text);
+}
+.ws-card-line strong {
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 0.35rem;
+}
+.ws-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding-top: 0.25rem;
+}
+.ws-card-actions .act {
+  font-size: 0.74rem;
+  padding: 0.32rem 0.66rem;
+}
+.ws-card-actions .ghost {
+  font-size: 0.74rem;
+  padding: 0.32rem 0.6rem;
+}
+.huddle-hero {
+  border-radius: 16px;
+  padding: 0.85rem;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 14%, var(--panel)), rgba(255, 255, 255, 0.03));
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.huddle-hero h2 {
+  margin: 0 0 0.18rem;
+  font-size: 0.96rem;
+}
+.huddle-hero p {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+.huddle-grid {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.huddle-card {
+  border-radius: 15px;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  display: grid;
+  gap: 0.42rem;
+}
+.huddle-card.boss {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 7%, rgba(255, 255, 255, 0.03));
+}
+.huddle-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+.huddle-who {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.huddle-role {
+  font-size: 0.76rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+.brief-seg {
+  margin-bottom: 0.75rem;
+}
+.brief-view {
+  display: grid;
+  gap: 0.85rem;
+}
+.brief-section {
+  display: grid;
+  gap: 0.55rem;
+}
+.brief-section-title {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.brief-banner {
+  border-radius: 18px;
+  padding: 0.95rem;
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.025));
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  display: grid;
+  gap: 0.45rem;
+}
+.brief-banner h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+.brief-banner p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.opp-card {
+  border-radius: 15px;
+  padding: 0.78rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  display: grid;
+  gap: 0.35rem;
+}
+.opp-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+.opp-card h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+.opp-card p {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--muted);
+  line-height: 1.38;
+}
+.notes-capture.hidden {
+  display: none;
+}
+.bento-tag.done {
+  background: rgba(52, 211, 153, 0.16);
+  color: #34d399;
+}
+.chat-inbox-row.is-floor {
+  background: color-mix(in srgb, var(--accent) 8%, rgba(255, 255, 255, 0.03));
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+}

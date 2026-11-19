@@ -22,7 +22,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>our app · zero spend · <span data-stack-version>v38.0</span></small>
+          <small>our app · zero spend · <span data-stack-version>v39.0</span></small>
         </div>
       </div>
       <p id="boot-status">Opening the vault…</p>
@@ -55,7 +55,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>agent command centre · <span data-stack-version>v38.0</span></small>
+          <small>agent command centre · <span data-stack-version>v39.0</span></small>
         </div>
       </div>
       <div class="live-pill" id="live-pill" title="Hub connection">
@@ -65,6 +65,7 @@
       <div class="section-label">Hub</div>
       <nav class="channel-list">
         <button type="button" id="home-nav" class="active" data-view="home">Home</button>
+        <button type="button" id="brief-nav" data-open-tab="notes">Vision &amp; Brief</button>
       </nav>
       <div class="section-label">Channels</div>
       <nav id="channel-list" class="channel-list"></nav>
@@ -101,7 +102,7 @@
               <option value="gemini-4-hydrogen">gemini-4-hydrogen (Deep · auto-fallback)</option>
             </select>
           </label>
-          <p class="look-hint">Saved on this device only. Streams via v1/interactions in Gemini DM or @Gemini mentions.</p>
+          <p class="look-hint">Saved on this device only. Streams live as Gemini Orchestrator in #dm-gemini-seth, #peer-floor &amp; @Gemini mentions.</p>
         </div>
         <p id="token-hint" class="token-hint"></p>
         <p id="phone-hint" class="token-hint phone-hint" hidden></p>
@@ -133,18 +134,28 @@
 
     <main class="main hidden notes-pane" id="notes-pane">
       <header class="main-head">
+        <button type="button" id="menu-toggle-notes" class="icon-btn" aria-label="Open menu">☰</button>
         <div class="main-head-text">
-          <h1>Notes</h1>
-          <p class="purpose" id="notes-headline">Things you want to remember</p>
+          <h1>Vision &amp; Brief</h1>
+          <p class="purpose" id="notes-headline">Master workstreams, opportunities &amp; notes</p>
         </div>
+        <button type="button" id="brief-refresh" class="ghost">Refresh</button>
       </header>
       <section class="notes-body" id="notes-body">
-        <input id="note-search" class="note-search" type="search" placeholder="Search notes" aria-label="Search notes" enterkeyhint="search" />
-        <form id="note-form" class="note-compose">
-          <textarea id="note-text" rows="2" placeholder="Write a note…" aria-label="New note"></textarea>
-          <button type="submit" class="act act-primary note-save">Save</button>
-        </form>
-        <div id="notes-list" class="notes-list"></div>
+        <div id="brief-seg" class="seg linear-seg brief-seg" role="tablist" aria-label="Vision and Brief sections">
+          <button type="button" role="tab" data-brief-tab="brief" class="active">🧭 Exec Brief</button>
+          <button type="button" role="tab" data-brief-tab="master">📋 Master Hub</button>
+          <button type="button" role="tab" data-brief-tab="notes">📝 Notes</button>
+        </div>
+        <div id="brief-view" class="brief-view"></div>
+        <div id="notes-capture" class="notes-capture hidden">
+          <input id="note-search" class="note-search" type="search" placeholder="Search notes" aria-label="Search notes" enterkeyhint="search" />
+          <form id="note-form" class="note-compose">
+            <textarea id="note-text" rows="2" placeholder="Write a note…" aria-label="New note"></textarea>
+            <button type="submit" class="act act-primary note-save">Save</button>
+          </form>
+          <div id="notes-list" class="notes-list"></div>
+        </div>
       </section>
     </main>
 
@@ -175,14 +186,16 @@
       <section id="messages" class="messages" aria-live="polite"></section>
       <div id="photo-tray" class="photo-tray" hidden></div>
       <div id="quick-chips" class="quick-chips" aria-label="Quick prompts">
+        <button type="button" class="q-chip" data-insert="@Gemini @ChatGPT @Cursor @Claude @Nori @Grokbot ">@All team</button>
+        <button type="button" class="q-chip" data-insert="@Gemini ">@Gemini</button>
         <button type="button" class="q-chip" data-insert="@ChatGPT ">@ChatGPT</button>
         <button type="button" class="q-chip" data-insert="@Cursor ">@Cursor</button>
+        <button type="button" class="q-chip" data-insert="@Claude ">@Claude</button>
+        <button type="button" class="q-chip" data-insert="@Nori ">@Nori</button>
         <button type="button" class="q-chip" data-insert="@Grokbot ">@Grokbot</button>
-        <button type="button" class="q-chip" data-insert="@Gemini ">@Gemini</button>
-        <button type="button" class="q-chip" data-insert="@Real-Claude ">@Claude</button>
-        <button type="button" class="q-chip" data-send="Status check — what is open, blocked, or ready to merge right now?">⚡ Status check</button>
+        <button type="button" class="q-chip" data-send="@Gemini @ChatGPT @Cursor @Claude @Nori @Grokbot Status check — orchestrate what is open, blocked, or ready right now.">⚡ Orchestrate</button>
         <button type="button" class="q-chip" data-send="Run E2E verification and drop the receipt.">✅ Verify E2E</button>
-        <button type="button" class="q-chip" data-send="Challenge the last claim with repo paths — what works, what's fucked, exact fix.">🔥 Challenge</button>
+        <button type="button" class="q-chip" data-send="Challenge the last claim with repo paths — what works, what's broken, exact fix.">🔥 Challenge</button>
       </div>
       <form id="composer" class="composer">
         <input id="author" name="author" value="Seth" aria-label="Author" autocomplete="nickname" />
@@ -248,8 +261,7 @@
       <footer class="host-sheet-actions" id="debrief-actions">
         <button type="button" id="debrief-mark-all" class="act act-primary">✓ Mark all Got it</button>
         <button type="button" id="debrief-refresh" class="act">↻ Re-brief with Gemini</button>
-        <a id="debrief-slides-link" class="act" target="_blank" rel="noopener" hidden>📽️ Slides</a>
-        <a id="debrief-sheet-link" class="act" target="_blank" rel="noopener" hidden>📊 Sheet</a>
+        <button type="button" id="debrief-open-brief" class="act">🧭 Full Brief</button>
       </footer>
     </aside>
     <aside class="host-sheet" id="workstream-sheet" hidden>
@@ -259,7 +271,7 @@
           <h1 id="ws-sheet-title">Workstream</h1>
           <p class="purpose" id="ws-sheet-sub">Status &amp; Clarity</p>
         </div>
-        <span class="bento-tag live" id="ws-sheet-pct">0%</span>
+        <span class="bento-tag live" id="ws-sheet-pct">Active</span>
       </header>
       <section class="host-sheet-body" id="ws-sheet-body"></section>
       <footer class="host-sheet-actions" id="ws-sheet-actions"></footer>
@@ -268,7 +280,7 @@
       <button type="button" data-tab="home" class="active"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z"/></svg><span>Home</span></button>
       <button type="button" data-tab="chats"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 16.5 3.5 20V8.5A2.5 2.5 0 0 1 6 6h8a2.5 2.5 0 0 1 2.5 2.5V14A2.5 2.5 0 0 1 14 16.5z"/><path d="M8.5 11h.01M12 11h.01"/></svg><span>Chats</span></button>
       <button type="button" data-tab="agents"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="2.6"/><circle cx="16" cy="9.2" r="2"/><path d="M4.2 18.5c.7-2.4 2.6-3.6 4.8-3.6s4.1 1.2 4.8 3.6"/><path d="M14.2 15.1c1.3-.3 2.6.2 3.4 1.4.5.8.7 1.4.8 1.9"/></svg><span>Agents</span></button>
-      <button type="button" data-tab="notes"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h7.2L19 8.8V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M14 4v5h5M8.5 13h7M8.5 16.5h4.5"/></svg><span>Notes</span></button>
+      <button type="button" data-tab="notes"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h7.2L19 8.8V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M14 4v5h5M8.5 13h7M8.5 16.5h4.5"/></svg><span>Brief</span></button>
     </nav>
   </div>
   <script src="github_hub.js"></script>

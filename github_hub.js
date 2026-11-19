@@ -748,20 +748,20 @@ function ghDmSlug(a, b) {
 }
 
 const GH_WAKEABLE = {
+  gemini: "Gemini",
+  chatgpt: "ChatGPT",
+  gpt: "ChatGPT",
   cursor: "Cursor",
   "cursor-cloud": "Cursor",
-  chatgpt: "ChatGPT",
-  gemini: "Gemini",
+  claude: "Claude",
+  "real-claude": "Claude",
+  nori: "Nori",
   grokbot: "Grokbot",
   grok: "Grokbot",
-  nori: "Grokbot",
 };
 const GH_RETIRED_OR_EXCLUDED = new Set([
   "codex",
   "openclaw",
-  "workhorse",
-  "claude",
-  "real-claude",
   "hermes",
 ]);
 const GH_HUMAN = new Set(["seth", "viewer", "me", "you"]);
