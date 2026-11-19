@@ -2832,10 +2832,18 @@ button.host:focus-visible {
   padding: 0.15rem 0 0.35rem;
   gap: 0.45rem;
   align-items: center;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+.host-sheet-head .main-head-text {
+  min-width: 8rem;
+  flex: 1 1 auto;
 }
 .host-sheet-head .aw-pill { margin-left: auto; flex: 0 0 auto; }
 .host-sheet-body {
+  flex: 1 1 auto;
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
   min-height: 0;
   display: grid;
   gap: 0.75rem;
@@ -2898,8 +2906,18 @@ button.host:focus-visible {
 .host-mentions li span { font-size: 0.78rem; color: color-mix(in srgb, var(--text) 80%, transparent); }
 .host-mentions time { font-size: 0.68rem; color: var(--muted); }
 .host-sheet-actions {
+  flex: 0 0 auto;
   display: grid;
   gap: 0.4rem;
+}
+#debrief-sheet {
+  max-height: min(86dvh, 44rem);
+}
+#debrief-actions {
+  grid-template-columns: 1fr 1fr;
+}
+#debrief-actions #debrief-mark-all {
+  grid-column: 1 / -1;
 }
 .host-sheet-actions .act {
   width: 100%;
@@ -3636,10 +3654,11 @@ button.bento-av {
   color: var(--accent);
 }
 .debrief-tabs {
+  flex: 0 0 auto;
   display: flex;
   gap: 0.38rem;
   overflow-x: auto;
-  padding: 0.5rem 0.9rem 0.25rem;
+  padding: 0.35rem 0.2rem 0.45rem;
   border-bottom: 1px solid var(--separator);
   scrollbar-width: none;
 }

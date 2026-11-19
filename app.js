@@ -622,18 +622,18 @@ async function streamGeminiOnce({ key, model, slug, userText, prevInteractionId,
   }
   return { text: fullText.trim(), model, interactionId };
 }
-async function streamGeminiInteraction({ slug, userText, onDelta }) {
+async function streamGeminiInteraction({ slug, userText, onDelta, fresh = false }) {
   const key = getGeminiKey();
   if (!key) throw new Error("Gemini API key not configured");
   const preferred = getGeminiModel();
-  const prevId = state.geminiInteractionBySlug[slug] || null;
+  const prevId = fresh ? null : state.geminiInteractionBySlug[slug] || null;
   const attempts = preferred === GEMINI_DEFAULT_MODEL ? [[preferred, prevId]] : [[preferred, prevId], [GEMINI_DEFAULT_MODEL, null]];
   let lastErr;
   for (let i = 0; i < attempts.length; i++) {
     const [model, pid] = attempts[i];
     try {
       const out = await streamGeminiOnce({ key, model, slug, userText, prevInteractionId: pid, onDelta });
-      if (out.interactionId) state.geminiInteractionBySlug[slug] = out.interactionId;
+      if (!fresh && out.interactionId) state.geminiInteractionBySlug[slug] = out.interactionId;
       if (out.text) return out;
       throw new Error(`Gemini (${model}) returned an empty response`);
     } catch (err) {
@@ -4272,6 +4272,7 @@ function renderDebriefSlides(slides, activeIdx = 0) {
   const tabs = document.getElementById("debrief-tabs");
   const body = document.getElementById("debrief-body");
   if (!tabs || !body) return;
+  const prevScroll = body.scrollTop;
   tabs.innerHTML = slides
     .map((s, i) => `<button type="button" class="debrief-tab${i === state.debriefSlideIdx ? " active" : ""}" data-slide="${i}">${esc(s.tab)}</button>`)
     .join("");
@@ -4292,6 +4293,7 @@ function renderDebriefSlides(slides, activeIdx = 0) {
     <ul>${(cur.bullets || []).map((b) => `<li>${esc(b)}</li>`).join("")}</ul>
     ${chartHtml}
   </article>`;
+  body.scrollTop = prevScroll;
 }
 
 window.__stackUtterances = window.__stackUtterances || [];
@@ -4403,7 +4405,12 @@ function speakStackText(text, btnEl, idleLabel = "▶ Voice") {
 }
 
 function parseAiSlides(text, fallbackSlides) {
-  const sections = String(text || "").split(/^##\s+/m).filter(Boolean);
+  const cleaned = String(text || "")
+    .replace(/^```(?:markdown|md)?\s*\n?/i, "")
+    .replace(/\n?```\s*$/i, "");
+  const firstHeading = cleaned.search(/^##\s+/m);
+  if (firstHeading < 0) return null;
+  const sections = cleaned.slice(firstHeading).split(/^##\s+/m).filter(Boolean);
   if (sections.length < 2) return null;
   const tabs = ["1 · Vision", "2 · Shipped", "3 · Clarity", "4 · Next"];
   return sections.slice(0, 4).map((sec, idx) => {
@@ -4414,20 +4421,38 @@ function parseAiSlides(text, fallbackSlides) {
   });
 }
 
-async function openDebriefSheet({ useGemini = true } = {}) {
+async function openDebriefSheet({ useGemini = true, explicit = false } = {}) {
+  if (state._debriefRunning) return;
   stopDebriefVoice();
   const sheet = document.getElementById("debrief-sheet");
   const sub = document.getElementById("debrief-sub");
+  const refreshBtn = document.getElementById("debrief-refresh");
   if (!sheet) return;
   const kept = state.lastKeptDebrief || [];
   const cc = state.lastCc || {};
   const todos = state.lastTodos || [];
   const localSlides = buildLocalSlides(kept, cc, todos);
   sheet.hidden = false;
-  renderDebriefSlides(localSlides, 0);
+  if (!explicit || !(state.debriefSlides && state.debriefSlides.length)) {
+    renderDebriefSlides(localSlides, 0);
+  }
   if (sub) sub.textContent = `${kept.length} kept item${kept.length === 1 ? "" : "s"} · Instant overview`;
 
-  if (!useGemini || !getGeminiKey() || !kept.length) return;
+  if (!useGemini) return;
+  if (!getGeminiKey()) {
+    if (explicit) toast("Add a Gemini API key in Settings (☰) to enable AI re-briefing", "err");
+    return;
+  }
+  if (!kept.length) {
+    if (explicit) toast("No kept updates to re-brief — showing current summary");
+    return;
+  }
+
+  state._debriefRunning = true;
+  if (refreshBtn) {
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = "↻ Re-briefing…";
+  }
   if (sub) sub.textContent = `${kept.length} kept · Compiling Gemini presentation…`;
   try {
     const summaryInput = [
@@ -4442,20 +4467,38 @@ async function openDebriefSheet({ useGemini = true } = {}) {
 ## Opportunities & Blockers
 ## Next Moves
 Each section must have 2-4 sharp bullets. Zero fluff.\n\n${summaryInput}`;
+    let lastPaintAt = 0;
     const out = await streamGeminiInteraction({
       slug: "debrief-presentation",
       userText: prompt,
+      fresh: true,
       onDelta: (partial) => {
+        const now = Date.now();
+        if (now - lastPaintAt < 150) return;
         const parsed = parseAiSlides(partial, localSlides);
-        if (parsed) renderDebriefSlides(parsed, state.debriefSlideIdx || 0);
+        if (parsed) {
+          lastPaintAt = now;
+          renderDebriefSlides(parsed, state.debriefSlideIdx || 0);
+        }
       },
     });
     const finalParsed = parseAiSlides(out.text, localSlides);
-    if (finalParsed) renderDebriefSlides(finalParsed, state.debriefSlideIdx || 0);
-    if (sub) sub.textContent = `${kept.length} kept · Briefed by ${out.model}`;
+    if (finalParsed) {
+      renderDebriefSlides(finalParsed, state.debriefSlideIdx || 0);
+      if (sub) sub.textContent = `${kept.length} kept · Briefed by ${out.model}`;
+    } else {
+      renderDebriefSlides(localSlides, state.debriefSlideIdx || 0);
+      if (sub) sub.textContent = `${kept.length} kept · Local summary (AI format fallback)`;
+    }
   } catch (err) {
     if (sub) sub.textContent = `${kept.length} kept · Offline slide summary`;
     toast(`Debrief AI fallback: ${friendlyError(err)}`, "err");
+  } finally {
+    state._debriefRunning = false;
+    if (refreshBtn) {
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = "↻ Re-brief with Gemini";
+    }
   }
 }
 
@@ -6097,7 +6140,7 @@ document.getElementById("debrief-mark-all")?.addEventListener("click", () => {
   loadHome().catch(() => {});
 });
 document.getElementById("debrief-refresh")?.addEventListener("click", () => {
-  openDebriefSheet({ useGemini: true });
+  openDebriefSheet({ useGemini: true, explicit: true });
 });
 document.getElementById("debrief-open-brief")?.addEventListener("click", () => {
   stopDebriefVoice();
@@ -6143,7 +6186,7 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (e.target.closest("#brief-run-debrief")) {
-    openDebriefSheet({ useGemini: true });
+    openDebriefSheet({ useGemini: true, explicit: true });
     return;
   }
   const holdWs = e.target.closest("[data-toggle-ws-hold]");
