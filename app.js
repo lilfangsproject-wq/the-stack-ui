@@ -543,16 +543,16 @@ function buildGeminiPromptInput(slug, userText, prevInteractionId) {
   if (!recent.length) return userText;
   return `Recent #${slug} context:\n${recent.join("\n")}\n\nSeth: ${userText}`;
 }
-async function streamGeminiOnce({ key, model, slug, userText, prevInteractionId, onDelta }) {
+async function streamGeminiOnce({ key, model, slug, userText, prevInteractionId, onDelta, fresh = false, maxOutputTokens = 900 }) {
   const systemInstruction =
     'You are Gemini — Orchestrator / Boss inside "The Stack", Seth\'s command centre. Unified 6-agent team: Gemini (you · orchestrator, live SSE, Vision & Google Workspace Hub), @ChatGPT (ideation, continuity & independent verifier — not boss), @Cursor (engineering, tests & PRs), @Claude (the real Claude app · high-burst architect), @Nori (trends, social & AskGazza/Newmy funnel synth), and @Grokbot (challenger & signal synth). Hermes is wiped/parked; legacy Workhorse CLI is deleted. Always assign concrete owners with @Name tags when coordinating, keep replies concise and brutally honest with zero fluff, and be candid about which actions execute via repo/Cursor/Gemini vs waiting for manual app pickup in external UIs.';
   const payload = {
     model,
     system_instruction: systemInstruction,
-    input: buildGeminiPromptInput(slug, userText, prevInteractionId),
+    input: fresh ? userText : buildGeminiPromptInput(slug, userText, prevInteractionId),
     stream: true,
     store: true,
-    generation_config: { max_output_tokens: 900 },
+    generation_config: { max_output_tokens: maxOutputTokens },
     ...(prevInteractionId ? { previous_interaction_id: prevInteractionId } : {}),
   };
   const res = await fetch("https://generativelanguage.googleapis.com/v1/interactions", {
@@ -622,17 +622,17 @@ async function streamGeminiOnce({ key, model, slug, userText, prevInteractionId,
   }
   return { text: fullText.trim(), model, interactionId };
 }
-async function streamGeminiInteraction({ slug, userText, onDelta, fresh = false }) {
+async function streamGeminiInteraction({ slug, userText, onDelta, fresh = false, modelOverride = "", maxOutputTokens = 900 }) {
   const key = getGeminiKey();
   if (!key) throw new Error("Gemini API key not configured");
-  const preferred = getGeminiModel();
+  const preferred = modelOverride && GEMINI_MODELS_ALLOWED.has(modelOverride) ? modelOverride : getGeminiModel();
   const prevId = fresh ? null : state.geminiInteractionBySlug[slug] || null;
   const attempts = preferred === GEMINI_DEFAULT_MODEL ? [[preferred, prevId]] : [[preferred, prevId], [GEMINI_DEFAULT_MODEL, null]];
   let lastErr;
   for (let i = 0; i < attempts.length; i++) {
     const [model, pid] = attempts[i];
     try {
-      const out = await streamGeminiOnce({ key, model, slug, userText, prevInteractionId: pid, onDelta });
+      const out = await streamGeminiOnce({ key, model, slug, userText, prevInteractionId: pid, onDelta, fresh, maxOutputTokens });
       if (!fresh && out.interactionId) state.geminiInteractionBySlug[slug] = out.interactionId;
       if (out.text) return out;
       throw new Error(`Gemini (${model}) returned an empty response`);
@@ -4232,15 +4232,28 @@ function openWorkstreamSheet(wsId) {
 }
 
 function buildLocalSlides(kept, cc, todos) {
-  const needs = cc?.needsList || [];
+  const needs = (cc?.needsList || []).filter((n, i) => !isSethGateDeleted(i) && !isSethGateHeld(i));
+  const workstreams = state.lastWorkstreams || cc?.workstreamsData?.workstreams || [];
+  const activeWs = workstreams.filter((w) => {
+    const st = wsEffectiveState(w);
+    return !st.sethDone && !st.archived && !st.held;
+  });
+  const heldWs = workstreams.filter((w) => {
+    const st = wsEffectiveState(w);
+    return !st.sethDone && !st.archived && st.held;
+  });
+  const providers = Array.isArray(cc?.usageData?.providers) ? cc.usageData.providers : [];
+  const quotaAlerts = providers.filter((p) => p.status === "hold" || p.status === "warn" || (typeof p.pct_used === "number" && p.pct_used >= 75));
   return [
     {
       tab: "1 · Vision",
-      title: "Big Picture & Opportunity",
+      title: "Active Jobs & Big Picture",
       bullets: [
-        `${kept.length} kept items queued for your attention (${needs.length} blocked on Seth, ${todos.length} open todos).`,
-        kept[0] ? `Top focus right now: ${kept[0].title} (${kept[0].who}).` : "All caught up — zero unreviewed updates.",
-        `Active team: ${liveAgentRoster().map((a) => a.name).join(" · ")}.`,
+        `${activeWs.length} active jobs (${heldWs.length} on hold) · ${needs.length} decisions waiting on Seth · ${kept.length} kept updates.`,
+        ...activeWs.slice(0, 3).map((w) => `${w.name}: ${w.next_action || "In progress"}${w.deadline ? ` (Due ${w.deadline})` : ""}`),
+        quotaAlerts.length
+          ? `Quota watch: ${quotaAlerts.map((p) => `${p.agent || p.provider} ${typeof p.pct_used === "number" ? `${p.pct_used}%` : p.status}`).join(", ")}.`
+          : `Quotas: ${providers.length} providers tracked (no warnings logged).`,
       ],
     },
     {
@@ -4250,15 +4263,17 @@ function buildLocalSlides(kept, cc, todos) {
     },
     {
       tab: "3 · Clarity",
-      title: "Blocked / Needs Seth",
-      bullets: needs.length
-        ? needs.map((n) => `${n.title || "Decision"}: ${n.detail || n.action || "Needs Seth input"}`)
-        : ["Nothing is blocked waiting on you right now."],
+      title: "Decisions & Blockers",
+      bullets: [
+        ...(needs.length ? needs.map((n) => `${n.title || "Decision"}: ${n.detail || n.action || "Needs Seth input"}`) : ["No pending decisions waiting on Seth."]),
+        ...activeWs.filter((w) => w.blocker).slice(0, 3).map((w) => `[${w.name}] Gate: ${w.blocker}`),
+      ],
     },
     {
       tab: "4 · Next",
       title: "Highest-Leverage Next Moves",
       bullets: [
+        ...activeWs.slice(0, 2).map((w) => `${w.name} (${(w.owners || ["Team"]).join(", ")}): ${w.next_action || "Review"}`),
         ...(todos.slice(0, 3).map((t) => `Todo: ${t.item}${t.owner ? ` (${t.owner})` : ""}`)),
         kept.length ? "Tap Mark all Got it below once done reviewing to clear the board." : "Pick the next priority in #peer-floor.",
       ],
@@ -4438,13 +4453,21 @@ async function openDebriefSheet({ useGemini = true, explicit = false } = {}) {
   }
   if (sub) sub.textContent = `${kept.length} kept item${kept.length === 1 ? "" : "s"} · Instant overview`;
 
+  const workstreams = state.lastWorkstreams || cc?.workstreamsData?.workstreams || [];
+  const activeWs = workstreams.filter((w) => {
+    const st = wsEffectiveState(w);
+    return !st.sethDone && !st.archived && !st.held;
+  });
+  const needs = (cc?.needsList || []).filter((n, i) => !isSethGateDeleted(i) && !isSethGateHeld(i));
+  const providers = Array.isArray(cc?.usageData?.providers) ? cc.usageData.providers : [];
+
   if (!useGemini) return;
   if (!getGeminiKey()) {
     if (explicit) toast("Add a Gemini API key in Settings (☰) to enable AI re-briefing", "err");
     return;
   }
-  if (!kept.length) {
-    if (explicit) toast("No kept updates to re-brief — showing current summary");
+  if (!kept.length && !activeWs.length && !needs.length && !todos.length) {
+    if (explicit) toast("Nothing queued to re-brief right now");
     return;
   }
 
@@ -4453,25 +4476,38 @@ async function openDebriefSheet({ useGemini = true, explicit = false } = {}) {
     refreshBtn.disabled = true;
     refreshBtn.textContent = "↻ Re-briefing…";
   }
-  if (sub) sub.textContent = `${kept.length} kept · Compiling Gemini presentation…`;
+  if (sub) sub.textContent = `${activeWs.length} jobs · ${kept.length} kept · Compiling Gemini debrief…`;
   try {
     const summaryInput = [
+      `Active Workstreams (${activeWs.length}):`,
+      ...activeWs.slice(0, 8).map(
+        (w) => `- ${w.name} [${w.status || w.category || "Active"}]${w.deadline ? ` Due ${w.deadline}` : ""} | Owners: ${(w.owners || []).join(", ")} | Next: ${w.next_action || "—"} | Gate: ${w.blocker || "None"}`
+      ),
+      `Decisions Waiting on Seth (${needs.length}):`,
+      ...(needs.length ? needs.slice(0, 8).map((n) => `- ${n.title || "Decision"} (${n.owner || "Team"}): ${n.detail || n.action || "Needs input"}`) : ["- None"]),
+      `Provider Quotas (${providers.length}):`,
+      ...providers.map(
+        (p) => `- ${p.agent || p.provider}: ${typeof p.pct_used === "number" ? `${p.pct_used}% used (${100 - p.pct_used}% left)` : "unmeasured"}, reset=${formatResetCountdown(p.reset_at)}, status=${p.status}`
+      ),
       `Kept updates (${kept.length}):`,
       ...kept.slice(0, 14).map((k) => `- [${k.kind}] ${k.title} (${k.who}): ${k.text}`),
       `Open Todos (${todos.length}):`,
-      ...todos.slice(0, 6).map((t) => `- ${t.item}`),
+      ...todos.slice(0, 8).map((t) => `- ${t.item}${t.owner ? ` (${t.owner})` : ""}`),
     ].join("\n");
-    const prompt = `Create a crisp 4-section executive presentation debrief strictly from these kept updates. Format ONLY as 4 Markdown sections starting with '## ':
-## Vision & Big Picture
+    const prompt = `You are briefing Seth directly on mobile. Synthesize a crisp, decision-grade 4-section executive debrief strictly from the live Stack state below. Do NOT invent metrics or status. Format ONLY as 4 Markdown sections starting with '## ':
+## Vision & Active Jobs
 ## What Moved
-## Opportunities & Blockers
+## Decisions & Quotas
 ## Next Moves
-Each section must have 2-4 sharp bullets. Zero fluff.\n\n${summaryInput}`;
+Each section must have 3-5 sharp, specific bullets naming owners (@Name) and concrete blockers/deadlines. Zero fluff.\n\n${summaryInput}`;
     let lastPaintAt = 0;
+    const debriefModel = getGeminiModel() === GEMINI_DEFAULT_MODEL ? "gemini-3.8-flash" : "";
     const out = await streamGeminiInteraction({
       slug: "debrief-presentation",
       userText: prompt,
       fresh: true,
+      modelOverride: debriefModel,
+      maxOutputTokens: 1400,
       onDelta: (partial) => {
         const now = Date.now();
         if (now - lastPaintAt < 150) return;
