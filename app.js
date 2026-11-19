@@ -2082,10 +2082,8 @@ async function onJobsClick(e) {
 
   const openChannel = e.target.closest("[data-open-channel]");
   if (openChannel && !e.target.closest("[data-stop-nav]")) {
-    state.channelSlug = openChannel.dataset.openChannel;
-    state.threadParentId = null;
-    document.getElementById("thread")?.classList.add("hidden");
-    showView("channel");
+    const wsId = openChannel.dataset.wsRef || openChannel.closest("[data-ws-id]")?.dataset.wsId || "";
+    openChannelWithJobRef(openChannel.dataset.openChannel, wsId);
     return;
   }
 
@@ -2727,21 +2725,7 @@ document.getElementById("agents-body")?.addEventListener("click", async (e) => {
   }
   const wsHuddle = e.target.closest("[data-ws-huddle]");
   if (wsHuddle) {
-    const ws = (state.lastWorkstreams || []).find((x) => x.id === wsHuddle.dataset.wsHuddle);
-    state.channelSlug = "peer-floor";
-    state.threadParentId = null;
-    document.getElementById("thread")?.classList.add("hidden");
-    showView("channel");
-    const box = document.getElementById("body");
-    if (ws && box && !box.value.trim()) {
-      const ownerMentions = (ws.owners || ["Gemini", "Cursor"])
-        .filter((o) => o !== "Seth")
-        .map((o) => `@${o}`)
-        .join(" ");
-      box.value = `${ownerMentions || "@Gemini @Cursor"} [${ws.name}] `;
-      autosize(box);
-      setTimeout(() => box.focus(), 60);
-    }
+    openChannelWithJobRef("peer-floor", wsHuddle.dataset.wsHuddle);
     return;
   }
   const fb = e.target.closest("[data-agent-filter]");
@@ -3187,6 +3171,36 @@ function renderJobCardHtml(w, doneSet = loadWsDoneSet()) {
     </div>
   </article>`;
 }
+function openChannelWithJobRef(channelSlug, wsId = "") {
+  if (!channelSlug) return;
+  state.channelSlug = channelSlug;
+  state.threadParentId = null;
+  document.getElementById("thread")?.classList.add("hidden");
+  showView("channel");
+  if (!wsId) return;
+  const ws = (state.lastWorkstreams || []).find((x) => x.id === wsId);
+  const box = document.getElementById("body");
+  if (!ws || !box) return;
+  const tag = `[${ws.name}]`;
+  let prefix = `${tag} `;
+  if (channelSlug === "peer-floor") {
+    const ownerMentions = (ws.owners || ["Gemini", "Cursor"])
+      .filter((o) => o !== "Seth")
+      .map((o) => `@${o}`)
+      .join(" ");
+    prefix = `${ownerMentions || "@Gemini @Cursor"} ${tag} `;
+  }
+  if (!box.value.trim()) {
+    box.value = prefix;
+  } else if (!box.value.includes(tag)) {
+    box.value = `${prefix}${box.value}`;
+  }
+  autosize(box);
+  setTimeout(() => {
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+  }, 60);
+}
 function renderWorkstreamCardHtml(w, doneSet = loadWsDoneSet()) {
   const st = wsEffectiveState(w, doneSet);
   const owners = (w.owners || []).join(" · ") || "Seth";
@@ -3203,7 +3217,7 @@ function renderWorkstreamCardHtml(w, doneSet = loadWsDoneSet()) {
     <div class="ws-card-line"><strong>Owners</strong>${esc(owners)}</div>
     <div class="ws-card-actions">
       <button type="button" class="act" data-open-ws="${esc(w.id)}">🔍 Deep Dive</button>
-      ${w.channel_slug ? `<button type="button" class="act" data-open-channel="${esc(w.channel_slug)}">💬 #${esc(w.channel_slug)}</button>` : ""}
+      ${w.channel_slug ? `<button type="button" class="act" data-open-channel="${esc(w.channel_slug)}" data-ws-ref="${esc(w.id)}">💬 #${esc(w.channel_slug)}</button>` : ""}
       ${!st.sethDone ? `<button type="button" class="act" data-toggle-ws-hold="${esc(w.id)}">${st.held ? "▶ Resume" : "⏸ Hold"}</button>` : ""}
       <button type="button" class="act${st.sethDone ? "" : " act-primary"}" data-toggle-ws-done="${esc(w.id)}">${st.sethDone ? "↺ Reopen" : "✓ Mark Done"}</button>
       <button type="button" class="act act-danger" data-delete-ws="${esc(w.id)}">🗑 Delete</button>
@@ -3234,24 +3248,32 @@ function paintBriefView() {
   const reopenSet = loadWsReopenSet();
   const needsCount = (cc.needsList || []).length;
   const keptCount = (state.lastKeptDebrief || []).length;
-  const openWs = workstreams.filter((w) => !wsEffectiveState(w, doneSet, reopenSet).sethDone && !wsEffectiveState(w, doneSet, reopenSet).archived);
+  const openWs = workstreams.filter((w) => {
+    const st = wsEffectiveState(w, doneSet, reopenSet);
+    return !st.sethDone && !st.archived && !st.held;
+  });
+  const heldWs = workstreams.filter((w) => {
+    const st = wsEffectiveState(w, doneSet, reopenSet);
+    return !st.sethDone && !st.archived && st.held;
+  });
   const doneWs = workstreams.filter((w) => wsEffectiveState(w, doneSet, reopenSet).sethDone);
   const headlineEl = document.getElementById("notes-headline");
   if (headlineEl) {
-    headlineEl.textContent = `${openWs.length} active jobs · ${doneWs.length} done (Seth) · ${opps.length} ranked opps`;
+    headlineEl.textContent = `${openWs.length} active jobs · ${heldWs.length} on hold · ${doneWs.length} done (Seth) · ${opps.length} ranked opps`;
   }
 
   if (tab === "master") {
     const html = `<div class="brief-section">
         <div class="brief-banner">
           <h2>Master Workstreams Hub</h2>
-          <p>Active jobs stay here until you tap <strong>✓ Mark Done</strong> — completed jobs move automatically to the Completed archive below and in <strong>Jobs → Done</strong>.</p>
+          <p>Active jobs stay here until you tap <strong>⏸ Hold</strong> (moves to <strong>Jobs → On Hold</strong>) or <strong>✓ Mark Done</strong>.</p>
           <div class="ws-card-actions">
             <button type="button" class="act act-primary" data-open-channel="peer-floor">🗣️ Orchestrate in #peer-floor</button>
             <button type="button" class="act" data-open-tab="agents">📋 Open Job Board</button>
           </div>
         </div>
-        <div class="ws-cards">${openWs.length ? openWs.map((w) => renderWorkstreamCardHtml(w, doneSet)).join("") : `<p class="home-empty">All jobs marked Done! Check below or open Job Board.</p>`}</div>
+        <div class="ws-cards">${openWs.length ? openWs.map((w) => renderWorkstreamCardHtml(w, doneSet)).join("") : `<p class="home-empty">No active jobs — check On Hold or Done below.</p>`}</div>
+        ${heldWs.length ? `<details class="brief-done-details"><summary>⏸ On Hold (${heldWs.length})</summary><div class="ws-cards">${heldWs.map((w) => renderWorkstreamCardHtml(w, doneSet)).join("")}</div></details>` : ""}
         ${doneWs.length ? `<details class="brief-done-details"><summary>✓ Completed by Seth (${doneWs.length})</summary><div class="ws-cards">${doneWs.map((w) => renderWorkstreamCardHtml(w, doneSet)).join("")}</div></details>` : ""}
       </div>`;
     if (bv.dataset.sig !== html) {
@@ -3855,7 +3877,10 @@ function buildBentoHub({ cc, todos }) {
   state.lastWorkstreams = workstreams;
   state.lastWorkspaceLinks = wsLinks;
 
-  const openWs = workstreams.filter((w) => !wsEffectiveState(w, doneSet).sethDone && !wsEffectiveState(w, doneSet).archived);
+  const openWs = workstreams.filter((w) => {
+    const st = wsEffectiveState(w, doneSet);
+    return !st.sethDone && !st.archived && !st.held;
+  });
   const gateWs = openWs.filter((w) => w.tone === "warn" || Boolean(w.deadline));
   const sethDoneCount = workstreams.filter((w) => wsEffectiveState(w, doneSet).sethDone).length;
 
@@ -4145,7 +4170,7 @@ function openWorkstreamSheet(wsId) {
     actions.innerHTML = `
       <button type="button" class="act${st.sethDone ? "" : " act-primary"}" data-toggle-ws-done="${esc(ws.id)}">${st.sethDone ? "↺ Reopen Job" : "✓ Mark Done (Seth)"}</button>
       <button type="button" class="act" data-ws-huddle="${esc(ws.id)}">🗣️ #peer-floor</button>
-      ${ws.channel_slug && ws.channel_slug !== "peer-floor" ? `<button type="button" class="act" data-ws-chat="${esc(ws.channel_slug)}">💬 #${esc(ws.channel_slug)}</button>` : ""}
+      ${ws.channel_slug && ws.channel_slug !== "peer-floor" ? `<button type="button" class="act" data-ws-chat="${esc(ws.channel_slug)}" data-ws-ref="${esc(ws.id)}">💬 #${esc(ws.channel_slug)}</button>` : ""}
     `;
   }
   sheet.hidden = false;
@@ -4196,9 +4221,10 @@ function renderDebriefSlides(slides, activeIdx = 0) {
     .map((s, i) => `<button type="button" class="debrief-tab${i === state.debriefSlideIdx ? " active" : ""}" data-slide="${i}">${esc(s.tab)}</button>`)
     .join("");
   const cur = slides[state.debriefSlideIdx] || slides[0];
-  const openInDebrief = (state.lastWorkstreams || []).filter(
-    (w) => !wsEffectiveState(w).sethDone && !wsEffectiveState(w).archived
-  );
+  const openInDebrief = (state.lastWorkstreams || []).filter((w) => {
+    const st = wsEffectiveState(w);
+    return !st.sethDone && !st.archived && !st.held;
+  });
   const chartHtml =
     state.debriefSlideIdx === 0 && openInDebrief.length
       ? `<div class="ws-cards">${openInDebrief
@@ -5868,8 +5894,7 @@ document.getElementById("workstream-sheet")?.addEventListener("click", async (e)
     stopDebriefVoice();
     const s = document.getElementById("workstream-sheet");
     if (s) s.hidden = true;
-    state.channelSlug = wsChat.dataset.wsChat;
-    showView("channel");
+    openChannelWithJobRef(wsChat.dataset.wsChat, wsChat.dataset.wsRef || "");
     return;
   }
   const wsHuddle = e.target.closest("[data-ws-huddle]");
@@ -5877,21 +5902,7 @@ document.getElementById("workstream-sheet")?.addEventListener("click", async (e)
     stopDebriefVoice();
     const s = document.getElementById("workstream-sheet");
     if (s) s.hidden = true;
-    const ws = (state.lastWorkstreams || []).find((x) => x.id === wsHuddle.dataset.wsHuddle);
-    state.channelSlug = "peer-floor";
-    state.threadParentId = null;
-    document.getElementById("thread")?.classList.add("hidden");
-    showView("channel");
-    const box = document.getElementById("body");
-    if (ws && box && !box.value.trim()) {
-      const ownerMentions = (ws.owners || ["Gemini", "Cursor"])
-        .filter((o) => o !== "Seth")
-        .map((o) => `@${o}`)
-        .join(" ");
-      box.value = `${ownerMentions || "@Gemini @Cursor"} [${ws.name}] `;
-      autosize(box);
-      setTimeout(() => box.focus(), 60);
-    }
+    openChannelWithJobRef("peer-floor", wsHuddle.dataset.wsHuddle);
     return;
   }
   const docBtn = e.target.closest("[data-load-ws-doc]");
@@ -6185,9 +6196,7 @@ document.addEventListener("click", async (e) => {
       stopDebriefVoice();
       s.hidden = true;
     }
-    state.channelSlug = openCh.dataset.openChannel;
-    state.threadParentId = null;
-    document.getElementById("thread")?.classList.add("hidden");
-    showView("channel");
+    const wsId = openCh.dataset.wsRef || openCh.closest("[data-ws-id]")?.dataset.wsId || "";
+    openChannelWithJobRef(openCh.dataset.openChannel, wsId);
   }
 });
