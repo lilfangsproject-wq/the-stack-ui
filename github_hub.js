@@ -630,6 +630,11 @@ async function ghSaveUsage(payload) {
   );
 }
 
+async function ghLoadDigest() {
+  const data = await ghReadJson("digest.json", { version: 1, slides: [], spoken_brief: "" });
+  return data && typeof data === "object" ? data : { version: 1, slides: [], spoken_brief: "" };
+}
+
 async function ghReadVaultDoc(relPath) {
   const clean = String(relPath || "").trim().replace(/^\/+/, "").replace(/\/+$/, "");
   if (!clean || clean.split("/").includes("..")) {
@@ -1293,6 +1298,9 @@ async function ghRoute(path, options = {}) {
   }
   if (p === "/api/usage" && method === "POST") {
     return ghSaveUsage(body || {});
+  }
+  if (p === "/api/digest" && method === "GET") {
+    return ghLoadDigest();
   }
   if (p === "/api/doc" && method === "GET") {
     const rel = url.searchParams.get("path") || "";

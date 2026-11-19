@@ -1475,9 +1475,15 @@ async function loadCommandCentre() {
   let needsSeth = [];
   let workstreamsData = { workstreams: [], opportunities: [], links: {}, vision: {} };
   let usageData = { version: 1, providers: [] };
-  const [wsRes, usageRes] = await Promise.allSettled([api("/api/workstreams"), api("/api/usage")]);
+  let digestData = { version: 1, slides: [], spoken_brief: "" };
+  const [wsRes, usageRes, digestRes] = await Promise.allSettled([
+    api("/api/workstreams"),
+    api("/api/usage"),
+    api("/api/digest"),
+  ]);
   if (wsRes.status === "fulfilled" && wsRes.value) workstreamsData = wsRes.value;
   if (usageRes.status === "fulfilled" && usageRes.value) usageData = usageRes.value;
+  if (digestRes.status === "fulfilled" && digestRes.value) digestData = digestRes.value;
   if (cloud) {
     const [mem, com, pref, prs, hb, js, hos, ns] = await Promise.allSettled([
       ghSharedMemory(),
@@ -1674,6 +1680,7 @@ async function loadCommandCentre() {
   out.events = events;
   out.workstreamsData = workstreamsData;
   out.usageData = usageData;
+  out.digestData = digestData;
   return out;
 }
 
@@ -2377,11 +2384,13 @@ function buildVoiceHandoffText(scope = "debrief") {
 
   const cc = state.lastCc || state.agentsCC || {};
   const slides = Array.isArray(state.debriefSlides) ? state.debriefSlides : [];
+  const spoken = String(cc.digestData?.spoken_brief || "").trim();
   const base = buildVoiceBriefText(state.lastWorkstreams || [], cc.needsList || []);
+  const spokenBlock = spoken ? `Spoken Digest Summary:\n${spoken}\n\n` : "";
   const slideBlock = slides.length
     ? ["Executive Debrief Slides:", ...slides.map((s) => `${s.tab || ""} ${s.title}: ${(s.bullets || []).join(" | ")}`), ""].join("\n")
     : "";
-  return `${slideBlock}${base}\nNotebookLM Exec Brief Google Doc: ${gdocUrl}\n${closing}`;
+  return `${spokenBlock}${slideBlock}${base}\nNotebookLM Exec Brief Google Doc: ${gdocUrl}\n${closing}`;
 }
 
 function paintAgentsView() {
@@ -4763,12 +4772,19 @@ async function openDebriefSheet({ useGemini = true, explicit = false } = {}) {
   const kept = state.lastKeptDebrief || [];
   const cc = state.lastCc || {};
   const todos = state.lastTodos || [];
+  const precompiled = cc.digestData && Array.isArray(cc.digestData.slides) && cc.digestData.slides.length ? cc.digestData : null;
   const localSlides = buildLocalSlides(kept, cc, todos);
   sheet.hidden = false;
-  if (!explicit || !(state.debriefSlides && state.debriefSlides.length)) {
-    renderDebriefSlides(localSlides, 0);
+  if (!explicit) {
+    renderDebriefSlides(precompiled ? precompiled.slides : localSlides, 0);
+  } else if (!(state.debriefSlides && state.debriefSlides.length)) {
+    renderDebriefSlides(precompiled ? precompiled.slides : localSlides, 0);
   }
-  if (sub) sub.textContent = `${kept.length} kept item${kept.length === 1 ? "" : "s"} · Instant overview`;
+  if (sub) {
+    sub.textContent = precompiled && !explicit
+      ? `Pre-compiled Digest (${precompiled.model || "grounded"}) · ${kept.length} kept`
+      : `${kept.length} kept item${kept.length === 1 ? "" : "s"} · Instant overview`;
+  }
 
   const workstreams = state.lastWorkstreams || cc?.workstreamsData?.workstreams || [];
   const activeWs = workstreams.filter((w) => {
@@ -4778,7 +4794,7 @@ async function openDebriefSheet({ useGemini = true, explicit = false } = {}) {
   const needs = (cc?.needsList || []).filter((n, i) => !isSethGateDeleted(i) && !isSethGateHeld(i));
   const providers = Array.isArray(cc?.usageData?.providers) ? cc.usageData.providers : [];
 
-  if (!useGemini) return;
+  if (!useGemini || (!explicit && precompiled)) return;
   if (!getGeminiKey()) {
     if (explicit) toast("Add a Gemini API key in Settings (☰) to enable AI re-briefing", "err");
     return;
