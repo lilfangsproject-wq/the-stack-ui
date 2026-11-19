@@ -1474,11 +1474,10 @@ async function loadCommandCentre() {
   let handovers = [];
   let needsSeth = [];
   let workstreamsData = { workstreams: [], opportunities: [], links: {}, vision: {} };
-  try {
-    workstreamsData = await api("/api/workstreams");
-  } catch {
-    /* optional in offline/pocket mode */
-  }
+  let usageData = { version: 1, providers: [] };
+  const [wsRes, usageRes] = await Promise.allSettled([api("/api/workstreams"), api("/api/usage")]);
+  if (wsRes.status === "fulfilled" && wsRes.value) workstreamsData = wsRes.value;
+  if (usageRes.status === "fulfilled" && usageRes.value) usageData = usageRes.value;
   if (cloud) {
     const [mem, com, pref, prs, hb, js, hos, ns] = await Promise.allSettled([
       ghSharedMemory(),
@@ -1674,6 +1673,7 @@ async function loadCommandCentre() {
   out.commits = commits;
   out.events = events;
   out.workstreamsData = workstreamsData;
+  out.usageData = usageData;
   return out;
 }
 
@@ -3862,6 +3862,60 @@ function build7DayActivity(cc) {
     .slice(0, 4);
   return { days, counts, total, max, peakIdx, platforms };
 }
+function formatResetCountdown(resetAt) {
+  if (!resetAt) return "—";
+  const ms = Date.parse(resetAt) - Date.now();
+  if (!Number.isFinite(ms)) return "—";
+  if (ms <= 0) return "Reset due";
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ${mins % 60}m`;
+  const days = Math.floor(hrs / 24);
+  const remH = hrs % 24;
+  return remH ? `${days}d ${remH}h` : `${days}d`;
+}
+function renderUsageTrackerCard(usageData) {
+  const providers = Array.isArray(usageData?.providers) ? usageData.providers : [];
+  if (!providers.length) return "";
+  const rows = providers
+    .map((p) => {
+      const hasPct = typeof p.pct_used === "number" && Number.isFinite(p.pct_used);
+      const pct = hasPct ? Math.max(0, Math.min(100, Math.round(p.pct_used))) : null;
+      const left = hasPct ? Math.max(0, 100 - pct) : null;
+      const resetTxt = formatResetCountdown(p.reset_at);
+      const tone = p.status === "hold" || (hasPct && pct >= 90) ? "warn" : p.status === "warn" || (hasPct && pct >= 70) ? "warn" : "live";
+      const statusLabel = p.status === "hold" ? "HOLD" : hasPct ? `${left}% left` : "UNMEASURED";
+      return `<div class="usage-row" data-usage-id="${esc(p.id)}">
+        <div class="usage-row-top">
+          <div>
+            <strong>${esc(p.agent || p.provider)}</strong>
+            <span class="usage-sub">${esc(p.plan || p.provider)} · ${esc(p.window_label || "Quota")}</span>
+          </div>
+          <div class="usage-row-right">
+            <span class="bento-tag ${tone}">${esc(statusLabel)}</span>
+            <button type="button" class="got-it-btn" data-edit-usage="${esc(p.id)}">Update</button>
+          </div>
+        </div>
+        <div class="usage-bar" aria-label="${esc(p.provider)} usage">
+          <div class="usage-fill${tone === "warn" ? " warn" : ""}" style="width:${hasPct ? pct : 0}%"></div>
+        </div>
+        <div class="usage-meta">
+          <span>${hasPct ? `${pct}% used · ${left}% left` : "Not measured yet"}</span>
+          <span>Reset: <strong>${esc(resetTxt)}</strong></span>
+        </div>
+        ${p.note ? `<div class="usage-note">${esc(p.note)}</div>` : ""}
+      </div>`;
+    })
+    .join("");
+  return `<article class="bento-card bento-quotas">
+    <div class="bento-head">
+      <h2>Model &amp; Provider Quotas</h2>
+      <span class="bento-tag">${providers.length} providers</span>
+    </div>
+    <div class="usage-grid">${rows}</div>
+  </article>`;
+}
 function buildBentoHub({ cc, todos }) {
   const gotIt = loadGotItSet();
   const doneSet = loadWsDoneSet();
@@ -4062,6 +4116,7 @@ function buildBentoHub({ cc, todos }) {
       </div>
       <div class="bento-since-grid">${trayHtml}</div>
     </article>
+    ${renderUsageTrackerCard(cc.usageData)}
   </section>`;
 }
 
@@ -6198,5 +6253,70 @@ document.addEventListener("click", async (e) => {
     }
     const wsId = openCh.dataset.wsRef || openCh.closest("[data-ws-id]")?.dataset.wsId || "";
     openChannelWithJobRef(openCh.dataset.openChannel, wsId);
+    return;
+  }
+  const editUsage = e.target.closest("[data-edit-usage]");
+  if (editUsage) {
+    const id = editUsage.dataset.editUsage;
+    const usage = state.lastCc?.usageData || state.agentsCC?.usageData || { version: 1, providers: [] };
+    const list = Array.isArray(usage.providers) ? [...usage.providers] : [];
+    const idx = list.findIndex((p) => p.id === id);
+    if (idx < 0) return;
+    const cur = list[idx];
+    const pctRaw = window.prompt(
+      `${cur.agent || cur.provider} — % used (0–100, or blank for unmeasured):`,
+      typeof cur.pct_used === "number" ? String(cur.pct_used) : ""
+    );
+    if (pctRaw === null) return;
+    const resetRaw = window.prompt(
+      `Time until reset (e.g. 3d, 4h, 90m, or blank to clear):`,
+      cur.reset_at ? formatResetCountdown(cur.reset_at) : ""
+    );
+    if (resetRaw === null) return;
+    const trimmedPct = pctRaw.trim();
+    const pctUsed = trimmedPct === "" ? null : Math.max(0, Math.min(100, Number(trimmedPct)));
+    if (trimmedPct !== "" && !Number.isFinite(pctUsed)) {
+      toast("Enter a number 0–100 or leave blank", "err");
+      return;
+    }
+    let resetAt = cur.reset_at || null;
+    const rTrim = resetRaw.trim().toLowerCase();
+    if (!rTrim) {
+      resetAt = null;
+    } else {
+      let ms = 0;
+      const dMatch = rTrim.match(/(\d+(?:\.\d+)?)\s*d/);
+      const hMatch = rTrim.match(/(\d+(?:\.\d+)?)\s*h/);
+      const mMatch = rTrim.match(/(\d+(?:\.\d+)?)\s*m/);
+      if (dMatch) ms += Number(dMatch[1]) * 86400000;
+      if (hMatch) ms += Number(hMatch[1]) * 3600000;
+      if (mMatch) ms += Number(mMatch[1]) * 60000;
+      if (!dMatch && !hMatch && !mMatch && /^\d+(?:\.\d+)?$/.test(rTrim)) {
+        ms = Number(rTrim) * 86400000;
+      }
+      if (ms > 0) resetAt = new Date(Date.now() + ms).toISOString();
+    }
+    const nextStatus = pctUsed !== null && pctUsed >= 95 ? "hold" : pctUsed !== null && pctUsed >= 75 ? "warn" : "ok";
+    list[idx] = {
+      ...cur,
+      pct_used: pctUsed,
+      reset_at: resetAt,
+      status: nextStatus,
+      source: "manual",
+      updated_at: new Date().toISOString(),
+      updated_by: state.user || "Seth",
+    };
+    try {
+      const saved = await api("/api/usage", {
+        method: "POST",
+        body: JSON.stringify({ providers: list }),
+      });
+      if (state.lastCc) state.lastCc.usageData = saved;
+      if (state.agentsCC) state.agentsCC.usageData = saved;
+      if (state.view === "home") loadHome().catch(() => {});
+      toast(`Updated ${cur.agent || cur.provider} quota`);
+    } catch (err) {
+      toast(friendlyError(err), "err");
+    }
   }
 });

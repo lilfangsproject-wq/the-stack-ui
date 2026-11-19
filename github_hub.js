@@ -612,6 +612,24 @@ async function ghSaveWorkstreams(payload) {
   return next;
 }
 
+async function ghLoadUsage() {
+  const data = await ghReadJson("usage.json", { version: 1, providers: [] });
+  return data && typeof data === "object" ? data : { version: 1, providers: [] };
+}
+
+async function ghSaveUsage(payload) {
+  return ghUpdateJson(
+    "usage.json",
+    { version: 1, providers: [] },
+    (cur) => ({
+      ...(cur && typeof cur === "object" ? cur : {}),
+      ...(payload && typeof payload === "object" ? payload : {}),
+      updated_at: ghNowIso(),
+    }),
+    "the-stack: update provider usage tracker"
+  );
+}
+
 async function ghReadVaultDoc(relPath) {
   const clean = String(relPath || "").trim().replace(/^\/+/, "").replace(/\/+$/, "");
   if (!clean || clean.split("/").includes("..")) {
@@ -1269,6 +1287,12 @@ async function ghRoute(path, options = {}) {
   }
   if (p === "/api/workstreams" && method === "POST") {
     return ghSaveWorkstreams(body || {});
+  }
+  if (p === "/api/usage" && method === "GET") {
+    return ghLoadUsage();
+  }
+  if (p === "/api/usage" && method === "POST") {
+    return ghSaveUsage(body || {});
   }
   if (p === "/api/doc" && method === "GET") {
     const rel = url.searchParams.get("path") || "";
