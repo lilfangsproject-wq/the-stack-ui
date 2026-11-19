@@ -4648,3 +4648,10 @@ body,
 :root[data-surface="light"] .pool-card {
   background: rgba(255, 255, 255, 0.72);
 }
+a.act,
+a.ghost {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}

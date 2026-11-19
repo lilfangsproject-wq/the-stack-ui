@@ -439,7 +439,7 @@ function showCloudConnect(errMsg) {
   if (gemInput && getGeminiKey()) gemInput.value = getGeminiKey();
 }
 
-const STACK_VERSION = "v40.0";
+const STACK_VERSION = "v40.1";
 const GEMINI_KEY_STORAGE = "stack-gemini-key-v1";
 const GEMINI_MODEL_STORAGE = "stack-gemini-model-v1";
 const GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite";
@@ -2345,6 +2345,47 @@ function buildVoiceBriefText(workstreams, needsList) {
   return lines.join("\n");
 }
 
+function buildVoiceHandoffText(scope = "debrief") {
+  const closing =
+    "Let's talk through this job out loud. When we finish, give me ONE tight Workhorse prompt to paste back into The Stack #peer-floor.";
+  const links = state.lastWorkspaceLinks || {};
+  const gdocUrl =
+    links.doc_url ||
+    "https://docs.google.com/document/d/1mfBzM1SN9a4thNZpq1Jyvk8jEd5tfpkNq7-tr2NzRyo/edit";
+
+  if (scope === "job" && state.openWsId) {
+    const ws = (state.lastWorkstreams || []).find((w) => w.id === state.openWsId);
+    if (ws) {
+      const st = wsEffectiveState(ws);
+      const checks = wsChecklistItems(ws);
+      const lines = [
+        `JOB BRIEF — ${ws.name} (${ws.category || "Job"} · ${st.status})`,
+        ws.summary ? `Summary: ${ws.summary}` : "",
+        Array.isArray(ws.metrics) && ws.metrics.length ? `Metrics: ${ws.metrics.join(" · ")}` : "",
+        `Owners: ${(ws.owners || []).join(", ") || "Seth"}`,
+        `Next Move: ${ws.next_action || "—"}`,
+        `Gate / Blocker: ${ws.blocker || "None"}`,
+        ws.doc_path ? `Source Path: ${ws.doc_path}` : "",
+        checks.length
+          ? `Checklist:\n${checks.map((c) => `- [${c.done ? "x" : " "}] ${c.label}`).join("\n")}`
+          : "",
+        `NotebookLM Exec Brief Google Doc: ${gdocUrl}`,
+        "",
+        closing,
+      ].filter((x) => x !== "");
+      return lines.join("\n");
+    }
+  }
+
+  const cc = state.lastCc || state.agentsCC || {};
+  const slides = Array.isArray(state.debriefSlides) ? state.debriefSlides : [];
+  const base = buildVoiceBriefText(state.lastWorkstreams || [], cc.needsList || []);
+  const slideBlock = slides.length
+    ? ["Executive Debrief Slides:", ...slides.map((s) => `${s.tab || ""} ${s.title}: ${(s.bullets || []).join(" | ")}`), ""].join("\n")
+    : "";
+  return `${slideBlock}${base}\nNotebookLM Exec Brief Google Doc: ${gdocUrl}\n${closing}`;
+}
+
 function paintAgentsView() {
   const body = document.getElementById("agents-body");
   const cc = state.agentsCC;
@@ -2387,7 +2428,9 @@ function paintAgentsView() {
       <p>Use free consumer <strong>Gemini Voice Call</strong> to think out loud at $0 Antigravity usage, then paste your crisp Workhorse prompt into <strong>+ New Job</strong> or <strong>#peer-floor</strong>.</p>
     </div>
     <div class="ws-card-actions">
-      <button type="button" id="copy-voice-brief" class="act act-primary">🎙️ Copy Voice Call Brief</button>
+      <a href="https://gemini.google.com/app" target="_blank" rel="noopener" id="jobs-gemini-link" class="act act-primary" data-voice-handoff="gemini" data-voice-scope="debrief">🎙️ Open Gemini Voice</a>
+      <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" id="jobs-notebook-link" class="act" data-voice-handoff="notebook" data-voice-scope="debrief">📓 Open NotebookLM</a>
+      <button type="button" id="copy-voice-brief" class="ghost">📋 Copy Brief Only</button>
       <button type="button" class="act" data-open-channel="peer-floor">🗣️ Open #peer-floor</button>
       <button type="button" class="ghost" data-toggle-new-job="1">${state.showNewJobForm ? "✕ Close New Job" : "+ Drop New Job / Idea"}</button>
     </div>
@@ -3206,6 +3249,9 @@ function paintBriefView() {
         }
         <div class="ws-card-actions">
           <button type="button" class="act act-primary" data-open-channel="peer-floor">🗣️ Orchestrate #peer-floor</button>
+          <a href="https://gemini.google.com/app" target="_blank" rel="noopener" class="act" data-voice-handoff="gemini" data-voice-scope="debrief">🎙️ Gemini Voice</a>
+          <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" class="act" data-voice-handoff="notebook" data-voice-scope="debrief">📓 NotebookLM</a>
+          <a href="https://docs.google.com/document/d/1mfBzM1SN9a4thNZpq1Jyvk8jEd5tfpkNq7-tr2NzRyo/edit" target="_blank" rel="noopener" class="ghost">📄 Exec Brief GDoc</a>
           <button type="button" class="act" data-brief-tab="master">📋 All Workstreams (${workstreams.length})</button>
           <button type="button" id="brief-run-debrief" class="act">✦ Debrief</button>
         </div>
@@ -3884,7 +3930,8 @@ function buildBentoHub({ cc, todos }) {
       <div class="bento-ws-links">${extLinksHtml}</div>
       <div class="bento-cta-row">
         <button type="button" id="bento-debrief-btn" class="act act-primary">✦ Debrief me (${kept.length})</button>
-        <button type="button" id="bento-quick-voice" class="act" title="Speak quick summary">▶ Voice</button>
+        <a href="https://gemini.google.com/app" target="_blank" rel="noopener" id="bento-gemini-voice" class="act" data-voice-handoff="gemini" data-voice-scope="debrief" title="Copy brief &amp; open Gemini Voice Call">🎙️ Gemini Voice</a>
+        <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" id="bento-notebook-voice" class="act" data-voice-handoff="notebook" data-voice-scope="debrief" title="Copy brief &amp; open NotebookLM">📓 NotebookLM</a>
         ${dismissedCount ? `<button type="button" id="bento-reset-got-it" class="ghost">Reset (${dismissedCount})</button>` : ""}
       </div>
     </article>
@@ -5714,15 +5761,6 @@ document.getElementById("home-body")?.addEventListener("click", (e) => {
     openDebriefSheet({ useGemini: true });
     return;
   }
-  if (e.target.closest("#bento-quick-voice")) {
-    const kept = state.lastKeptDebrief || [];
-    const openWs = (state.lastWorkstreams || []).filter((w) => !wsEffectiveState(w).sethDone && !wsEffectiveState(w).archived);
-    const text = kept.length
-      ? `${openWs.length} open jobs and ${kept.length} kept updates. ` + kept.slice(0, 5).map((k) => `${k.kind} from ${k.who}: ${k.title}`).join(". ")
-      : `${openWs.length} active jobs ready. Everything else is caught up right now.`;
-    speakStackText(text, e.target.closest("#bento-quick-voice"), "▶ Voice");
-    return;
-  }
   if (e.target.closest("#bento-reset-got-it")) {
     saveGotItSet(new Set());
     loadHome().catch(() => {});
@@ -5743,13 +5781,6 @@ document.getElementById("ws-sheet-close")?.addEventListener("click", () => {
   stopDebriefVoice();
   const s = document.getElementById("workstream-sheet");
   if (s) s.hidden = true;
-});
-document.getElementById("ws-sheet-voice")?.addEventListener("click", () => {
-  const ws = (state.lastWorkstreams || []).find((w) => w.id === state.openWsId);
-  if (!ws) return;
-  const st = wsEffectiveState(ws);
-  const text = `${ws.name}. Status: ${st.status}. ${ws.summary || ""} Next move: ${ws.next_action || "None"}. Gate: ${ws.blocker || "None"}.`;
-  speakStackText(text, document.getElementById("ws-sheet-voice"), "▶ Listen");
 });
 document.getElementById("workstream-sheet")?.addEventListener("click", async (e) => {
   const wsChat = e.target.closest("[data-ws-chat]");
@@ -5892,10 +5923,22 @@ document.getElementById("debrief-tabs")?.addEventListener("click", (e) => {
   stopDebriefVoice();
   renderDebriefSlides(state.debriefSlides || [], Number(tab.dataset.slide) || 0);
 });
-document.getElementById("debrief-voice")?.addEventListener("click", () => {
-  const slides = state.debriefSlides || [];
-  const text = slides.map((s) => `${s.title}. ${(s.bullets || []).join(". ")}`).join(". ");
-  speakStackText(text, document.getElementById("debrief-voice"), "▶ Listen");
+document.addEventListener("click", (e) => {
+  const handoff = e.target.closest("[data-voice-handoff]");
+  if (!handoff) return;
+  const kind = handoff.dataset.voiceHandoff || "gemini";
+  const scope = handoff.dataset.voiceScope || "debrief";
+  const txt = buildVoiceHandoffText(scope);
+  try {
+    navigator.clipboard?.writeText(txt).catch(() => {});
+  } catch {
+    /* ignore clipboard block on non-secure origins */
+  }
+  toast(
+    kind === "notebook"
+      ? "Copied brief — paste or sync Exec Doc in NotebookLM"
+      : "Copied brief — paste into Gemini Voice Call"
+  );
 });
 document.getElementById("debrief-mark-all")?.addEventListener("click", () => {
   stopDebriefVoice();

@@ -35,7 +35,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>our app · zero spend · <span data-stack-version>v40.0</span></small>
+          <small>our app · zero spend · <span data-stack-version>v40.1</span></small>
         </div>
       </div>
       <p id="boot-status">Opening the vault…</p>
@@ -68,7 +68,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>agent command centre · <span data-stack-version>v40.0</span></small>
+          <small>agent command centre · <span data-stack-version>v40.1</span></small>
         </div>
       </div>
       <div class="rail-status-row">
@@ -283,7 +283,10 @@
           <h1 id="debrief-title">Executive Debrief</h1>
           <p class="purpose" id="debrief-sub">On-demand clarity &amp; presentation</p>
         </div>
-        <button type="button" id="debrief-voice" class="ghost">▶ Listen</button>
+        <div class="job-head-actions">
+          <a href="https://gemini.google.com/app" target="_blank" rel="noopener" id="debrief-gemini-link" class="act act-primary" data-voice-handoff="gemini" data-voice-scope="debrief">🎙️ Gemini</a>
+          <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" id="debrief-notebook-link" class="act" data-voice-handoff="notebook" data-voice-scope="debrief">📓 Notebook</a>
+        </div>
       </header>
       <nav id="debrief-tabs" class="debrief-tabs" aria-label="Presentation slides"></nav>
       <section class="host-sheet-body debrief-body" id="debrief-body"></section>
@@ -300,7 +303,8 @@
           <h1 id="ws-sheet-title">Workstream</h1>
           <p class="purpose" id="ws-sheet-sub">Status &amp; Clarity</p>
         </div>
-        <button type="button" id="ws-sheet-voice" class="ghost" aria-label="Speak job overview">▶ Listen</button>
+        <a href="https://gemini.google.com/app" target="_blank" rel="noopener" id="ws-sheet-gemini" class="ghost" data-voice-handoff="gemini" data-voice-scope="job">🎙️ Gemini</a>
+        <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" id="ws-sheet-notebook" class="ghost" data-voice-handoff="notebook" data-voice-scope="job">📓 Notebook</a>
         <span class="bento-tag live" id="ws-sheet-pct">Active</span>
       </header>
       <section class="host-sheet-body" id="ws-sheet-body"></section>
