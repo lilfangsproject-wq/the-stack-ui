@@ -2407,10 +2407,15 @@ function paintAgentsView() {
 
   const openJobs = allWorkstreams.filter((w) => {
     const st = wsEffectiveState(w, doneSet, reopenSet);
-    return !st.sethDone && !st.archived && matchesAgent(w);
+    return !st.sethDone && !st.archived && !st.held && matchesAgent(w);
+  });
+  const heldJobs = allWorkstreams.filter((w) => {
+    const st = wsEffectiveState(w, doneSet, reopenSet);
+    return !st.sethDone && !st.archived && st.held && matchesAgent(w);
   });
   const needsJobs = openJobs.filter(
-    (w) => w.stage === "needs" || /need|gate|leak|sensitive|buyer/i.test(String(w.status || ""))
+    (w) =>
+      w.stage === "needs" || /need|gate|leak|sensitive|buyer/i.test(String(w.status || ""))
   );
   const doneJobs = allWorkstreams.filter((w) => {
     const st = wsEffectiveState(w, doneSet, reopenSet);
@@ -2420,7 +2425,7 @@ function paintAgentsView() {
   if (!state.jobStage) state.jobStage = "active";
   const stage = state.jobStage;
 
-  document.getElementById("agents-headline").textContent = `${openJobs.length} active · ${needsJobs.length} need Seth · ${doneJobs.length} done · 6 bots ready`;
+  document.getElementById("agents-headline").textContent = `${openJobs.length} active · ${needsJobs.length} need Seth · ${heldJobs.length} on hold · ${doneJobs.length} done · 6 bots ready`;
 
   const bannerHtml = `<section class="job-board-banner">
     <div>
@@ -2459,6 +2464,7 @@ function paintAgentsView() {
   const stageCounts = {
     active: openJobs.length,
     needs: needsJobs.length,
+    hold: heldJobs.length,
     ideas: opps.length,
     done: doneJobs.length,
   };
@@ -2466,6 +2472,7 @@ function paintAgentsView() {
     ${[
       ["active", "🔥 Active"],
       ["needs", "⚡ Needs Seth"],
+      ["hold", "⏸ On Hold"],
       ["ideas", "💡 Ideas & Opps"],
       ["done", "✓ Done"],
     ]
@@ -2502,10 +2509,11 @@ function paintAgentsView() {
           .join("")}</div>`
       : `<p class="home-empty">No queued ideas yet — tap + New Job above to add one.</p>`;
   } else {
-    const shown = stage === "needs" ? needsJobs : stage === "done" ? doneJobs : openJobs;
+    const shown = stage === "needs" ? needsJobs : stage === "hold" ? heldJobs : stage === "done" ? doneJobs : openJobs;
     const emptyMsg = {
       active: "Zero open jobs — promote an Idea or tap + New Job.",
       needs: "Nothing blocked on Seth right now.",
+      hold: "No jobs on hold right now. Tap ⏸ Hold on any job to pause it.",
       done: "No jobs marked Done yet. Tap ✓ Mark Done on any job when Seth approves completion.",
     }[stage];
     stageBodyHtml = shown.length
@@ -2976,6 +2984,10 @@ function wsEffectiveState(w, doneSet = loadWsDoneSet(), reopenSet = loadWsReopen
   const id = String((w && w.id) || "");
   const reopened = reopenSet.has(id);
   const archived = !reopened && /no-go|closed|archived/i.test(String((w && w.status) || ""));
+  const held =
+    !reopened &&
+    !archived &&
+    (String((w && w.stage) || "") === "hold" || /\bon hold\b/i.test(String((w && w.status) || "")));
   const sethDone =
     !reopened &&
     (doneSet.has(id) ||
@@ -2986,14 +2998,17 @@ function wsEffectiveState(w, doneSet = loadWsDoneSet(), reopenSet = loadWsReopen
     ? archived
       ? w.status || "Archived"
       : "Done (Seth)"
+    : held
+    ? w.status || "On hold"
     : w && /no-go|closed|archived/i.test(String(w.status || ""))
     ? "Reopened"
     : (w && w.status) || "Active";
   return {
     sethDone,
     archived,
+    held,
     status,
-    tone: sethDone ? "done" : (w && w.tone) || "",
+    tone: sethDone ? "done" : held ? "hold" : (w && w.tone) || "",
   };
 }
 function getWorkstreamsSnapshot() {
@@ -3071,6 +3086,55 @@ function setWorkstreamDoneState(id, forceDone = null) {
   }).catch(() => {});
   return nextDone;
 }
+async function setWorkstreamHoldState(id) {
+  const snap = getWorkstreamsSnapshot();
+  const target = (snap.workstreams || []).find((w) => w.id === id);
+  const curHeld = target ? wsEffectiveState(target).held : false;
+  const nextHeld = !curHeld;
+  const doneSet = loadWsDoneSet();
+  const reopenSet = loadWsReopenSet();
+  doneSet.delete(id);
+  reopenSet.delete(id);
+  saveWsDoneSet(doneSet);
+  saveWsReopenSet(reopenSet);
+  await persistWorkstreamsUpdate((s) => {
+    for (const w of s.workstreams || []) {
+      if (w.id !== id) continue;
+      if (nextHeld) {
+        if (w.stage && w.stage !== "hold" && w.stage !== "done") w.prev_stage = w.stage;
+        if (w.status && !/on hold|hold/i.test(String(w.status))) w.prev_status = w.status;
+        w.done_by_seth = false;
+        w.stage = "hold";
+        w.status = "On hold";
+        w.tone = "hold";
+      } else {
+        w.done_by_seth = false;
+        w.stage = w.prev_stage || (w.blocker && w.blocker !== "None" ? "needs" : "active");
+        w.status = w.prev_status || "Active";
+        w.tone = w.stage === "active" ? "live" : "";
+      }
+    }
+    return s;
+  });
+  return nextHeld;
+}
+async function deleteWorkstream(id) {
+  const snap = getWorkstreamsSnapshot();
+  const target = (snap.workstreams || []).find((w) => w.id === id);
+  const title = (target && target.name) || id;
+  if (!window.confirm(`Delete "${title}" from the Job Board?`)) return false;
+  const doneSet = loadWsDoneSet();
+  const reopenSet = loadWsReopenSet();
+  doneSet.delete(id);
+  reopenSet.delete(id);
+  saveWsDoneSet(doneSet);
+  saveWsReopenSet(reopenSet);
+  await persistWorkstreamsUpdate((s) => {
+    s.workstreams = (s.workstreams || []).filter((w) => w.id !== id);
+    return s;
+  });
+  return true;
+}
 function toggleWsCheckItem(wsId, checkId) {
   const map = loadWsChecksMap();
   const key = `${wsId}:${checkId}`;
@@ -3117,7 +3181,9 @@ function renderJobCardHtml(w, doneSet = loadWsDoneSet()) {
     <div class="ws-card-actions">
       <button type="button" class="act" data-open-ws="${esc(w.id)}">🔍 Deep Dive</button>
       <button type="button" class="act" data-ws-huddle="${esc(w.id)}">🗣️ Huddle</button>
+      ${!st.sethDone ? `<button type="button" class="act" data-toggle-ws-hold="${esc(w.id)}">${st.held ? "▶ Resume" : "⏸ Hold"}</button>` : ""}
       <button type="button" class="act${st.sethDone ? "" : " act-primary"}" data-toggle-ws-done="${esc(w.id)}">${st.sethDone ? "↺ Reopen" : "✓ Mark Done"}</button>
+      <button type="button" class="act act-danger" data-delete-ws="${esc(w.id)}">🗑 Delete</button>
     </div>
   </article>`;
 }
@@ -3138,7 +3204,9 @@ function renderWorkstreamCardHtml(w, doneSet = loadWsDoneSet()) {
     <div class="ws-card-actions">
       <button type="button" class="act" data-open-ws="${esc(w.id)}">🔍 Deep Dive</button>
       ${w.channel_slug ? `<button type="button" class="act" data-open-channel="${esc(w.channel_slug)}">💬 #${esc(w.channel_slug)}</button>` : ""}
+      ${!st.sethDone ? `<button type="button" class="act" data-toggle-ws-hold="${esc(w.id)}">${st.held ? "▶ Resume" : "⏸ Hold"}</button>` : ""}
       <button type="button" class="act${st.sethDone ? "" : " act-primary"}" data-toggle-ws-done="${esc(w.id)}">${st.sethDone ? "↺ Reopen" : "✓ Mark Done"}</button>
+      <button type="button" class="act act-danger" data-delete-ws="${esc(w.id)}">🗑 Delete</button>
     </div>
   </article>`;
 }
@@ -3244,7 +3312,19 @@ function paintBriefView() {
         ${urgentWs ? `<div class="ws-card-line"><strong>Immediate Focus</strong>${esc(urgentWs.name)} — ${esc(urgentWs.next_action)}</div>` : ""}
         ${
           sethGates.length
-            ? `<div class="ws-card-line"><strong>Decisions Waiting on Seth</strong><ul style="margin:0.25rem 0 0;padding-left:1.1rem;display:grid;gap:0.22rem">${sethGates.map((g) => `<li>${esc(g)}</li>`).join("")}</ul></div>`
+            ? `<div class="ws-card-line"><strong>Decisions Waiting on Seth</strong><ul class="seth-gate-list">${sethGates
+                .map((g, idx) => {
+                  const isHeld = /on hold/i.test(String(g));
+                  return `<li class="seth-gate-item${isHeld ? " is-held" : ""}">
+                    <span class="seth-gate-text">${esc(g)}</span>
+                    <span class="seth-gate-actions">
+                      <button type="button" class="act act-primary" data-seth-gate-push="${idx}">🚀 Push</button>
+                      <button type="button" class="act" data-seth-gate-hold="${idx}">${isHeld ? "▶ Resume" : "⏸ Hold"}</button>
+                      <button type="button" class="act act-danger" data-seth-gate-delete="${idx}">🗑 Delete</button>
+                    </span>
+                  </li>`;
+                })
+                .join("")}</ul></div>`
             : ""
         }
         <div class="ws-card-actions">
@@ -5923,7 +6003,7 @@ document.getElementById("debrief-tabs")?.addEventListener("click", (e) => {
   stopDebriefVoice();
   renderDebriefSlides(state.debriefSlides || [], Number(tab.dataset.slide) || 0);
 });
-document.addEventListener("click", (e) => {
+document.addEventListener("click", async (e) => {
   const handoff = e.target.closest("[data-voice-handoff]");
   if (!handoff) return;
   const kind = handoff.dataset.voiceHandoff || "gemini";
@@ -5966,7 +6046,7 @@ document.getElementById("brief-refresh")?.addEventListener("click", () => {
   loadBriefAndNotes().catch((err) => toast(friendlyError(err), "err"));
 });
 document.getElementById("menu-toggle-notes")?.addEventListener("click", () => setRailOpen());
-document.addEventListener("click", (e) => {
+document.addEventListener("click", async (e) => {
   const toggleDone = e.target.closest("[data-toggle-ws-done]");
   if (toggleDone) {
     const id = toggleDone.dataset.toggleWsDone;
@@ -5998,6 +6078,93 @@ document.addEventListener("click", (e) => {
   }
   if (e.target.closest("#brief-run-debrief")) {
     openDebriefSheet({ useGemini: true });
+    return;
+  }
+  const holdWs = e.target.closest("[data-toggle-ws-hold]");
+  if (holdWs) {
+    const id = holdWs.dataset.toggleWsHold;
+    const nextHeld = await setWorkstreamHoldState(id);
+    if (state.view === "agents" || state.agentsCC) paintAgentsView();
+    if (state.view === "notes") paintBriefView();
+    if (state.view === "home") loadHome().catch(() => {});
+    toast(nextHeld ? "Job put on hold" : "Job resumed");
+    return;
+  }
+  const delWs = e.target.closest("[data-delete-ws]");
+  if (delWs) {
+    const id = delWs.dataset.deleteWs;
+    const deleted = await deleteWorkstream(id);
+    if (deleted) {
+      if (state.view === "agents" || state.agentsCC) paintAgentsView();
+      if (state.view === "notes") paintBriefView();
+      if (state.view === "home") loadHome().catch(() => {});
+      toast("Job deleted");
+    }
+    return;
+  }
+  const gatePush = e.target.closest("[data-seth-gate-push]");
+  if (gatePush) {
+    const idx = Number(gatePush.dataset.sethGatePush);
+    const snap = getWorkstreamsSnapshot();
+    const gates = Array.isArray(snap.vision && snap.vision.seth_gates) ? [...snap.vision.seth_gates] : [];
+    const gateText = gates[idx];
+    if (gateText) {
+      await persistWorkstreamsUpdate((s) => {
+        s.vision = s.vision || {};
+        s.vision.seth_gates = (s.vision.seth_gates || []).filter((_, i) => i !== idx);
+        return s;
+      });
+      await api("/api/channels/peer-floor/messages", {
+        method: "POST",
+        body: JSON.stringify({
+          author: currentViewer(),
+          body: `@Nori @ChatGPT @Cursor @Claude @Grokbot — **Seth APPROVED & PUSHED:** ${gateText}`,
+        }),
+      }).catch(() => {});
+      paintBriefView();
+      toast("Decision pushed to #peer-floor");
+    }
+    return;
+  }
+  const gateHold = e.target.closest("[data-seth-gate-hold]");
+  if (gateHold) {
+    const idx = Number(gateHold.dataset.sethGateHold);
+    let nextHeld = false;
+    await persistWorkstreamsUpdate((s) => {
+      s.vision = s.vision || {};
+      const list = Array.isArray(s.vision.seth_gates) ? [...s.vision.seth_gates] : [];
+      const cur = String(list[idx] || "");
+      if (cur) {
+        if (/on hold/i.test(cur)) {
+          nextHeld = false;
+          list[idx] = cur.replace(/\s*ON HOLD\s*(\([^)]*\))?\.?\s*/gi, " ").replace(/\s{2,}/g, " ").trim();
+        } else {
+          nextHeld = true;
+          list[idx] = `${cur.replace(/\.$/, "")} — ON HOLD (Seth)`;
+        }
+        s.vision.seth_gates = list;
+      }
+      return s;
+    });
+    paintBriefView();
+    toast(nextHeld ? "Decision put on hold" : "Decision resumed");
+    return;
+  }
+  const gateDel = e.target.closest("[data-seth-gate-delete]");
+  if (gateDel) {
+    const idx = Number(gateDel.dataset.sethGateDelete);
+    const snap = getWorkstreamsSnapshot();
+    const gates = Array.isArray(snap.vision && snap.vision.seth_gates) ? snap.vision.seth_gates : [];
+    const gateText = gates[idx];
+    if (gateText && window.confirm(`Delete decision "${gateText}"?`)) {
+      await persistWorkstreamsUpdate((s) => {
+        s.vision = s.vision || {};
+        s.vision.seth_gates = (s.vision.seth_gates || []).filter((_, i) => i !== idx);
+        return s;
+      });
+      paintBriefView();
+      toast("Decision deleted");
+    }
     return;
   }
   const openAgentAnywhere = e.target.closest("[data-open-agent]");

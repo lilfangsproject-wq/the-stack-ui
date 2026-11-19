@@ -3234,6 +3234,10 @@ button.host:focus-visible {
   background: rgba(245, 158, 11, 0.16);
   color: #fbbf24;
 }
+.bento-tag.hold {
+  background: rgba(148, 163, 184, 0.18);
+  color: #cbd5e1;
+}
 .bento-big {
   display: flex;
   align-items: baseline;
@@ -4654,4 +4658,48 @@ a.ghost {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+}
+
+/* Job Board: Hold & Delete action styling */
+.act.act-danger {
+  color: #f87171;
+  border-color: color-mix(in srgb, #ef4444 35%, transparent);
+  background: color-mix(in srgb, #ef4444 10%, transparent);
+}
+.act.act-danger:hover {
+  background: color-mix(in srgb, #ef4444 18%, transparent);
+}
+:root[data-surface="light"] .act.act-danger {
+  color: #dc2626;
+  border-color: color-mix(in srgb, #dc2626 30%, transparent);
+  background: color-mix(in srgb, #dc2626 8%, transparent);
+}
+
+/* Brief: Decisions Waiting on Seth per-item actions */
+.seth-gate-list {
+  margin: 0.35rem 0 0;
+  padding-left: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.55rem;
+}
+.seth-gate-item {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-2, #ffffff) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border, #ffffff) 12%, transparent);
+}
+.seth-gate-item.is-held {
+  opacity: 0.78;
+}
+.seth-gate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.seth-gate-actions .act {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.78rem;
 }
