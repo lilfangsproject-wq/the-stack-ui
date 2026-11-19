@@ -35,7 +35,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>our app · zero spend · <span data-stack-version>v40.1</span></small>
+          <small>our app · zero spend · <span data-stack-version>v40.7</span></small>
         </div>
       </div>
       <p id="boot-status">Opening the vault…</p>
@@ -68,7 +68,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>agent command centre · <span data-stack-version>v40.1</span></small>
+          <small>agent command centre · <span data-stack-version>v40.7</span></small>
         </div>
       </div>
       <div class="rail-status-row">
@@ -284,8 +284,9 @@
           <p class="purpose" id="debrief-sub">On-demand clarity &amp; presentation</p>
         </div>
         <div class="job-head-actions">
-          <a href="https://gemini.google.com/app" target="_blank" rel="noopener" id="debrief-gemini-link" class="act act-primary" data-voice-handoff="gemini" data-voice-scope="debrief">🎙️ Gemini</a>
-          <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" id="debrief-notebook-link" class="act" data-voice-handoff="notebook" data-voice-scope="debrief">📓 Notebook</a>
+          <button type="button" id="debrief-jarvis" class="act act-primary" data-open-jarvis="debrief">🎙 Jarvis</button>
+          <a href="https://gemini.google.com/app" target="_blank" rel="noopener" id="debrief-gemini-link" class="ghost" data-voice-handoff="gemini" data-voice-scope="debrief">Gemini</a>
+          <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" id="debrief-notebook-link" class="ghost" data-voice-handoff="notebook" data-voice-scope="debrief">Notebook</a>
         </div>
       </header>
       <nav id="debrief-tabs" class="debrief-tabs" aria-label="Presentation slides"></nav>
@@ -296,6 +297,37 @@
         <button type="button" id="debrief-open-brief" class="act">🧭 Full Brief</button>
       </footer>
     </aside>
+    <aside class="host-sheet jarvis-sheet" id="jarvis-sheet" hidden>
+      <header class="main-head host-sheet-head">
+        <button type="button" id="jarvis-close" class="icon-btn" aria-label="Close">‹</button>
+        <div class="main-head-text">
+          <h1 id="jarvis-title">Jarvis</h1>
+          <p class="purpose" id="jarvis-sub">In-Stack voice debrief · no clipboard hop</p>
+        </div>
+        <span class="bento-tag" id="jarvis-state-tag">Idle</span>
+      </header>
+      <section class="host-sheet-body jarvis-body" id="jarvis-body">
+        <p class="jarvis-hint" id="jarvis-hint">Speak your thoughts. Jarvis keeps the Stack brief in context, answers here, and can drop a Workhorse prompt into #peer-floor.</p>
+        <details class="jarvis-context" id="jarvis-context">
+          <summary>Brief in play</summary>
+          <pre id="jarvis-brief-preview"></pre>
+        </details>
+        <div class="jarvis-log" id="jarvis-log" aria-live="polite"></div>
+        <label class="jarvis-prompt-label" for="jarvis-prompt">Workhorse prompt</label>
+        <textarea id="jarvis-prompt" rows="5" placeholder="Ask Jarvis after talking — the tight prompt lands here."></textarea>
+      </section>
+      <footer class="host-sheet-actions jarvis-actions" id="jarvis-actions">
+        <button type="button" id="jarvis-mic" class="act act-primary">🎙 Hold to talk</button>
+        <button type="button" id="jarvis-speak-brief" class="act">▶ Speak brief</button>
+        <button type="button" id="jarvis-ask" class="act">✦ Ask Jarvis</button>
+        <button type="button" id="jarvis-drop" class="act">⤵ Drop to #peer-floor</button>
+        <button type="button" id="jarvis-copy" class="ghost">📋 Copy prompt</button>
+        <div class="jarvis-escape">
+          <a href="https://gemini.google.com/app" target="_blank" rel="noopener" class="ghost" data-voice-handoff="gemini" data-voice-scope="debrief">Escape → Gemini Voice</a>
+          <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" class="ghost" data-voice-handoff="notebook" data-voice-scope="debrief">Escape → NotebookLM</a>
+        </div>
+      </footer>
+    </aside>
     <aside class="host-sheet" id="workstream-sheet" hidden>
       <header class="main-head host-sheet-head">
         <button type="button" id="ws-sheet-close" class="icon-btn" aria-label="Close">‹</button>
@@ -303,8 +335,9 @@
           <h1 id="ws-sheet-title">Workstream</h1>
           <p class="purpose" id="ws-sheet-sub">Status &amp; Clarity</p>
         </div>
-        <a href="https://gemini.google.com/app" target="_blank" rel="noopener" id="ws-sheet-gemini" class="ghost" data-voice-handoff="gemini" data-voice-scope="job">🎙️ Gemini</a>
-        <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" id="ws-sheet-notebook" class="ghost" data-voice-handoff="notebook" data-voice-scope="job">📓 Notebook</a>
+        <button type="button" id="ws-sheet-jarvis" class="act act-primary" data-open-jarvis="job">🎙 Jarvis</button>
+        <a href="https://gemini.google.com/app" target="_blank" rel="noopener" id="ws-sheet-gemini" class="ghost" data-voice-handoff="gemini" data-voice-scope="job">Gemini</a>
+        <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" id="ws-sheet-notebook" class="ghost" data-voice-handoff="notebook" data-voice-scope="job">Notebook</a>
         <span class="bento-tag live" id="ws-sheet-pct">Active</span>
       </header>
       <section class="host-sheet-body" id="ws-sheet-body"></section>

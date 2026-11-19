@@ -4784,3 +4784,127 @@ a.ghost {
   font-size: 0.73rem;
   opacity: 0.68;
 }
+
+/* v40.7 — Jarvis in-Stack voice debrief */
+#jarvis-sheet {
+  max-height: min(92dvh, 48rem);
+  z-index: 46;
+}
+.jarvis-body {
+  display: grid;
+  gap: 0.7rem;
+  align-content: start;
+}
+.jarvis-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.jarvis-context {
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 0.45rem 0.65rem;
+}
+.jarvis-context summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--accent);
+}
+.jarvis-context pre {
+  margin: 0.45rem 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 0.72rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: color-mix(in srgb, var(--text) 82%, transparent);
+  max-height: 8rem;
+  overflow: auto;
+}
+.jarvis-log {
+  display: grid;
+  gap: 0.45rem;
+  min-height: 6.5rem;
+  max-height: 14rem;
+  overflow: auto;
+  padding: 0.55rem;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.18);
+}
+.jarvis-bubble {
+  border-radius: 14px;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  max-width: 95%;
+}
+.jarvis-bubble.you {
+  justify-self: end;
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.jarvis-bubble.jarvis {
+  justify-self: start;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+.jarvis-bubble.meta {
+  justify-self: center;
+  font-size: 0.72rem;
+  color: var(--muted);
+  background: transparent;
+  padding: 0.15rem 0.4rem;
+}
+.jarvis-bubble.interim {
+  opacity: 0.65;
+  font-style: italic;
+}
+.jarvis-prompt-label {
+  font-size: 0.74rem;
+  font-weight: 650;
+  color: var(--muted);
+}
+#jarvis-prompt {
+  width: 100%;
+  resize: vertical;
+  min-height: 5.5rem;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  padding: 0.65rem 0.75rem;
+  font: inherit;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+.jarvis-actions {
+  grid-template-columns: 1fr 1fr;
+}
+.jarvis-actions #jarvis-mic {
+  grid-column: 1 / -1;
+}
+.jarvis-actions #jarvis-mic.listening {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+  animation: jarvis-pulse 1.4s ease-in-out infinite;
+}
+.jarvis-escape {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: space-between;
+}
+.jarvis-escape .ghost {
+  font-size: 0.72rem;
+  opacity: 0.75;
+}
+#jarvis-state-tag.live {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+@keyframes jarvis-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.015); }
+}

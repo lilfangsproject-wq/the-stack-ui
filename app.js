@@ -439,7 +439,7 @@ function showCloudConnect(errMsg) {
   if (gemInput && getGeminiKey()) gemInput.value = getGeminiKey();
 }
 
-const STACK_VERSION = "v40.1";
+const STACK_VERSION = "v40.7";
 const GEMINI_KEY_STORAGE = "stack-gemini-key-v1";
 const GEMINI_MODEL_STORAGE = "stack-gemini-model-v1";
 const GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite";
@@ -2291,9 +2291,9 @@ function defaultQuotaPools() {
   return [
     {
       id: "gemini-web-voice",
-      name: "1. Gemini Web / Mobile Voice Call",
-      cost: "$0 · Consumer Pool",
-      note: "Unrelated to Antigravity quota. Use long voice calls here to think out loud and turn messy thoughts into clear Workhorse prompts.",
+      name: "1. Jarvis (in-Stack) · Gemini Voice escape",
+      cost: "$0 · Browser STT/TTS + AI Studio key",
+      note: "Primary: Jarvis voice room inside The Stack. Escape: consumer Gemini Voice Call for long external brainstorms — still $0 Antigravity.",
     },
     {
       id: "antigravity-gemini",
@@ -2324,7 +2324,7 @@ function buildVoiceBriefText(workstreams, needsList) {
     return !st.sethDone && !st.archived;
   });
   const lines = [
-    "CONTEXT BRIEF FOR GEMINI VOICE CALL (Help me turn my voice thoughts into a crisp Workhorse prompt for Antigravity):",
+    "CONTEXT BRIEF FOR JARVIS / VOICE DEBRIEF (Help turn spoken thoughts into a crisp Workhorse prompt for #peer-floor / Antigravity):",
     "",
     `Active Jobs (${open.length}):`,
     ...open.map(
@@ -2427,12 +2427,13 @@ function paintAgentsView() {
 
   const bannerHtml = `<section class="job-board-banner">
     <div>
-      <h2>Collaborative Job Board · Gemini Voice → Workhorse Flow</h2>
-      <p>Use free consumer <strong>Gemini Voice Call</strong> to think out loud at $0 Antigravity usage, then paste your crisp Workhorse prompt into <strong>+ New Job</strong> or <strong>#peer-floor</strong>.</p>
+      <h2>Collaborative Job Board · Jarvis Voice → Workhorse Flow</h2>
+      <p>Talk in-Stack with <strong>Jarvis</strong> (brief stays here). Escape hatch: consumer Gemini Voice / NotebookLM if you still want an external call.</p>
     </div>
     <div class="ws-card-actions">
-      <a href="https://gemini.google.com/app" target="_blank" rel="noopener" id="jobs-gemini-link" class="act act-primary" data-voice-handoff="gemini" data-voice-scope="debrief">🎙️ Open Gemini Voice</a>
-      <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" id="jobs-notebook-link" class="act" data-voice-handoff="notebook" data-voice-scope="debrief">📓 Open NotebookLM</a>
+      <button type="button" id="jobs-jarvis-link" class="act act-primary" data-open-jarvis="debrief">🎙 Open Jarvis</button>
+      <a href="https://gemini.google.com/app" target="_blank" rel="noopener" id="jobs-gemini-link" class="ghost" data-voice-handoff="gemini" data-voice-scope="debrief">Gemini Voice</a>
+      <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" id="jobs-notebook-link" class="ghost" data-voice-handoff="notebook" data-voice-scope="debrief">NotebookLM</a>
       <button type="button" id="copy-voice-brief" class="ghost">📋 Copy Brief Only</button>
       <button type="button" class="act" data-open-channel="peer-floor">🗣️ Open #peer-floor</button>
       <button type="button" class="ghost" data-toggle-new-job="1">${state.showNewJobForm ? "✕ Close New Job" : "+ Drop New Job / Idea"}</button>
@@ -3350,9 +3351,10 @@ function paintBriefView() {
             : ""
         }
         <div class="ws-card-actions">
-          <button type="button" class="act act-primary" data-open-channel="peer-floor">🗣️ Orchestrate #peer-floor</button>
-          <a href="https://gemini.google.com/app" target="_blank" rel="noopener" class="act" data-voice-handoff="gemini" data-voice-scope="debrief">🎙️ Gemini Voice</a>
-          <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" class="act" data-voice-handoff="notebook" data-voice-scope="debrief">📓 NotebookLM</a>
+          <button type="button" class="act act-primary" data-open-jarvis="debrief">🎙 Jarvis Voice</button>
+          <button type="button" class="act" data-open-channel="peer-floor">🗣️ Orchestrate #peer-floor</button>
+          <a href="https://gemini.google.com/app" target="_blank" rel="noopener" class="ghost" data-voice-handoff="gemini" data-voice-scope="debrief">Gemini Voice</a>
+          <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" class="ghost" data-voice-handoff="notebook" data-voice-scope="debrief">NotebookLM</a>
           <a href="https://docs.google.com/document/d/1mfBzM1SN9a4thNZpq1Jyvk8jEd5tfpkNq7-tr2NzRyo/edit" target="_blank" rel="noopener" class="ghost">📄 Exec Brief GDoc</a>
           <button type="button" class="act" data-brief-tab="master">📋 All Workstreams (${workstreams.length})</button>
           <button type="button" id="brief-run-debrief" class="act">✦ Debrief</button>
@@ -4089,8 +4091,9 @@ function buildBentoHub({ cc, todos }) {
       <div class="bento-ws-links">${extLinksHtml}</div>
       <div class="bento-cta-row">
         <button type="button" id="bento-debrief-btn" class="act act-primary">✦ Debrief me (${kept.length})</button>
-        <a href="https://gemini.google.com/app" target="_blank" rel="noopener" id="bento-gemini-voice" class="act" data-voice-handoff="gemini" data-voice-scope="debrief" title="Copy brief &amp; open Gemini Voice Call">🎙️ Gemini Voice</a>
-        <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" id="bento-notebook-voice" class="act" data-voice-handoff="notebook" data-voice-scope="debrief" title="Copy brief &amp; open NotebookLM">📓 NotebookLM</a>
+        <button type="button" id="bento-jarvis-voice" class="act" data-open-jarvis="debrief" title="In-Stack Jarvis voice room">🎙 Jarvis</button>
+        <a href="https://gemini.google.com/app" target="_blank" rel="noopener" id="bento-gemini-voice" class="ghost" data-voice-handoff="gemini" data-voice-scope="debrief" title="Escape hatch: copy brief &amp; open Gemini Voice Call">Gemini</a>
+        <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" id="bento-notebook-voice" class="ghost" data-voice-handoff="notebook" data-voice-scope="debrief" title="Escape hatch: copy brief &amp; open NotebookLM">Notebook</a>
         ${dismissedCount ? `<button type="button" id="bento-reset-got-it" class="ghost">Reset (${dismissedCount})</button>` : ""}
       </div>
     </article>
@@ -4418,6 +4421,320 @@ function speakStackText(text, btnEl, idleLabel = "▶ Voice") {
   speakIdx(0);
   toast("Speaking summary…");
 }
+
+/* ---- v40.7 Jarvis: in-Stack voice debrief (replaces clipboard → Gemini hop) ---- */
+const jarvis = {
+  scope: "debrief",
+  listening: false,
+  asking: false,
+  recognition: null,
+  finalTranscript: "",
+  interim: "",
+  wantListen: false,
+};
+
+function jarvisSpeechRecognition() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function setJarvisState(label, live = false) {
+  const tag = document.getElementById("jarvis-state-tag");
+  if (!tag) return;
+  tag.textContent = label;
+  tag.classList.toggle("live", !!live);
+}
+
+function jarvisAppendLog(role, text, { interim = false } = {}) {
+  const log = document.getElementById("jarvis-log");
+  if (!log || !text) return;
+  let el = interim ? log.querySelector(".jarvis-bubble.interim") : null;
+  if (!el) {
+    el = document.createElement("div");
+    el.className = `jarvis-bubble ${role}${interim ? " interim" : ""}`;
+    log.appendChild(el);
+  } else {
+    el.className = `jarvis-bubble ${role}${interim ? " interim" : ""}`;
+  }
+  el.textContent = text;
+  if (!interim) {
+    const stale = log.querySelector(".jarvis-bubble.interim");
+    if (stale && stale !== el) stale.remove();
+  }
+  log.scrollTop = log.scrollHeight;
+}
+
+function jarvisClearInterim() {
+  document.getElementById("jarvis-log")?.querySelector(".jarvis-bubble.interim")?.remove();
+}
+
+function stopJarvisListening() {
+  jarvis.wantListen = false;
+  jarvis.listening = false;
+  try {
+    jarvis.recognition?.stop();
+  } catch {
+    /* ignore */
+  }
+  const mic = document.getElementById("jarvis-mic");
+  if (mic) {
+    mic.classList.remove("listening");
+    mic.textContent = "🎙 Hold to talk";
+  }
+  jarvisClearInterim();
+  if (!jarvis.asking) setJarvisState("Idle", false);
+}
+
+function startJarvisListening() {
+  const SR = jarvisSpeechRecognition();
+  if (!SR) {
+    toast("Speech recognition needs Chrome/Safari with mic access", "err");
+    return;
+  }
+  stopDebriefVoice();
+  jarvis.wantListen = true;
+  if (!jarvis.recognition) {
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = "en-AU";
+    rec.onstart = () => {
+      jarvis.listening = true;
+      setJarvisState("Listening", true);
+      const mic = document.getElementById("jarvis-mic");
+      if (mic) {
+        mic.classList.add("listening");
+        mic.textContent = "⏹ Release / stop";
+      }
+    };
+    rec.onerror = (ev) => {
+      const code = ev?.error || "error";
+      if (code === "aborted" || code === "no-speech") return;
+      if (code === "not-allowed") toast("Mic permission blocked — allow microphone for The Stack", "err");
+      else toast(`Mic: ${code}`, "err");
+      stopJarvisListening();
+    };
+    rec.onend = () => {
+      jarvis.listening = false;
+      if (jarvis.wantListen) {
+        try {
+          rec.start();
+        } catch {
+          stopJarvisListening();
+        }
+        return;
+      }
+      const mic = document.getElementById("jarvis-mic");
+      if (mic) {
+        mic.classList.remove("listening");
+        mic.textContent = "🎙 Hold to talk";
+      }
+      jarvisClearInterim();
+      if (!jarvis.asking) setJarvisState("Idle", false);
+      const finalBit = jarvis.finalTranscript.trim();
+      if (finalBit && /\b(jarvis|hey stack|okay stack)\b/i.test(finalBit)) {
+        askJarvisFromVoice().catch(() => {});
+      }
+    };
+    rec.onresult = (event) => {
+      let interim = "";
+      let finals = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const r = event.results[i];
+        const t = r[0]?.transcript || "";
+        if (r.isFinal) finals += `${t} `;
+        else interim += t;
+      }
+      if (finals.trim()) {
+        jarvis.finalTranscript = `${jarvis.finalTranscript} ${finals}`.replace(/\s+/g, " ").trim();
+        jarvisAppendLog("you", jarvis.finalTranscript);
+      }
+      if (interim.trim()) jarvisAppendLog("you", interim.trim(), { interim: true });
+      else jarvisClearInterim();
+    };
+    jarvis.recognition = rec;
+  }
+  try {
+    jarvis.recognition.start();
+  } catch {
+    /* already started */
+  }
+}
+
+function openJarvisSheet(scope = "debrief") {
+  const sheet = document.getElementById("jarvis-sheet");
+  if (!sheet) return;
+  jarvis.scope = scope === "job" ? "job" : "debrief";
+  jarvis.finalTranscript = "";
+  jarvis.interim = "";
+  const brief = buildVoiceHandoffText(jarvis.scope);
+  const preview = document.getElementById("jarvis-brief-preview");
+  if (preview) preview.textContent = brief;
+  const log = document.getElementById("jarvis-log");
+  if (log) log.innerHTML = "";
+  const prompt = document.getElementById("jarvis-prompt");
+  if (prompt && !prompt.value.trim()) prompt.value = "";
+  const sub = document.getElementById("jarvis-sub");
+  if (sub) {
+    sub.textContent =
+      jarvis.scope === "job"
+        ? "Job voice room · brief stays here · drop prompt to #peer-floor"
+        : "In-Stack voice debrief · no clipboard hop";
+  }
+  sheet.hidden = false;
+  setJarvisState("Ready", false);
+  jarvisAppendLog("meta", "Brief loaded. Hold mic, talk it through, then Ask Jarvis.");
+  if (!getGeminiKey()) {
+    jarvisAppendLog("meta", "No Gemini key yet — Speak brief + mic still work; Ask Jarvis needs Menu → Gemini key (AI Studio free tier).");
+  }
+}
+
+function closeJarvisSheet() {
+  stopJarvisListening();
+  stopDebriefVoice();
+  const sheet = document.getElementById("jarvis-sheet");
+  if (sheet) sheet.hidden = true;
+}
+
+function extractWorkhorsePrompt(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+  const fenced = raw.match(/```(?:workhorse|prompt|text)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]?.trim()) return fenced[1].trim();
+  const labeled = raw.match(/(?:workhorse\s*prompt|tight\s*prompt)\s*[:\-]\s*([\s\S]+)/i);
+  if (labeled?.[1]?.trim()) return labeled[1].trim();
+  return raw;
+}
+
+async function askJarvisFromVoice() {
+  if (jarvis.asking) return;
+  const spoken = jarvis.finalTranscript.trim() || document.getElementById("jarvis-log")?.querySelector(".jarvis-bubble.you:not(.interim)")?.textContent?.trim() || "";
+  const typedExtra = "";
+  if (!spoken && !typedExtra) {
+    toast("Say something first (hold mic), then Ask Jarvis");
+    return;
+  }
+  if (!getGeminiKey()) {
+    toast("Add Gemini API key in Menu (AI Studio free) to Ask Jarvis", "err");
+    return;
+  }
+  stopJarvisListening();
+  jarvis.asking = true;
+  setJarvisState("Thinking", true);
+  const askBtn = document.getElementById("jarvis-ask");
+  if (askBtn) askBtn.disabled = true;
+  const brief = buildVoiceHandoffText(jarvis.scope);
+  const userText = [
+    "You are Jarvis inside The Stack — Seth's voice debrief partner.",
+    "Use ONLY the Stack brief below plus Seth's spoken notes. Do not invent metrics or status.",
+    "Reply with: (1) a short spoken answer (2-6 sentences), then (2) a fenced ```workhorse block with ONE tight Workhorse prompt ready for #peer-floor.",
+    "",
+    "STACK BRIEF:",
+    brief,
+    "",
+    "SETH SAID:",
+    spoken || "(no extra notes — brief him from the Stack state and propose the next Workhorse prompt)",
+  ].join("\n");
+  jarvisAppendLog("meta", "Asking Jarvis…");
+  let live = "";
+  try {
+    const out = await streamGeminiInteraction({
+      slug: "jarvis-voice",
+      userText,
+      fresh: true,
+      maxOutputTokens: 900,
+      onDelta: (t) => {
+        live = t;
+        jarvisAppendLog("jarvis", t);
+      },
+    });
+    const finalText = (out.text || live || "").trim();
+    jarvisAppendLog("jarvis", finalText || "No reply.");
+    const promptEl = document.getElementById("jarvis-prompt");
+    if (promptEl) promptEl.value = extractWorkhorsePrompt(finalText);
+    const speakPart = finalText.split(/```/)[0].trim() || finalText;
+    speakStackText(speakPart, document.getElementById("jarvis-speak-brief"), "▶ Speak brief");
+    setJarvisState("Answered", false);
+    toast("Jarvis ready — review prompt or drop to #peer-floor");
+  } catch (err) {
+    jarvisAppendLog("meta", friendlyError(err));
+    setJarvisState("Error", false);
+    toast(friendlyError(err), "err");
+  } finally {
+    jarvis.asking = false;
+    if (askBtn) askBtn.disabled = false;
+  }
+}
+
+async function dropJarvisPromptToPeerFloor() {
+  const prompt = (document.getElementById("jarvis-prompt")?.value || "").trim();
+  if (!prompt) {
+    toast("No Workhorse prompt yet — Ask Jarvis first");
+    return;
+  }
+  const body = `@Gemini @Cursor Jarvis voice debrief → Workhorse prompt:\n\n${prompt}`;
+  try {
+    await api("/api/channels/peer-floor/messages", {
+      method: "POST",
+      body: JSON.stringify({ author: currentViewer(), body }),
+    });
+    toast("Dropped to #peer-floor");
+    jarvisAppendLog("meta", "Posted to #peer-floor.");
+  } catch (err) {
+    toast(friendlyError(err), "err");
+  }
+}
+
+function wireJarvisControls() {
+  const mic = document.getElementById("jarvis-mic");
+  const start = (e) => {
+    e.preventDefault();
+    if (jarvis.listening || jarvis.wantListen) stopJarvisListening();
+    else startJarvisListening();
+  };
+  mic?.addEventListener("click", start);
+  mic?.addEventListener(
+    "touchstart",
+    (e) => {
+      if (e.cancelable) e.preventDefault();
+      if (!jarvis.wantListen) startJarvisListening();
+    },
+    { passive: false }
+  );
+  mic?.addEventListener("touchend", () => {
+    if (jarvis.wantListen) stopJarvisListening();
+  });
+  document.getElementById("jarvis-close")?.addEventListener("click", () => closeJarvisSheet());
+  document.getElementById("jarvis-speak-brief")?.addEventListener("click", (e) => {
+    const brief = buildVoiceHandoffText(jarvis.scope);
+    speakStackText(brief, e.currentTarget, "▶ Speak brief");
+  });
+  document.getElementById("jarvis-ask")?.addEventListener("click", () => {
+    askJarvisFromVoice().catch(() => {});
+  });
+  document.getElementById("jarvis-drop")?.addEventListener("click", () => {
+    dropJarvisPromptToPeerFloor().catch(() => {});
+  });
+  document.getElementById("jarvis-copy")?.addEventListener("click", async () => {
+    const prompt = (document.getElementById("jarvis-prompt")?.value || "").trim();
+    if (!prompt) {
+      toast("Nothing to copy");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(prompt);
+      toast("Prompt copied");
+    } catch {
+      toast("Clipboard blocked", "err");
+    }
+  });
+  document.addEventListener("click", (e) => {
+    const open = e.target.closest("[data-open-jarvis]");
+    if (!open) return;
+    e.preventDefault();
+    openJarvisSheet(open.dataset.openJarvis || "debrief");
+  });
+}
+wireJarvisControls();
 
 function parseAiSlides(text, fallbackSlides) {
   const cleaned = String(text || "")
