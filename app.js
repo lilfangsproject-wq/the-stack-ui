@@ -71,9 +71,11 @@ const READS_KEY = "stack-reads-v1";
 // v2 key: only an accent the person actually tapped is remembered (v1 also saved the default on every
 // load, which pinned old defaults like Lime after the default changed to Iridescent).
 const LOOK_KEY = "stack-look-v2";
+const SURFACE_KEY = "stack-surface-v1";
+const SURFACE_DEFAULT = "dark";
 const QUICK_REACTIONS = ["👍", "👀", "✅", "❤️", "🔥"];
 
-/** Phone-steerable accents on the dark Liquid Glass theme — tap Look in the menu. Lime is the default. */
+/** Phone-steerable accents on Liquid Glass (Black & White) — tap Look in the menu. */
 const LOOKS = {
   iris: {
     label: "Iridescent",
@@ -84,26 +86,99 @@ const LOOKS = {
     // Chameleon headlight film: pearl → pink → lavender → ice blue → mint.
     grad: "linear-gradient(115deg, #ffe3f3 0%, #f3b8e6 18%, #cdbdff 38%, #a9dcff 58%, #b9f5dc 78%, #fff1d6 100%)",
     swatch: "linear-gradient(135deg, #f3b8e6, #cdbdff, #a9dcff, #b9f5dc)",
+    lightAccent: "#6c4ce6",
+    lightStrong: "#5534d6",
+    lightSoft: "rgba(108, 76, 230, 0.14)",
+    lightOn: "#ffffff",
+    lightGrad: "linear-gradient(115deg, #f5b8df 0%, #c6a8ff 28%, #7ac7ff 56%, #6ee7b7 80%, #fcd38d 100%)",
   },
-  lime: { label: "Lime", accent: "#d4f25c", strong: "#b8d93c", soft: "rgba(212, 242, 92, 0.16)", on: "#151a05" },
-  violet: { label: "Violet", accent: "#b9a2ff", strong: "#9a7dff", soft: "rgba(185, 162, 255, 0.16)", on: "#1a1230" },
-  amber: { label: "Amber", accent: "#ffc94a", strong: "#f0ae1c", soft: "rgba(255, 201, 74, 0.16)", on: "#2a1f00" },
-  mint: { label: "Mint", accent: "#6ff0c4", strong: "#3fd6a5", soft: "rgba(111, 240, 196, 0.16)", on: "#04241a" },
-  coral: { label: "Coral", accent: "#ff8a70", strong: "#f2674a", soft: "rgba(255, 138, 112, 0.16)", on: "#2b0d06" },
-  white: { label: "White", accent: "#f4f5f2", strong: "#d9dbd5", soft: "rgba(244, 245, 242, 0.14)", on: "#111214" },
+  lime: {
+    label: "Lime",
+    accent: "#d4f25c",
+    strong: "#b8d93c",
+    soft: "rgba(212, 242, 92, 0.16)",
+    on: "#151a05",
+    lightAccent: "#4d7c0f",
+    lightStrong: "#3f6212",
+    lightSoft: "rgba(77, 124, 15, 0.14)",
+    lightOn: "#ffffff",
+  },
+  violet: {
+    label: "Violet",
+    accent: "#b9a2ff",
+    strong: "#9a7dff",
+    soft: "rgba(185, 162, 255, 0.16)",
+    on: "#1a1230",
+    lightAccent: "#6d4aff",
+    lightStrong: "#5735e5",
+    lightSoft: "rgba(109, 74, 255, 0.14)",
+    lightOn: "#ffffff",
+  },
+  amber: {
+    label: "Amber",
+    accent: "#ffc94a",
+    strong: "#f0ae1c",
+    soft: "rgba(255, 201, 74, 0.16)",
+    on: "#2a1f00",
+    lightAccent: "#b45309",
+    lightStrong: "#92400e",
+    lightSoft: "rgba(180, 83, 9, 0.14)",
+    lightOn: "#ffffff",
+  },
+  mint: {
+    label: "Mint",
+    accent: "#6ff0c4",
+    strong: "#3fd6a5",
+    soft: "rgba(111, 240, 196, 0.16)",
+    on: "#04241a",
+    lightAccent: "#0f8f69",
+    lightStrong: "#0b7052",
+    lightSoft: "rgba(15, 143, 105, 0.14)",
+    lightOn: "#ffffff",
+  },
+  coral: {
+    label: "Coral",
+    accent: "#ff8a70",
+    strong: "#f2674a",
+    soft: "rgba(255, 138, 112, 0.16)",
+    on: "#2b0d06",
+    lightAccent: "#d94826",
+    lightStrong: "#b83719",
+    lightSoft: "rgba(217, 72, 38, 0.14)",
+    lightOn: "#ffffff",
+  },
+  white: {
+    label: "Mono",
+    accent: "#f4f5f2",
+    strong: "#d9dbd5",
+    soft: "rgba(244, 245, 242, 0.14)",
+    on: "#111214",
+    swatch: "linear-gradient(135deg, #ffffff 0%, #cfd6e3 50%, #1b1e26 51%, #0b0c0e 100%)",
+    lightAccent: "#11141c",
+    lightStrong: "#000000",
+    lightSoft: "rgba(17, 20, 28, 0.1)",
+    lightOn: "#ffffff",
+  },
 };
 const LOOK_DEFAULT = "iris";
 
 function applyLook(id, remember = false) {
   const look = LOOKS[id] || LOOKS[LOOK_DEFAULT];
   const root = document.documentElement;
-  root.style.setProperty("--accent", look.accent);
-  root.style.setProperty("--accent-strong", look.strong);
-  root.style.setProperty("--accent-soft", look.soft);
-  root.style.setProperty("--on-accent", look.on || "#ffffff");
-  root.style.setProperty("--accent-grad", look.grad || look.accent);
+  const isLight = root.dataset.surface === "light";
+  const accent = isLight ? look.lightAccent || look.accent : look.accent;
+  const strong = isLight ? look.lightStrong || look.strong : look.strong;
+  const soft = isLight ? look.lightSoft || look.soft : look.soft;
+  const on = isLight ? look.lightOn || look.on : look.on;
+  const grad = isLight ? look.lightGrad || look.grad || accent : look.grad || accent;
+
+  root.style.setProperty("--accent", accent);
+  root.style.setProperty("--accent-strong", strong);
+  root.style.setProperty("--accent-soft", soft);
+  root.style.setProperty("--on-accent", on || "#ffffff");
+  root.style.setProperty("--accent-grad", grad);
   root.toggleAttribute("data-iris", Boolean(look.grad));
-  root.style.setProperty("--accent-glow", look.soft.replace(/0\.1\d\)/, "0.35)"));
+  root.style.setProperty("--accent-glow", soft.replace(/0\.1\d\)/, "0.35)"));
   root.dataset.look = LOOKS[id] ? id : LOOK_DEFAULT;
   if (remember) {
     try {
@@ -113,19 +188,52 @@ function applyLook(id, remember = false) {
       /* ignore */
     }
   }
-  /* theme-color comes from the light/dark meta tags in index.html */
+  /* theme-color comes from applySurface */
   document.querySelectorAll("#look-picker .look-swatch").forEach((btn) => {
-    const on = btn.dataset.look === root.dataset.look;
-    btn.setAttribute("aria-checked", on ? "true" : "false");
+    const onLook = btn.dataset.look === root.dataset.look;
+    btn.setAttribute("aria-checked", onLook ? "true" : "false");
   });
+}
+
+function applySurface(mode, remember = false) {
+  const m = mode === "light" ? "light" : "dark";
+  const root = document.documentElement;
+  root.dataset.surface = m;
+  const tc = m === "light" ? "#f6f8fc" : "#07080c";
+  document.querySelectorAll('meta[name="theme-color"]').forEach((meta) => {
+    meta.setAttribute("content", tc);
+  });
+  document.querySelectorAll("#surface-picker [data-surface]").forEach((btn) => {
+    btn.setAttribute("aria-checked", btn.dataset.surface === m ? "true" : "false");
+  });
+  const quick = document.getElementById("surface-quick-toggle");
+  if (quick) {
+    const ico = quick.querySelector(".sq-ico");
+    const lbl = quick.querySelector(".sq-label");
+    if (ico) ico.textContent = m === "light" ? "☀" : "☾";
+    if (lbl) lbl.textContent = m === "light" ? "White" : "Black";
+    quick.setAttribute("aria-pressed", m === "light" ? "true" : "false");
+  }
+  if (remember) {
+    try {
+      localStorage.setItem(SURFACE_KEY, m);
+    } catch {
+      /* ignore */
+    }
+  }
+  applyLook(root.dataset.look || LOOK_DEFAULT, false);
 }
 
 function initLookPicker() {
   let saved = LOOK_DEFAULT;
+  let savedSurface = SURFACE_DEFAULT;
   try {
     saved = localStorage.getItem(LOOK_KEY) || LOOK_DEFAULT;
+    const rawSurface = localStorage.getItem(SURFACE_KEY);
+    if (rawSurface === "light" || rawSurface === "dark") savedSurface = rawSurface;
   } catch {
     saved = LOOK_DEFAULT;
+    savedSurface = SURFACE_DEFAULT;
   }
   if (!LOOKS[saved]) saved = LOOK_DEFAULT;
   const host = document.getElementById("look-picker");
@@ -142,7 +250,25 @@ function initLookPicker() {
       applyLook(btn.dataset.look, true);
     });
   }
+  const surfaceHost = document.getElementById("surface-picker");
+  if (surfaceHost && !surfaceHost.dataset.bound) {
+    surfaceHost.dataset.bound = "1";
+    surfaceHost.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-surface]");
+      if (!btn) return;
+      applySurface(btn.dataset.surface, true);
+    });
+  }
+  const quickToggle = document.getElementById("surface-quick-toggle");
+  if (quickToggle && !quickToggle.dataset.bound) {
+    quickToggle.dataset.bound = "1";
+    quickToggle.addEventListener("click", () => {
+      const next = document.documentElement.dataset.surface === "light" ? "dark" : "light";
+      applySurface(next, true);
+    });
+  }
   applyLook(saved);
+  applySurface(savedSurface, false);
 }
 
 const POCKET_DB = "the-stack-pocket";
@@ -313,7 +439,7 @@ function showCloudConnect(errMsg) {
   if (gemInput && getGeminiKey()) gemInput.value = getGeminiKey();
 }
 
-const STACK_VERSION = "v39.0";
+const STACK_VERSION = "v40.0";
 const GEMINI_KEY_STORAGE = "stack-gemini-key-v1";
 const GEMINI_MODEL_STORAGE = "stack-gemini-model-v1";
 const GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite";
@@ -898,6 +1024,11 @@ function defaultChatSlug() {
 function paintSessionStrip() {
   const strip = document.getElementById("session-strip");
   if (!strip) return;
+  if (state.channelSlug === "peer-floor") {
+    strip.hidden = true;
+    return;
+  }
+  strip.hidden = false;
   const viewer = currentViewer();
   strip.innerHTML =
     sessionList()
@@ -2158,22 +2289,186 @@ function taskRow(j) {
   </article>`;
 }
 
+function defaultQuotaPools() {
+  return [
+    {
+      id: "gemini-web-voice",
+      name: "1. Gemini Web / Mobile Voice Call",
+      cost: "$0 · Consumer Pool",
+      note: "Unrelated to Antigravity quota. Use long voice calls here to think out loud and turn messy thoughts into clear Workhorse prompts.",
+    },
+    {
+      id: "antigravity-gemini",
+      name: "2. Antigravity Gemini Orchestrator",
+      cost: "Dev Agent Bucket",
+      note: "Boss/coordinator inside Antigravity. Use for real multi-file synthesis, PR shipping, and steering.",
+    },
+    {
+      id: "antigravity-claude-swarm",
+      name: "3. Antigravity Claude Swarm (Opus 5.5 / Sonnet 5.5)",
+      cost: "Separate Swarm Pool",
+      note: "Standing Claude worker inside Antigravity with its own model quota bucket — wakes cleanly for heavy code/analysis bursts.",
+    },
+    {
+      id: "cursor-team",
+      name: "4. Cursor + Peer Bots (ChatGPT, Nori, Grokbot)",
+      cost: "Parallel Async Pool",
+      note: "Cursor owns frontend/infra fixes; ChatGPT critiques/verifies; Nori & Grokbot handle async research & sweeps.",
+    },
+  ];
+}
+
+function buildVoiceBriefText(workstreams, needsList) {
+  const doneSet = loadWsDoneSet();
+  const reopenSet = loadWsReopenSet();
+  const open = (workstreams || []).filter((w) => {
+    const st = wsEffectiveState(w, doneSet, reopenSet);
+    return !st.sethDone && !st.archived;
+  });
+  const lines = [
+    "CONTEXT BRIEF FOR GEMINI VOICE CALL (Help me turn my voice thoughts into a crisp Workhorse prompt for Antigravity):",
+    "",
+    `Active Jobs (${open.length}):`,
+    ...open.map(
+      (w, i) =>
+        `${i + 1}. ${w.name} [${w.status || "Active"}${w.deadline ? `, Due ${w.deadline}` : ""}] — Next: ${w.next_action || "TBD"} | Gate: ${w.blocker || "None"} | Owners: ${(w.owners || []).join(", ")}`
+    ),
+  ];
+  if (Array.isArray(needsList) && needsList.length) {
+    lines.push("", `Needs Seth (${needsList.length}):`);
+    needsList.slice(0, 6).forEach((n) => lines.push(`- ${n.title || n.detail || "Decision needed"}`));
+  }
+  lines.push(
+    "",
+    "When we finish talking, output ONE tight Workhorse Prompt I can paste straight into #peer-floor or Antigravity."
+  );
+  return lines.join("\n");
+}
+
 function paintAgentsView() {
   const body = document.getElementById("agents-body");
   const cc = state.agentsCC;
   if (!body || !cc) return;
   const jobs = state.lastJobs || { needs: [], running: [], done: [] };
   const f = state.agentFilter;
-  const match = (j) => !f || (canonicalAgent(j.who) || j.who) === f || (j.title === f && j.status === "running");
-  const lists = {
-    needs: jobs.needs.filter(match),
-    running: jobs.running.filter((j) => !f || j.title === f),
-    done: jobs.done.filter(match),
+  const wsData = (cc.workstreamsData && typeof cc.workstreamsData === "object" ? cc.workstreamsData : {}) || {};
+  const allWorkstreams = state.lastWorkstreams || (Array.isArray(wsData.workstreams) ? wsData.workstreams : []);
+  if (!state.lastWorkstreams && allWorkstreams.length) state.lastWorkstreams = allWorkstreams;
+  const opps = Array.isArray(wsData.opportunities) ? wsData.opportunities : [];
+  const doneSet = loadWsDoneSet();
+  const reopenSet = loadWsReopenSet();
+
+  const matchesAgent = (w) => {
+    if (!f) return true;
+    const owners = Array.isArray(w.owners) ? w.owners : [];
+    return owners.some((o) => canonicalAgent(o) === f || o === f);
   };
-  if (!state.agentsSeg) state.agentsSeg = lists.needs.length ? "needs" : lists.running.length ? "running" : "done";
-  const seg = state.agentsSeg;
-  const running = cc.agents.filter((a) => a.status === "active").length;
-  document.getElementById("agents-headline").textContent = `${liveAgentRoster().filter((a) => a.name !== "Cursor-Cloud").length} in huddle · Gemini orchestrating · ${lists.needs.length} need you`;
+
+  const openJobs = allWorkstreams.filter((w) => {
+    const st = wsEffectiveState(w, doneSet, reopenSet);
+    return !st.sethDone && !st.archived && matchesAgent(w);
+  });
+  const needsJobs = openJobs.filter(
+    (w) => w.stage === "needs" || /need|gate|leak|sensitive|buyer/i.test(String(w.status || ""))
+  );
+  const doneJobs = allWorkstreams.filter((w) => {
+    const st = wsEffectiveState(w, doneSet, reopenSet);
+    return (st.sethDone || st.archived) && matchesAgent(w);
+  });
+
+  if (!state.jobStage) state.jobStage = "active";
+  const stage = state.jobStage;
+
+  document.getElementById("agents-headline").textContent = `${openJobs.length} active · ${needsJobs.length} need Seth · ${doneJobs.length} done · 6 bots ready`;
+
+  const bannerHtml = `<section class="job-board-banner">
+    <div>
+      <h2>Collaborative Job Board · Gemini Voice → Workhorse Flow</h2>
+      <p>Use free consumer <strong>Gemini Voice Call</strong> to think out loud at $0 Antigravity usage, then paste your crisp Workhorse prompt into <strong>+ New Job</strong> or <strong>#peer-floor</strong>.</p>
+    </div>
+    <div class="ws-card-actions">
+      <button type="button" id="copy-voice-brief" class="act act-primary">🎙️ Copy Voice Call Brief</button>
+      <button type="button" class="act" data-open-channel="peer-floor">🗣️ Open #peer-floor</button>
+      <button type="button" class="ghost" data-toggle-new-job="1">${state.showNewJobForm ? "✕ Close New Job" : "+ Drop New Job / Idea"}</button>
+    </div>
+  </section>`;
+
+  const newJobFormHtml = `<form id="new-job-form" class="new-job-form"${state.showNewJobForm ? "" : " hidden"}>
+    <strong>New Collaborative Job</strong>
+    <input name="title" required placeholder="Job title (e.g. Call 5 Perth strata managers)" autocomplete="off" />
+    <div class="new-job-grid">
+      <input name="category" placeholder="Category (e.g. Revenue, Product, Research)" value="Revenue" autocomplete="off" />
+      <select name="stage">
+        <option value="active">🔥 Active Job</option>
+        <option value="needs">⚡ Needs Seth Decision</option>
+      </select>
+    </div>
+    <input name="owners" placeholder="Owners (comma separated)" value="Gemini, Cursor" autocomplete="off" />
+    <textarea name="next_action" rows="2" placeholder="Next concrete move / Workhorse instruction…"></textarea>
+    <input name="blocker" placeholder="Blocker / gate (or None)" value="None" autocomplete="off" />
+    <label class="ws-check-row"><input type="checkbox" name="announce" checked /><span>Also post job kickoff to #peer-floor</span></label>
+    <div class="ws-card-actions">
+      <button type="submit" class="act act-primary">Save Job &amp; Sync</button>
+      <button type="button" class="ghost" data-toggle-new-job="0">Cancel</button>
+    </div>
+  </form>`;
+
+  const stageCounts = {
+    active: openJobs.length,
+    needs: needsJobs.length,
+    ideas: opps.length,
+    done: doneJobs.length,
+  };
+  const stageTabsHtml = `<div class="seg linear-seg job-stage-tabs" role="tablist" aria-label="Job stages">
+    ${[
+      ["active", "🔥 Active"],
+      ["needs", "⚡ Needs Seth"],
+      ["ideas", "💡 Ideas & Opps"],
+      ["done", "✓ Done"],
+    ]
+      .map(
+        ([id, label]) =>
+          `<button type="button" role="tab" data-job-stage="${id}" class="${id === stage ? "active" : ""}${
+            id === "needs" && needsJobs.length ? " alert" : ""
+          }" aria-selected="${id === stage}">${label}<span class="seg-n">${stageCounts[id]}</span></button>`
+      )
+      .join("")}
+  </div>`;
+
+  let stageBodyHtml = "";
+  if (stage === "ideas") {
+    stageBodyHtml = opps.length
+      ? `<div class="job-cards-grid">${opps
+          .map(
+            (o, idx) => `<article class="job-card-collab opp-card-collab">
+              <div class="job-card-top">
+                <div>
+                  <div class="job-card-meta">Rank #${esc(String(o.rank || idx + 1))} · Score ${esc(String(o.score || "Ranked"))}</div>
+                  <h3 class="job-card-title">${esc(o.title)}</h3>
+                </div>
+                <span class="bento-tag live">Idea</span>
+              </div>
+              <p class="job-card-summary">${esc(o.hook || "")}</p>
+              ${o.doc_path ? `<div class="ws-card-line"><strong>Doc</strong><code>${esc(o.doc_path)}</code></div>` : ""}
+              <div class="ws-card-actions">
+                <button type="button" class="act act-primary" data-promote-opp="${idx}">+ Promote to Active Job</button>
+                <button type="button" class="act" data-open-channel="peer-floor">🗣️ Discuss</button>
+              </div>
+            </article>`
+          )
+          .join("")}</div>`
+      : `<p class="home-empty">No queued ideas yet — tap + New Job above to add one.</p>`;
+  } else {
+    const shown = stage === "needs" ? needsJobs : stage === "done" ? doneJobs : openJobs;
+    const emptyMsg = {
+      active: "Zero open jobs — promote an Idea or tap + New Job.",
+      needs: "Nothing blocked on Seth right now.",
+      done: "No jobs marked Done yet. Tap ✓ Mark Done on any job when Seth approves completion.",
+    }[stage];
+    stageBodyHtml = shown.length
+      ? `<div class="job-cards-grid">${shown.map((w) => renderJobCardHtml(w, doneSet)).join("")}</div>`
+      : `<p class="home-empty">${esc(emptyMsg)}</p>`;
+  }
 
   const teamCards = liveAgentRoster()
     .filter((a) => a.name !== "Cursor-Cloud")
@@ -2202,42 +2497,38 @@ function paintAgentsView() {
     })
     .join("");
 
-  const teamDeckHtml = `<section class="huddle-hero">
-      <div>
-        <h2>Gemini Orchestrated Huddle (6 Bots)</h2>
-        <p>Talk to everyone together in #peer-floor or tap any teammate below to open their DM.</p>
-      </div>
-      <button type="button" class="act act-primary" data-open-channel="peer-floor">🗣️ Open #peer-floor</button>
-    </section>
-    <section class="huddle-grid" aria-label="Unified Team">${teamCards}</section>`;
+  const pools =
+    Array.isArray(wsData.vision && wsData.vision.quota_pools) && wsData.vision.quota_pools.length
+      ? wsData.vision.quota_pools
+      : defaultQuotaPools();
+  const poolsHtml = `<div class="pool-grid">${pools
+    .map(
+      (p) => `<article class="pool-card">
+        <strong>${esc(p.name)}</strong>
+        <span class="bento-tag">${esc(p.cost || "Separate")}</span>
+        <p>${esc(p.note || "")}</p>
+      </article>`
+    )
+    .join("")}</div>`;
 
-  const strip = cc.agents
-    .map((a) => {
-      const model = (state.agentPrefs[a.name] || {}).model || "";
-      const on = f === a.name;
-      return `<button type="button" class="agent-pill st-${a.status}${on ? " on" : ""}" data-agent-filter="${esc(a.name)}" aria-pressed="${on}">
-        <span class="agent-avatar sm" aria-hidden="true">${initialOf(a.name)}<i class="sdot"></i></span>
-        <span class="ap-text"><strong>${esc(a.name)}</strong><span>${esc(model || a.statusLabel)}</span></span>
-      </button>`;
-    })
-    .join("");
-
-  const rows = lists[seg];
-  // Codex-style day groups.
+  const matchTask = (j) => !f || (canonicalAgent(j.who) || j.who) === f || (j.title === f && j.status === "running");
+  const lists = {
+    needs: jobs.needs.filter(matchTask),
+    running: jobs.running.filter((j) => !f || j.title === f),
+    done: jobs.done.filter(matchTask),
+  };
+  if (!state.agentsSeg) state.agentsSeg = lists.needs.length ? "needs" : lists.running.length ? "running" : "done";
+  const seg = state.agentsSeg;
+  const rows = lists[seg] || [];
   const groups = {};
   for (const j of rows) (groups[dayBucket(j.at)] = groups[dayBucket(j.at)] || []).push(j);
   const order = ["Today", "Yesterday", "Earlier"].filter((g) => groups[g]);
-  const empty = {
-    needs: "Nothing waiting on you.",
-    running: f ? `${f} hasn't logged work in the last 2 hours.` : "No agent has logged work in the last 2 hours.",
-    done: "Nothing finished in the last day.",
-  }[seg];
   const openHandovers = (state.handovers || []).filter(
     (h) => h && !["COMPLETED", "CANCELLED"].includes(String(h.status || ""))
   );
   const handoverHtml = openHandovers.length
-    ? `<section class="handover-panel"><h3 class="task-day">Handovers</h3>${openHandovers
-        .slice(0, 12)
+    ? `<div class="handover-panel"><h3 class="task-day">Open Handovers (${openHandovers.length})</h3>${openHandovers
+        .slice(0, 8)
         .map((h) => {
           const st = esc(h.status || "?");
           const ack = esc(h.ack_status || "pending");
@@ -2246,44 +2537,53 @@ function paintAgentsView() {
               <span class="task-ico">${STATUS_ICON.blocked}</span>
               <span class="task-main">
                 <span class="task-title">${esc(clip(h.description || h.id, 90))}</span>
-                <span class="task-meta">${esc(h.from_agent || "?")} → ${esc(h.to_agent || "?")} · ${st} · ack ${ack}${
-                  h.task_id ? ` · ${esc(h.task_id)}` : ""
-                }</span>
+                <span class="task-meta">${esc(h.from_agent || "?")} → ${esc(h.to_agent || "?")} · ${st} · ack ${ack}</span>
               </span>
               <time class="task-time">${esc(fmtTime(h.created_at))}</time>
             </div>
           </article>`;
         })
-        .join("")}</section>`
-    : `<section class="handover-panel"><h3 class="task-day">Handovers</h3><p class="home-empty">No open handovers. Dispatches without acknowledgement never count as done.</p></section>`;
-  const agentsHtml = `
-    ${teamDeckHtml}
-    <div class="agents-controls">
-    <div class="agent-strip">${strip}</div>
-    <div class="seg linear-seg" role="tablist">
-      ${[
-        ["needs", "Needs you"],
-        ["running", "Running"],
-        ["done", "Done"],
-      ]
-        .map(
-          ([id, label]) =>
-            `<button type="button" role="tab" data-agents-seg="${id}" class="${id === seg ? "active" : ""}${
-              id === "needs" && lists.needs.length ? " alert" : ""
-            }" aria-selected="${id === seg}">${label}<span class="seg-n">${lists[id].length}</span></button>`
-        )
-        .join("")}
-    </div>
-    ${f ? `<button type="button" class="link-btn clear-filter" data-agent-filter="">Showing ${esc(f)} only · Show all</button>` : ""}
-    </div>
+        .join("")}</div>`
+    : "";
+
+  const teamDetailsHtml = `<details class="home-more job-more-section">
+    <summary>Team Roster (6 Bots), 4 Quota Pools &amp; Agent Tasks (${lists.needs.length + lists.running.length} active)</summary>
+    <h3 class="task-day">Unified Huddle · 6 Bots under Gemini ★</h3>
+    <section class="huddle-grid" aria-label="Unified Team">${teamCards}</section>
+    <h3 class="task-day">4 Separate Quota Pools (Zero Cross-Deduction)</h3>
+    ${poolsHtml}
     ${handoverHtml}
+    <div class="agents-controls" style="margin-top:12px">
+      <div class="seg linear-seg" role="tablist">
+        ${[
+          ["needs", "Agent Needs"],
+          ["running", "Running"],
+          ["done", "Agent Done"],
+        ]
+          .map(
+            ([id, label]) =>
+              `<button type="button" role="tab" data-agents-seg="${id}" class="${id === seg ? "active" : ""}" aria-selected="${id === seg}">${label}<span class="seg-n">${lists[id].length}</span></button>`
+          )
+          .join("")}
+      </div>
+    </div>
     <div class="task-list">
       ${
         order.length
           ? order.map((g) => `<h3 class="task-day">${g}</h3>${groups[g].map(taskRow).join("")}`).join("")
-          : `<p class="home-empty">${esc(empty)}</p>`
+          : `<p class="home-empty">Nothing queued in this agent bucket.</p>`
       }
-    </div>`;
+    </div>
+  </details>`;
+
+  const agentsHtml = `
+    ${bannerHtml}
+    ${newJobFormHtml}
+    ${stageTabsHtml}
+    ${f ? `<button type="button" class="link-btn clear-filter" data-agent-filter="">Filtered by ${esc(f)} · Show all owners</button>` : ""}
+    ${stageBodyHtml}
+    ${teamDetailsHtml}`;
+
   if (body.dataset.sig === agentsHtml) return;
   const sc = body.scrollTop;
   body.dataset.sig = agentsHtml;
@@ -2293,17 +2593,109 @@ function paintAgentsView() {
 
 async function loadAgentsView() {
   const body = document.getElementById("agents-body");
-  if (body && !state.agentsCC) body.innerHTML = `<p class="home-empty">Loading agents…</p>`;
+  if (body && !state.agentsCC) body.innerHTML = `<p class="home-empty">Loading Job Board…</p>`;
   state.agentsCC = await loadCommandCentre();
   paintAgentsView();
 }
 
-document.getElementById("agents-body")?.addEventListener("click", (e) => {
+document.getElementById("new-job-toggle")?.addEventListener("click", () => {
+  state.showNewJobForm = !state.showNewJobForm;
+  if (state.view !== "agents") {
+    showView("agents");
+    return;
+  }
+  paintAgentsView();
+});
+
+document.getElementById("agents-body")?.addEventListener("click", async (e) => {
+  const togNew = e.target.closest("[data-toggle-new-job]");
+  if (togNew) {
+    state.showNewJobForm = togNew.dataset.toggleNewJob === "1";
+    paintAgentsView();
+    return;
+  }
+  if (e.target.closest("#copy-voice-brief")) {
+    const cc = state.agentsCC || state.lastCc || {};
+    const txt = buildVoiceBriefText(state.lastWorkstreams || [], cc.needsList || []);
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(txt);
+        toast("Copied Gemini Voice Call brief");
+      } else {
+        window.prompt("Copy brief for Gemini Voice Call:", txt);
+      }
+    } catch {
+      window.prompt("Copy brief for Gemini Voice Call:", txt);
+    }
+    return;
+  }
+  const jStage = e.target.closest("[data-job-stage]");
+  if (jStage) {
+    state.jobStage = jStage.dataset.jobStage || "active";
+    paintAgentsView();
+    return;
+  }
+  const prom = e.target.closest("[data-promote-opp]");
+  if (prom) {
+    const idx = Number(prom.dataset.promoteOpp);
+    const snap = getWorkstreamsSnapshot();
+    const opp = (snap.opportunities || [])[idx];
+    if (opp) {
+      const slug = String(opp.title || "job")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)/g, "")
+        .slice(0, 32);
+      const id = `job-${slug}-${Date.now().toString(36).slice(-4)}`;
+      const newJob = {
+        id,
+        name: opp.title,
+        category: "Promoted Opportunity",
+        owners: ["Gemini", "Cursor", "Seth"],
+        status: "Active",
+        tone: "live",
+        stage: "active",
+        summary: opp.hook || opp.title,
+        next_action: opp.hook || "Assign next step in #peer-floor",
+        blocker: "None",
+        doc_path: opp.doc_path || "",
+        channel_slug: "peer-floor",
+        metrics: opp.score ? [`Score ${opp.score}`, "Promoted from Ideas"] : ["Promoted from Ideas"],
+        checklist: [{ id: `${id}-kickoff`, label: "Confirm owners & first concrete step", done: false }],
+        done_by_seth: false,
+      };
+      await persistWorkstreamsUpdate((s) => {
+        s.workstreams = [newJob, ...(s.workstreams || [])];
+        return s;
+      });
+      state.jobStage = "active";
+      paintAgentsView();
+      toast(`Promoted "${opp.title}" to Active Jobs`);
+    }
+    return;
+  }
+  const wsHuddle = e.target.closest("[data-ws-huddle]");
+  if (wsHuddle) {
+    const ws = (state.lastWorkstreams || []).find((x) => x.id === wsHuddle.dataset.wsHuddle);
+    state.channelSlug = "peer-floor";
+    state.threadParentId = null;
+    document.getElementById("thread")?.classList.add("hidden");
+    showView("channel");
+    const box = document.getElementById("body");
+    if (ws && box && !box.value.trim()) {
+      const ownerMentions = (ws.owners || ["Gemini", "Cursor"])
+        .filter((o) => o !== "Seth")
+        .map((o) => `@${o}`)
+        .join(" ");
+      box.value = `${ownerMentions || "@Gemini @Cursor"} [${ws.name}] `;
+      autosize(box);
+      setTimeout(() => box.focus(), 60);
+    }
+    return;
+  }
   const fb = e.target.closest("[data-agent-filter]");
   if (fb) {
     state.agentFilter = state.agentFilter === fb.dataset.agentFilter ? "" : fb.dataset.agentFilter;
-    state.agentsSeg = "";
-    state.openTask = "";
     paintAgentsView();
     return;
   }
@@ -2319,6 +2711,67 @@ document.getElementById("agents-body")?.addEventListener("click", (e) => {
     state.openTask = state.openTask === tb.dataset.toggleTask ? "" : tb.dataset.toggleTask;
     paintAgentsView();
   }
+});
+
+document.getElementById("agents-body")?.addEventListener("submit", async (e) => {
+  if (e.target.id !== "new-job-form") return;
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const title = String(fd.get("title") || "").trim();
+  if (!title) return;
+  const category = String(fd.get("category") || "Initiative").trim() || "Initiative";
+  const stageVal = String(fd.get("stage") || "active");
+  const owners = String(fd.get("owners") || "Gemini, Cursor")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const nextAction = String(fd.get("next_action") || "").trim() || "Assign first move in #peer-floor";
+  const blocker = String(fd.get("blocker") || "None").trim() || "None";
+  const announce = Boolean(fd.get("announce"));
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 32);
+  const id = `${slug || "job"}-${Date.now().toString(36).slice(-4)}`;
+  const newJob = {
+    id,
+    name: title,
+    category,
+    owners: owners.length ? owners : ["Gemini", "Cursor"],
+    status: stageVal === "needs" ? "Needs Seth" : "Active",
+    tone: stageVal === "needs" ? "warn" : "live",
+    stage: stageVal,
+    summary: nextAction,
+    next_action: nextAction,
+    blocker,
+    channel_slug: "peer-floor",
+    metrics: [stageVal === "needs" ? "Needs Seth" : "Active Job", `${(owners.length || 2)} owners`],
+    checklist: [{ id: `${id}-1`, label: nextAction, done: false }],
+    done_by_seth: false,
+  };
+  await persistWorkstreamsUpdate((s) => {
+    s.workstreams = [newJob, ...(s.workstreams || [])];
+    return s;
+  });
+  if (announce) {
+    const mentions = newJob.owners
+      .filter((o) => o !== "Seth")
+      .map((o) => `@${o}`)
+      .join(" ");
+    await api("/api/channels/peer-floor/messages", {
+      method: "POST",
+      body: JSON.stringify({
+        author: currentViewer(),
+        body: `${mentions || "@Gemini"} New Job added to board: **${title}** — ${nextAction}`,
+      }),
+    }).catch(() => {});
+  }
+  state.showNewJobForm = false;
+  state.jobStage = stageVal === "needs" ? "needs" : "active";
+  paintAgentsView();
+  loadHome().catch(() => {});
+  toast(`Added "${title}" to Job Board`);
 });
 document.getElementById("agents-refresh")?.addEventListener("click", () => loadAgentsView().catch(() => {}));
 
@@ -2416,32 +2869,214 @@ function paintNotes() {
   list.dataset.sig = html;
   list.innerHTML = html;
 }
-/* v39.0 — In-app Vision & Exec Brief + Master Workstreams (no tiny mobile spreadsheets) + Quick Notes */
+/* v40.0 — Collaborative Jobs Hub, Deep Dive Checklists, Voice Synthesis & Master Brief */
 const WS_DONE_KEY = "stack-ws-done-v1";
-function loadWsDoneSet() {
+const WS_REOPEN_KEY = "stack-ws-reopen-v1";
+const WS_CHECKS_KEY = "stack-ws-checks-v1";
+function _loadIdSet(key) {
   try {
-    const arr = JSON.parse(localStorage.getItem(WS_DONE_KEY) || "[]");
+    const arr = JSON.parse(localStorage.getItem(key) || "[]");
     return new Set(Array.isArray(arr) ? arr : []);
   } catch {
     return new Set();
   }
 }
-function saveWsDoneSet(set) {
+function _saveIdSet(key, set) {
   try {
-    localStorage.setItem(WS_DONE_KEY, JSON.stringify([...set]));
+    localStorage.setItem(key, JSON.stringify([...set]));
   } catch {
     /* ignore */
   }
 }
-function wsEffectiveState(w, doneSet = loadWsDoneSet()) {
-  const sethDone = doneSet.has(w.id);
-  const archived = /no-go|closed|archived/i.test(String(w.status || ""));
+function loadWsDoneSet() {
+  return _loadIdSet(WS_DONE_KEY);
+}
+function saveWsDoneSet(set) {
+  _saveIdSet(WS_DONE_KEY, set);
+}
+function loadWsReopenSet() {
+  return _loadIdSet(WS_REOPEN_KEY);
+}
+function saveWsReopenSet(set) {
+  _saveIdSet(WS_REOPEN_KEY, set);
+}
+function loadWsChecksMap() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(WS_CHECKS_KEY) || "{}");
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  } catch {
+    return {};
+  }
+}
+function saveWsChecksMap(map) {
+  try {
+    localStorage.setItem(WS_CHECKS_KEY, JSON.stringify(map || {}));
+  } catch {
+    /* ignore */
+  }
+}
+function wsChecklistItems(w) {
+  const map = loadWsChecksMap();
+  const list = Array.isArray(w && w.checklist) ? w.checklist : [];
+  return list.map((it, idx) => {
+    const cid = it.id || `${w.id}-step-${idx}`;
+    const k = `${w.id}:${cid}`;
+    const hasOverride = Object.prototype.hasOwnProperty.call(map, k);
+    return {
+      id: cid,
+      label: it.label || it.title || String(it),
+      done: hasOverride ? Boolean(map[k]) : Boolean(it.done),
+    };
+  });
+}
+function wsEffectiveState(w, doneSet = loadWsDoneSet(), reopenSet = loadWsReopenSet()) {
+  const id = String((w && w.id) || "");
+  const reopened = reopenSet.has(id);
+  const archived = !reopened && /no-go|closed|archived/i.test(String((w && w.status) || ""));
+  const sethDone =
+    !reopened &&
+    (doneSet.has(id) ||
+      Boolean(w && w.done_by_seth) ||
+      (w && w.stage === "done") ||
+      archived);
+  const status = sethDone
+    ? archived
+      ? w.status || "Archived"
+      : "Done (Seth)"
+    : w && /no-go|closed|archived/i.test(String(w.status || ""))
+    ? "Reopened"
+    : (w && w.status) || "Active";
   return {
     sethDone,
     archived,
-    status: sethDone ? "Done (Seth)" : w.status || "Active",
-    tone: sethDone ? "done" : w.tone || "",
+    status,
+    tone: sethDone ? "done" : (w && w.tone) || "",
   };
+}
+function getWorkstreamsSnapshot() {
+  const base =
+    (state.lastCc && state.lastCc.workstreamsData) ||
+    (state.agentsCC && state.agentsCC.workstreamsData) ||
+    {};
+  const list = Array.isArray(state.lastWorkstreams)
+    ? state.lastWorkstreams
+    : Array.isArray(base.workstreams)
+    ? base.workstreams
+    : [];
+  return {
+    version: base.version || 2,
+    vision: base.vision || {},
+    links: base.links || {},
+    opportunities: Array.isArray(base.opportunities) ? base.opportunities : [],
+    workstreams: list,
+  };
+}
+function applyWorkstreamsSnapshotLocally(snapshot) {
+  const list = Array.isArray(snapshot.workstreams) ? snapshot.workstreams : [];
+  state.lastWorkstreams = list;
+  if (state.lastCc) state.lastCc.workstreamsData = snapshot;
+  if (state.agentsCC) state.agentsCC.workstreamsData = snapshot;
+}
+async function persistWorkstreamsUpdate(mutator) {
+  const snap = JSON.parse(JSON.stringify(getWorkstreamsSnapshot()));
+  const next = typeof mutator === "function" ? mutator(snap) || snap : snap;
+  applyWorkstreamsSnapshotLocally(next);
+  try {
+    const saved = await api("/api/workstreams", {
+      method: "POST",
+      body: JSON.stringify(next),
+    });
+    if (saved && Array.isArray(saved.workstreams)) {
+      applyWorkstreamsSnapshotLocally(saved);
+    }
+    return true;
+  } catch (err) {
+    console.warn("workstreams sync warning:", err);
+    return false;
+  }
+}
+function setWorkstreamDoneState(id, forceDone = null) {
+  const snap = getWorkstreamsSnapshot();
+  const target = (snap.workstreams || []).find((w) => w.id === id);
+  const curDone = target ? wsEffectiveState(target).sethDone : loadWsDoneSet().has(id);
+  const nextDone = typeof forceDone === "boolean" ? forceDone : !curDone;
+  const doneSet = loadWsDoneSet();
+  const reopenSet = loadWsReopenSet();
+  if (nextDone) {
+    doneSet.add(id);
+    reopenSet.delete(id);
+  } else {
+    doneSet.delete(id);
+    reopenSet.add(id);
+  }
+  saveWsDoneSet(doneSet);
+  saveWsReopenSet(reopenSet);
+  persistWorkstreamsUpdate((s) => {
+    for (const w of s.workstreams || []) {
+      if (w.id !== id) continue;
+      if (nextDone) {
+        if (w.stage && w.stage !== "done") w.prev_stage = w.stage;
+        w.done_by_seth = true;
+        w.stage = "done";
+      } else {
+        w.done_by_seth = false;
+        w.stage = w.prev_stage || (w.blocker && w.blocker !== "None" ? "needs" : "active");
+        if (/no-go|closed|archived/i.test(String(w.status || ""))) w.status = "Reopened";
+      }
+    }
+    return s;
+  }).catch(() => {});
+  return nextDone;
+}
+function toggleWsCheckItem(wsId, checkId) {
+  const map = loadWsChecksMap();
+  const key = `${wsId}:${checkId}`;
+  const snap = getWorkstreamsSnapshot();
+  const ws = (snap.workstreams || []).find((w) => w.id === wsId);
+  const item = ws && Array.isArray(ws.checklist) ? ws.checklist.find((c, idx) => (c.id || `${wsId}-step-${idx}`) === checkId) : null;
+  const current = Object.prototype.hasOwnProperty.call(map, key) ? Boolean(map[key]) : Boolean(item && item.done);
+  const nextVal = !current;
+  map[key] = nextVal;
+  saveWsChecksMap(map);
+  persistWorkstreamsUpdate((s) => {
+    const w = (s.workstreams || []).find((x) => x.id === wsId);
+    if (w && Array.isArray(w.checklist)) {
+      w.checklist.forEach((c, idx) => {
+        const cid = c.id || `${wsId}-step-${idx}`;
+        if (cid === checkId) c.done = nextVal;
+      });
+    }
+    return s;
+  }).catch(() => {});
+  return nextVal;
+}
+function renderJobCardHtml(w, doneSet = loadWsDoneSet()) {
+  const st = wsEffectiveState(w, doneSet);
+  const owners = Array.isArray(w.owners) && w.owners.length ? w.owners : ["Seth"];
+  const checks = wsChecklistItems(w);
+  const checksDone = checks.filter((c) => c.done).length;
+  const ownerPills = owners
+    .map((o) => `<span class="job-owner-pill">${esc(o === "Gemini" ? "Gemini ★" : o)}</span>`)
+    .join("");
+  return `<article class="job-card-collab${st.sethDone ? " done" : ""}" data-ws-id="${esc(w.id)}">
+    <div class="job-card-top">
+      <div>
+        <div class="job-card-meta">${esc(w.category || "Job")}${w.deadline ? ` · Due ${esc(w.deadline)}` : ""}</div>
+        <h3 class="job-card-title">${esc(w.name)}</h3>
+      </div>
+      <span class="bento-tag ${esc(st.tone)}">${esc(st.status)}</span>
+    </div>
+    ${w.summary ? `<p class="job-card-summary">${esc(clip(w.summary, 180))}</p>` : ""}
+    <div class="job-owners-row">${ownerPills}</div>
+    <div class="ws-card-line"><strong>Next Move</strong>${esc(w.next_action || "—")}</div>
+    <div class="ws-card-line"><strong>Gate</strong>${esc(w.blocker || "None")}</div>
+    ${checks.length ? `<div class="job-check-prog">Checklist: ${checksDone}/${checks.length} checked</div>` : ""}
+    <div class="ws-card-actions">
+      <button type="button" class="act" data-open-ws="${esc(w.id)}">🔍 Deep Dive</button>
+      <button type="button" class="act" data-ws-huddle="${esc(w.id)}">🗣️ Huddle</button>
+      <button type="button" class="act${st.sethDone ? "" : " act-primary"}" data-toggle-ws-done="${esc(w.id)}">${st.sethDone ? "↺ Reopen" : "✓ Mark Done"}</button>
+    </div>
+  </article>`;
 }
 function renderWorkstreamCardHtml(w, doneSet = loadWsDoneSet()) {
   const st = wsEffectiveState(w, doneSet);
@@ -2458,9 +3093,9 @@ function renderWorkstreamCardHtml(w, doneSet = loadWsDoneSet()) {
     <div class="ws-card-line"><strong>Gate / Blocker</strong>${esc(w.blocker || "None")}</div>
     <div class="ws-card-line"><strong>Owners</strong>${esc(owners)}</div>
     <div class="ws-card-actions">
-      <button type="button" class="act${st.sethDone ? "" : " act-primary"}" data-toggle-ws-done="${esc(w.id)}">${st.sethDone ? "↺ Reopen" : "✓ Mark Done"}</button>
+      <button type="button" class="act" data-open-ws="${esc(w.id)}">🔍 Deep Dive</button>
       ${w.channel_slug ? `<button type="button" class="act" data-open-channel="${esc(w.channel_slug)}">💬 #${esc(w.channel_slug)}</button>` : ""}
-      <button type="button" class="ghost" data-open-ws="${esc(w.id)}">Details</button>
+      <button type="button" class="act${st.sethDone ? "" : " act-primary"}" data-toggle-ws-done="${esc(w.id)}">${st.sethDone ? "↺ Reopen" : "✓ Mark Done"}</button>
     </div>
   </article>`;
 }
@@ -2485,25 +3120,28 @@ function paintBriefView() {
   const workstreams = state.lastWorkstreams || (Array.isArray(wsData.workstreams) ? wsData.workstreams : []);
   const opps = Array.isArray(wsData.opportunities) ? wsData.opportunities : [];
   const doneSet = loadWsDoneSet();
+  const reopenSet = loadWsReopenSet();
   const needsCount = (cc.needsList || []).length;
   const keptCount = (state.lastKeptDebrief || []).length;
-  const openWs = workstreams.filter((w) => !wsEffectiveState(w, doneSet).sethDone && !wsEffectiveState(w, doneSet).archived);
-  const doneWs = workstreams.filter((w) => wsEffectiveState(w, doneSet).sethDone);
+  const openWs = workstreams.filter((w) => !wsEffectiveState(w, doneSet, reopenSet).sethDone && !wsEffectiveState(w, doneSet, reopenSet).archived);
+  const doneWs = workstreams.filter((w) => wsEffectiveState(w, doneSet, reopenSet).sethDone);
   const headlineEl = document.getElementById("notes-headline");
   if (headlineEl) {
-    headlineEl.textContent = `${openWs.length} open workstreams · ${doneWs.length} done (Seth) · ${opps.length} ranked opps`;
+    headlineEl.textContent = `${openWs.length} active jobs · ${doneWs.length} done (Seth) · ${opps.length} ranked opps`;
   }
 
   if (tab === "master") {
     const html = `<div class="brief-section">
         <div class="brief-banner">
           <h2>Master Workstreams Hub</h2>
-          <p>Everything that used to sit inside the spreadsheet — built for your phone. Workstreams only turn Done when you tap <strong>✓ Mark Done</strong>.</p>
+          <p>Active jobs stay here until you tap <strong>✓ Mark Done</strong> — completed jobs move automatically to the Completed archive below and in <strong>Jobs → Done</strong>.</p>
           <div class="ws-card-actions">
             <button type="button" class="act act-primary" data-open-channel="peer-floor">🗣️ Orchestrate in #peer-floor</button>
+            <button type="button" class="act" data-open-tab="agents">📋 Open Job Board</button>
           </div>
         </div>
-        <div class="ws-cards">${workstreams.length ? workstreams.map((w) => renderWorkstreamCardHtml(w, doneSet)).join("") : `<p class="home-empty">Loading workstreams…</p>`}</div>
+        <div class="ws-cards">${openWs.length ? openWs.map((w) => renderWorkstreamCardHtml(w, doneSet)).join("") : `<p class="home-empty">All jobs marked Done! Check below or open Job Board.</p>`}</div>
+        ${doneWs.length ? `<details class="brief-done-details"><summary>✓ Completed by Seth (${doneWs.length})</summary><div class="ws-cards">${doneWs.map((w) => renderWorkstreamCardHtml(w, doneSet)).join("")}</div></details>` : ""}
       </div>`;
     if (bv.dataset.sig !== html) {
       bv.dataset.sig = html;
@@ -3135,28 +3773,26 @@ function buildBentoHub({ cc, todos }) {
     })
     .join("");
 
-  // Big inline Workstream cards (zero fake % — jobs stay open until Seth taps Mark Done)
-  const wsFeatured = [
-    ...openWs.slice(0, 3),
-    ...workstreams.filter((w) => wsEffectiveState(w, doneSet).sethDone).slice(0, 1),
-  ];
+  // Big inline Workstream cards (zero fake % — jobs disappear from active views once Seth taps Mark Done)
+  const wsFeatured = openWs.slice(0, 4);
   const wsCardsHtml = wsFeatured.length
     ? `<div class="ws-cards">${wsFeatured.map((w) => renderWorkstreamCardHtml(w, doneSet)).join("")}</div>`
-    : "";
+    : `<p class="home-empty">All active workstreams marked Done! Open <strong>Jobs</strong> to inspect ✓ Done or add a new job.</p>`;
 
   const extLinksHtml = [
+    `<button type="button" class="ws-ext-pill" data-open-tab="agents">📋 Collaborative Job Board (${openWs.length})</button>`,
     `<button type="button" class="ws-ext-pill" data-open-channel="peer-floor">💬 Peer Floor Huddle</button>`,
-    `<button type="button" class="ws-ext-pill" data-open-tab="notes">🧭 Vision &amp; Master Brief</button>`,
+    `<button type="button" class="ws-ext-pill" data-open-tab="notes">🧭 Vision &amp; Brief</button>`,
   ].join("");
 
   const activeTab = state.bentoTab || "since";
   let trayTitle = "Since last you looked";
   let trayHtml = "";
   if (activeTab === "workstreams") {
-    trayTitle = "All Workstreams";
-    trayHtml = workstreams.length
-      ? workstreams.map((w) => renderWorkstreamCardHtml(w, doneSet)).join("")
-      : `<p class="home-empty">No workstream snapshot loaded.</p>`;
+    trayTitle = "Active Workstreams";
+    trayHtml = openWs.length
+      ? openWs.map((w) => renderWorkstreamCardHtml(w, doneSet)).join("")
+      : `<p class="home-empty">No open workstreams — everything marked Done lives in Jobs → Done.</p>`;
   } else if (activeTab === "opps") {
     trayTitle = "Ranked Opportunities";
     trayHtml = opps.length
@@ -3268,7 +3904,7 @@ function buildBentoHub({ cc, todos }) {
         <h2>${esc(trayTitle)}</h2>
         <div class="bento-seg-tabs" role="tablist" aria-label="Dashboard tray view">
           <button type="button" class="bento-seg-tab${activeTab === "since" ? " active" : ""}" data-bento-tab="since">Since (${kept.length})</button>
-          <button type="button" class="bento-seg-tab${activeTab === "workstreams" ? " active" : ""}" data-bento-tab="workstreams">Workstreams (${workstreams.length})</button>
+          <button type="button" class="bento-seg-tab${activeTab === "workstreams" ? " active" : ""}" data-bento-tab="workstreams">Workstreams (${openWs.length})</button>
           <button type="button" class="bento-seg-tab${activeTab === "opps" ? " active" : ""}" data-bento-tab="opps">Opps (${opps.length})</button>
         </div>
       </div>
@@ -3277,34 +3913,112 @@ function buildBentoHub({ cc, todos }) {
   </section>`;
 }
 
+function buildLocalJobBreakdown(ws) {
+  const checks = wsChecklistItems(ws);
+  const remaining = checks.filter((c) => !c.done);
+  const voicePrompt = `Workhorse Prompt [${ws.name}]: Owners=${(ws.owners || []).join(", ")}. Goal=${ws.next_action || "Advance job"}. Gate=${ws.blocker || "None"}. Please execute the next unchecked step cleanly and verify E2E.`;
+  return [
+    `<strong>Current Gate:</strong> ${esc(ws.blocker || "None")}`,
+    `<strong>Immediate Next Step:</strong> ${esc(ws.next_action || "Review deliverable doc and assign owner.")}`,
+    remaining.length
+      ? `<strong>Open Steps (${remaining.length}):</strong><ul>${remaining.map((r) => `<li>${esc(r.label)}</li>`).join("")}</ul>`
+      : `<strong>Checklist:</strong> All checklist items ticked.`,
+    `<div style="margin-top:6px"><strong>Ready Workhorse Prompt:</strong><br><code>${esc(voicePrompt)}</code></div>`,
+  ].join("<br>");
+}
+
 function openWorkstreamSheet(wsId) {
   const ws = (state.lastWorkstreams || []).find((w) => w.id === wsId);
   const sheet = document.getElementById("workstream-sheet");
   if (!ws || !sheet) return;
+  state.openWsId = wsId;
   const st = wsEffectiveState(ws);
   document.getElementById("ws-sheet-title").textContent = ws.name;
-  document.getElementById("ws-sheet-sub").textContent = `${ws.category || "Workstream"} · ${(ws.owners || []).join(" · ")}`;
+  document.getElementById("ws-sheet-sub").textContent = `${ws.category || "Job"} · ${(ws.owners || []).join(" · ")}`;
   const badge = document.getElementById("ws-sheet-pct");
   if (badge) {
     badge.textContent = st.status;
     badge.className = `bento-tag ${st.tone || "live"}`;
   }
+  const metrics = Array.isArray(ws.metrics) ? ws.metrics : [];
+  const checks = wsChecklistItems(ws);
+  const doneChecks = checks.filter((c) => c.done).length;
+  const ownerPills = (ws.owners || ["Seth"])
+    .map((o) => `<span class="job-owner-pill">${esc(o === "Gemini" ? "Gemini ★" : o)}</span>`)
+    .join("");
+  const checklistHtml = checks.length
+    ? checks
+        .map(
+          (c) => `<label class="ws-check-row${c.done ? " checked" : ""}">
+            <input type="checkbox" data-ws-check="${esc(ws.id)}:${esc(c.id)}"${c.done ? " checked" : ""} />
+            <span>${esc(c.label)}</span>
+          </label>`
+        )
+        .join("")
+    : `<p class="home-empty">No checklist steps yet.</p>`;
+
   const body = document.getElementById("ws-sheet-body");
   if (body) {
     body.innerHTML = `<div class="ws-detail-card">
-      <div class="ws-detail-kv"><strong>Status</strong>${esc(st.status)}</div>
-      <div class="ws-detail-kv"><strong>Owners</strong>${esc((ws.owners || []).join(" · ") || "Seth")}</div>
+      ${ws.summary ? `<p class="job-card-summary" style="margin-bottom:8px">${esc(ws.summary)}</p>` : ""}
+      ${metrics.length ? `<div class="ws-metrics">${metrics.map((m) => `<span class="ws-metric-pill">${esc(m)}</span>`).join("")}</div>` : ""}
+      <div class="ws-detail-kv" style="margin-top:8px"><strong>Status</strong>${esc(st.status)}</div>
+      <div class="ws-detail-kv"><strong>Team</strong><div class="job-owners-row">${ownerPills}</div></div>
       <div class="ws-detail-kv"><strong>Next Concrete Move</strong>${esc(ws.next_action || "—")}</div>
       <div class="ws-detail-kv"><strong>Current Blocker / Gate</strong>${esc(ws.blocker || "None")}</div>
       ${ws.deadline ? `<div class="ws-detail-kv"><strong>Deadline</strong>${esc(ws.deadline)}</div>` : ""}
-      ${ws.doc_path ? `<div class="ws-detail-kv"><strong>Source Path</strong><code>${esc(ws.doc_path)}</code></div>` : ""}
+    </div>
+
+    <div class="ws-section-card">
+      <h4>Checklist (${doneChecks}/${checks.length})</h4>
+      <div class="ws-checklist">${checklistHtml}</div>
+    </div>
+
+    ${
+      ws.doc_path
+        ? `<div class="ws-section-card">
+            <h4>Source Deliverable</h4>
+            <div class="ws-detail-kv"><code>${esc(ws.doc_path)}</code></div>
+            <div class="ws-card-actions" style="margin-top:8px">
+              <button type="button" class="act" data-load-ws-doc="${esc(ws.doc_path)}">📄 Read Deliverable Doc</button>
+            </div>
+            <div id="ws-doc-viewer" class="ws-doc-viewer" hidden></div>
+          </div>`
+        : ""
+    }
+
+    <div class="ws-section-card">
+      <h4>Gemini Job Breakdown</h4>
+      <div class="ws-card-actions">
+        <button type="button" class="act" data-ws-ai-analyze="${esc(ws.id)}">✦ Ask Gemini — Breakdown &amp; Next Actions</button>
+      </div>
+      <div id="ws-ai-output" class="ws-ai-output" hidden></div>
+    </div>
+
+    <div class="ws-section-card">
+      <h4>Send Job Order to #peer-floor</h4>
+      <form id="ws-order-form" class="ws-order-form" data-ws-id="${esc(ws.id)}">
+        <select name="target" class="q-chip-select" style="border-radius:10px;padding:7px 10px">
+          <option value="@Gemini @Cursor ">@Gemini ★ + @Cursor (Ship / Build)</option>
+          <option value="@Claude ">@Claude (Opus 5.5 Swarm Burst)</option>
+          <option value="@Gemini @ChatGPT @Cursor @Claude @Nori @Grokbot ">@All 6 Bots (Full Huddle)</option>
+          <option value="@ChatGPT ">@ChatGPT (Critique / Verify)</option>
+          <option value="@Nori ">@Nori (Research)</option>
+          <option value="@Grokbot ">@Grokbot (Sweep)</option>
+        </select>
+        <div class="ws-order-row">
+          <input name="instruction" placeholder="Type instruction or paste from Gemini Voice Call…" autocomplete="off" required />
+          <button type="submit" class="act act-primary">Send</button>
+        </div>
+      </form>
     </div>`;
   }
   const actions = document.getElementById("ws-sheet-actions");
   if (actions) {
     actions.innerHTML = `
-      <button type="button" class="act${st.sethDone ? "" : " act-primary"}" data-toggle-ws-done="${esc(ws.id)}">${st.sethDone ? "↺ Reopen Workstream" : "✓ Mark Done (Seth)"}</button>
-      ${ws.channel_slug ? `<button type="button" class="act" data-ws-chat="${esc(ws.channel_slug)}">Open #${esc(ws.channel_slug)}</button>` : ""}
+      <button type="button" class="act${st.sethDone ? "" : " act-primary"}" data-toggle-ws-done="${esc(ws.id)}">${st.sethDone ? "↺ Reopen Job" : "✓ Mark Done (Seth)"}</button>
+      <button type="button" class="act" data-ws-huddle="${esc(ws.id)}">🗣️ #peer-floor</button>
+      ${ws.channel_slug && ws.channel_slug !== "peer-floor" ? `<button type="button" class="act" data-ws-chat="${esc(ws.channel_slug)}">💬 #${esc(ws.channel_slug)}</button>` : ""}
     `;
   }
   sheet.hidden = false;
@@ -3355,9 +4069,12 @@ function renderDebriefSlides(slides, activeIdx = 0) {
     .map((s, i) => `<button type="button" class="debrief-tab${i === state.debriefSlideIdx ? " active" : ""}" data-slide="${i}">${esc(s.tab)}</button>`)
     .join("");
   const cur = slides[state.debriefSlideIdx] || slides[0];
+  const openInDebrief = (state.lastWorkstreams || []).filter(
+    (w) => !wsEffectiveState(w).sethDone && !wsEffectiveState(w).archived
+  );
   const chartHtml =
-    state.debriefSlideIdx === 0 && (state.lastWorkstreams || []).length
-      ? `<div class="ws-cards">${(state.lastWorkstreams || [])
+    state.debriefSlideIdx === 0 && openInDebrief.length
+      ? `<div class="ws-cards">${openInDebrief
           .slice(0, 4)
           .map((w) => renderWorkstreamCardHtml(w))
           .join("")}</div>`
@@ -3369,10 +4086,112 @@ function renderDebriefSlides(slides, activeIdx = 0) {
   </article>`;
 }
 
+window.__stackUtterances = window.__stackUtterances || [];
+let stackVoiceBtn = null;
+let stackVoiceIdleLabel = "▶ Voice";
+let stackVoiceSeq = 0;
+
 function stopDebriefVoice() {
-  if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
-  const btn = document.getElementById("debrief-voice");
-  if (btn) btn.textContent = "▶ Listen";
+  stackVoiceSeq += 1;
+  window.__stackUtterances = [];
+  try {
+    if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
+  } catch {
+    /* ignore */
+  }
+  if (stackVoiceBtn) {
+    stackVoiceBtn.textContent = stackVoiceIdleLabel;
+    stackVoiceBtn = null;
+  }
+  const dv = document.getElementById("debrief-voice");
+  if (dv) dv.textContent = "▶ Listen";
+  const qv = document.getElementById("bento-quick-voice");
+  if (qv) qv.textContent = "▶ Voice";
+  const wv = document.getElementById("ws-sheet-voice");
+  if (wv) wv.textContent = "▶ Listen";
+}
+
+function pickEnglishVoice() {
+  try {
+    const voices = speechSynthesis.getVoices() || [];
+    return (
+      voices.find((v) => /en[-_]AU/i.test(v.lang)) ||
+      voices.find((v) => /^en/i.test(v.lang)) ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function chunkSpeechText(text, maxLen = 175) {
+  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  if (!clean) return [];
+  const sentences = clean.split(/(?<=[.!?])\s+/);
+  const chunks = [];
+  let cur = "";
+  for (const s of sentences) {
+    if ((cur + " " + s).trim().length <= maxLen) {
+      cur = (cur + " " + s).trim();
+    } else {
+      if (cur) chunks.push(cur);
+      if (s.length <= maxLen) {
+        cur = s;
+      } else {
+        for (let i = 0; i < s.length; i += maxLen) chunks.push(s.slice(i, i + maxLen));
+        cur = "";
+      }
+    }
+  }
+  if (cur) chunks.push(cur);
+  return chunks;
+}
+
+function speakStackText(text, btnEl, idleLabel = "▶ Voice") {
+  if (typeof speechSynthesis === "undefined" || typeof SpeechSynthesisUtterance === "undefined") {
+    toast("Voice playback is not supported in this browser", "err");
+    return;
+  }
+  if (speechSynthesis.speaking || stackVoiceBtn === btnEl) {
+    const sameBtn = stackVoiceBtn === btnEl;
+    stopDebriefVoice();
+    if (sameBtn) return;
+  }
+  const chunks = chunkSpeechText(text);
+  if (!chunks.length) {
+    toast("Nothing to read out loud right now");
+    return;
+  }
+  const seq = ++stackVoiceSeq;
+  stackVoiceBtn = btnEl || null;
+  stackVoiceIdleLabel = idleLabel;
+  if (btnEl) btnEl.textContent = "⏹ Stop";
+  const voice = pickEnglishVoice();
+  const speakIdx = (idx) => {
+    if (seq !== stackVoiceSeq) return;
+    if (idx >= chunks.length) {
+      stopDebriefVoice();
+      return;
+    }
+    const u = new SpeechSynthesisUtterance(chunks[idx]);
+    if (voice) u.voice = voice;
+    u.lang = (voice && voice.lang) || "en-AU";
+    u.rate = 1.02;
+    window.__stackUtterances.push(u);
+    u.onend = () => speakIdx(idx + 1);
+    u.onerror = () => {
+      if (seq === stackVoiceSeq) stopDebriefVoice();
+    };
+    try {
+      speechSynthesis.resume();
+      speechSynthesis.speak(u);
+    } catch {
+      stopDebriefVoice();
+      toast("Tap once more to allow Safari voice playback", "err");
+    }
+  };
+  speakIdx(0);
+  toast("Speaking summary…");
 }
 
 function parseAiSlides(text, fallbackSlides) {
@@ -4602,7 +5421,7 @@ document.getElementById("thread-body").addEventListener("input", (e) => autosize
 /* v35.0: One-tap Quick Prompt pills in chat + Home Quick Dispatch bar */
 document.getElementById("quick-chips")?.addEventListener("click", (e) => {
   const chip = e.target.closest(".q-chip");
-  if (!chip) return;
+  if (!chip || chip.tagName === "SELECT") return;
   const input = document.getElementById("body");
   if (!input) return;
   if (chip.dataset.insert) {
@@ -4621,6 +5440,21 @@ document.getElementById("quick-chips")?.addEventListener("click", (e) => {
     if (typeof form?.requestSubmit === "function") form.requestSubmit();
     else form?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
   }
+});
+
+document.getElementById("quick-mention-pick")?.addEventListener("change", (e) => {
+  const sel = e.target;
+  const prefix = String(sel.value || "");
+  if (!prefix) return;
+  const input = document.getElementById("body");
+  if (input) {
+    if (!input.value.includes(prefix.trim())) {
+      input.value = `${prefix}${input.value}`;
+    }
+    autosize(input);
+    input.focus();
+  }
+  sel.selectedIndex = 0;
 });
 
 document.getElementById("home-body")?.addEventListener("submit", async (e) => {
@@ -4881,21 +5715,12 @@ document.getElementById("home-body")?.addEventListener("click", (e) => {
     return;
   }
   if (e.target.closest("#bento-quick-voice")) {
-    if (typeof speechSynthesis === "undefined") {
-      toast("Voice not supported in this browser", "err");
-      return;
-    }
-    if (speechSynthesis.speaking) {
-      stopDebriefVoice();
-      return;
-    }
     const kept = state.lastKeptDebrief || [];
+    const openWs = (state.lastWorkstreams || []).filter((w) => !wsEffectiveState(w).sethDone && !wsEffectiveState(w).archived);
     const text = kept.length
-      ? `${kept.length} kept updates. ` + kept.slice(0, 5).map((k) => `${k.kind} from ${k.who}: ${k.title}`).join(". ")
-      : "Everything is caught up right now.";
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.04;
-    speechSynthesis.speak(u);
+      ? `${openWs.length} open jobs and ${kept.length} kept updates. ` + kept.slice(0, 5).map((k) => `${k.kind} from ${k.who}: ${k.title}`).join(". ")
+      : `${openWs.length} active jobs ready. Everything else is caught up right now.`;
+    speakStackText(text, e.target.closest("#bento-quick-voice"), "▶ Voice");
     return;
   }
   if (e.target.closest("#bento-reset-got-it")) {
@@ -4915,16 +5740,146 @@ document.getElementById("home-body")?.addEventListener("click", (e) => {
   }
 });
 document.getElementById("ws-sheet-close")?.addEventListener("click", () => {
+  stopDebriefVoice();
   const s = document.getElementById("workstream-sheet");
   if (s) s.hidden = true;
 });
-document.getElementById("workstream-sheet")?.addEventListener("click", (e) => {
+document.getElementById("ws-sheet-voice")?.addEventListener("click", () => {
+  const ws = (state.lastWorkstreams || []).find((w) => w.id === state.openWsId);
+  if (!ws) return;
+  const st = wsEffectiveState(ws);
+  const text = `${ws.name}. Status: ${st.status}. ${ws.summary || ""} Next move: ${ws.next_action || "None"}. Gate: ${ws.blocker || "None"}.`;
+  speakStackText(text, document.getElementById("ws-sheet-voice"), "▶ Listen");
+});
+document.getElementById("workstream-sheet")?.addEventListener("click", async (e) => {
   const wsChat = e.target.closest("[data-ws-chat]");
-  if (!wsChat) return;
-  const s = document.getElementById("workstream-sheet");
-  if (s) s.hidden = true;
-  state.channelSlug = wsChat.dataset.wsChat;
-  showView("channel");
+  if (wsChat) {
+    stopDebriefVoice();
+    const s = document.getElementById("workstream-sheet");
+    if (s) s.hidden = true;
+    state.channelSlug = wsChat.dataset.wsChat;
+    showView("channel");
+    return;
+  }
+  const wsHuddle = e.target.closest("[data-ws-huddle]");
+  if (wsHuddle) {
+    stopDebriefVoice();
+    const s = document.getElementById("workstream-sheet");
+    if (s) s.hidden = true;
+    const ws = (state.lastWorkstreams || []).find((x) => x.id === wsHuddle.dataset.wsHuddle);
+    state.channelSlug = "peer-floor";
+    state.threadParentId = null;
+    document.getElementById("thread")?.classList.add("hidden");
+    showView("channel");
+    const box = document.getElementById("body");
+    if (ws && box && !box.value.trim()) {
+      const ownerMentions = (ws.owners || ["Gemini", "Cursor"])
+        .filter((o) => o !== "Seth")
+        .map((o) => `@${o}`)
+        .join(" ");
+      box.value = `${ownerMentions || "@Gemini @Cursor"} [${ws.name}] `;
+      autosize(box);
+      setTimeout(() => box.focus(), 60);
+    }
+    return;
+  }
+  const docBtn = e.target.closest("[data-load-ws-doc]");
+  if (docBtn) {
+    const viewer = document.getElementById("ws-doc-viewer");
+    if (!viewer) return;
+    if (!viewer.hidden && viewer.dataset.loaded === docBtn.dataset.loadWsDoc) {
+      viewer.hidden = true;
+      docBtn.textContent = "📄 Read Deliverable Doc";
+      return;
+    }
+    docBtn.disabled = true;
+    docBtn.textContent = "Loading doc…";
+    try {
+      const res = await api(`/api/doc?path=${encodeURIComponent(docBtn.dataset.loadWsDoc)}`);
+      viewer.dataset.loaded = docBtn.dataset.loadWsDoc;
+      viewer.innerHTML = `<div class="job-card-meta">${esc(res.path || docBtn.dataset.loadWsDoc)}${res.truncated ? " (truncated preview)" : ""}</div><pre class="ws-doc-pre">${esc(res.content || "(empty file)")}</pre>`;
+      viewer.hidden = false;
+      docBtn.textContent = "📄 Hide Deliverable Doc";
+    } catch (err) {
+      viewer.innerHTML = `<span class="boot-err">${esc(friendlyError(err))}</span>`;
+      viewer.hidden = false;
+      docBtn.textContent = "📄 Retry Doc";
+    } finally {
+      docBtn.disabled = false;
+    }
+    return;
+  }
+  const aiBtn = e.target.closest("[data-ws-ai-analyze]");
+  if (aiBtn) {
+    const out = document.getElementById("ws-ai-output");
+    const ws = (state.lastWorkstreams || []).find((x) => x.id === aiBtn.dataset.wsAiAnalyze);
+    if (!out || !ws) return;
+    out.hidden = false;
+    if (getGeminiKey()) {
+      aiBtn.disabled = true;
+      aiBtn.textContent = "✦ Analyzing…";
+      out.textContent = "Asking Gemini…";
+      try {
+        const prompt = `Analyze job "${ws.name}" (${ws.category}). Summary: ${ws.summary || ""}. Next move: ${ws.next_action || ""}. Blocker: ${ws.blocker || ""}. Give 3 crisp next actions and 1 ready Workhorse prompt for #peer-floor.`;
+        const res = await streamGeminiInteraction({
+          slug: `ws-${ws.id}`,
+          userText: prompt,
+          onDelta: (txt) => {
+            out.innerHTML = `<pre class="ws-doc-pre" style="max-height:220px">${esc(txt)}</pre>`;
+          },
+        });
+        out.innerHTML = `<pre class="ws-doc-pre" style="max-height:220px">${esc(res.text)}</pre>`;
+      } catch {
+        out.innerHTML = buildLocalJobBreakdown(ws);
+      } finally {
+        aiBtn.disabled = false;
+        aiBtn.textContent = "✦ Refresh Breakdown";
+      }
+    } else {
+      out.innerHTML = buildLocalJobBreakdown(ws);
+    }
+  }
+});
+document.getElementById("workstream-sheet")?.addEventListener("change", (e) => {
+  const chk = e.target.closest("[data-ws-check]");
+  if (!chk) return;
+  const raw = String(chk.dataset.wsCheck || "");
+  const sep = raw.indexOf(":");
+  if (sep < 1) return;
+  const wsId = raw.slice(0, sep);
+  const checkId = raw.slice(sep + 1);
+  toggleWsCheckItem(wsId, checkId);
+  openWorkstreamSheet(wsId);
+  if (state.view === "agents") paintAgentsView();
+});
+document.getElementById("workstream-sheet")?.addEventListener("submit", async (e) => {
+  if (e.target.id !== "ws-order-form") return;
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const target = String(fd.get("target") || "@Gemini @Cursor ");
+  const instruction = String(fd.get("instruction") || "").trim();
+  const wsId = e.target.dataset.wsId || state.openWsId;
+  const ws = (state.lastWorkstreams || []).find((x) => x.id === wsId);
+  if (!instruction) return;
+  const btn = e.target.querySelector('button[type="submit"]');
+  if (btn) btn.disabled = true;
+  try {
+    const label = ws ? `[${ws.name}] ` : "";
+    await api("/api/channels/peer-floor/messages", {
+      method: "POST",
+      body: JSON.stringify({ author: currentViewer(), body: `${target}${label}${instruction}` }),
+    });
+    stopDebriefVoice();
+    const s = document.getElementById("workstream-sheet");
+    if (s) s.hidden = true;
+    toast("Job order sent to #peer-floor");
+    state.channelSlug = "peer-floor";
+    showView("channel");
+  } catch (err) {
+    toast(friendlyError(err), "err");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 });
 document.getElementById("debrief-close")?.addEventListener("click", () => {
   stopDebriefVoice();
@@ -4938,24 +5893,9 @@ document.getElementById("debrief-tabs")?.addEventListener("click", (e) => {
   renderDebriefSlides(state.debriefSlides || [], Number(tab.dataset.slide) || 0);
 });
 document.getElementById("debrief-voice")?.addEventListener("click", () => {
-  if (typeof speechSynthesis === "undefined") {
-    toast("Voice playback not supported in this browser", "err");
-    return;
-  }
-  if (speechSynthesis.speaking) {
-    stopDebriefVoice();
-    return;
-  }
   const slides = state.debriefSlides || [];
   const text = slides.map((s) => `${s.title}. ${(s.bullets || []).join(". ")}`).join(". ");
-  if (!text) return;
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.rate = 1.04;
-  utter.onend = () => stopDebriefVoice();
-  utter.onerror = () => stopDebriefVoice();
-  const btn = document.getElementById("debrief-voice");
-  if (btn) btn.textContent = "⏹ Stop";
-  speechSynthesis.speak(utter);
+  speakStackText(text, document.getElementById("debrief-voice"), "▶ Listen");
 });
 document.getElementById("debrief-mark-all")?.addEventListener("click", () => {
   stopDebriefVoice();
@@ -4988,15 +5928,9 @@ document.addEventListener("click", (e) => {
   if (toggleDone) {
     const id = toggleDone.dataset.toggleWsDone;
     if (id) {
-      const set = loadWsDoneSet();
-      if (set.has(id)) {
-        set.delete(id);
-        toast("Reopened workstream");
-      } else {
-        set.add(id);
-        toast("Marked Done by Seth");
-      }
-      saveWsDoneSet(set);
+      const nowDone = setWorkstreamDoneState(id);
+      toast(nowDone ? "Marked Done by Seth" : "Reopened job");
+      if (state.view === "agents" || state.agentsCC) paintAgentsView();
       if (state.view === "notes") paintBriefView();
       if (!document.getElementById("workstream-sheet")?.hidden) openWorkstreamSheet(id);
       if (!document.getElementById("debrief-sheet")?.hidden) {

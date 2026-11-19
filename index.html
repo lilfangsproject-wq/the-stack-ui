@@ -3,8 +3,21 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#0b0c0e" />
-  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0c0e" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#07080c" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#07080c" />
+  <script>
+    (function () {
+      try {
+        var s = localStorage.getItem("stack-surface-v1");
+        var mode = s === "light" ? "light" : "dark";
+        document.documentElement.dataset.surface = mode;
+        var tc = mode === "light" ? "#f6f8fc" : "#07080c";
+        document.querySelectorAll('meta[name="theme-color"]').forEach(function (m) {
+          m.setAttribute("content", tc);
+        });
+      } catch (e) {}
+    })();
+  </script>
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="The Stack" />
@@ -22,7 +35,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>our app · zero spend · <span data-stack-version>v39.0</span></small>
+          <small>our app · zero spend · <span data-stack-version>v40.0</span></small>
         </div>
       </div>
       <p id="boot-status">Opening the vault…</p>
@@ -55,16 +68,23 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>agent command centre · <span data-stack-version>v39.0</span></small>
+          <small>agent command centre · <span data-stack-version>v40.0</span></small>
         </div>
       </div>
-      <div class="live-pill" id="live-pill" title="Hub connection">
-        <span class="dot"></span>
-        <span id="live-label">online</span>
+      <div class="rail-status-row">
+        <div class="live-pill" id="live-pill" title="Hub connection">
+          <span class="dot"></span>
+          <span id="live-label">online</span>
+        </div>
+        <button type="button" id="surface-quick-toggle" class="surface-quick-btn" aria-label="Switch background between Black and White" title="Switch Black / White glass">
+          <span class="sq-ico" aria-hidden="true">☾</span>
+          <span class="sq-label">Black</span>
+        </button>
       </div>
       <div class="section-label">Hub</div>
       <nav class="channel-list">
         <button type="button" id="home-nav" class="active" data-view="home">Home</button>
+        <button type="button" id="jobs-nav" data-open-tab="agents">Job Board</button>
         <button type="button" id="brief-nav" data-open-tab="notes">Vision &amp; Brief</button>
       </nav>
       <div class="section-label">Channels</div>
@@ -83,8 +103,12 @@
       <nav id="list-nav" class="channel-list"></nav>
       <details class="rail-more">
         <summary>Look &amp; connection</summary>
+        <div id="surface-picker" class="surface-picker" role="radiogroup" aria-label="Background surface">
+          <button type="button" role="radio" data-surface="dark" aria-checked="true">● Black</button>
+          <button type="button" role="radio" data-surface="light" aria-checked="false">○ White</button>
+        </div>
         <div id="look-picker" class="look-picker" role="radiogroup" aria-label="Accent colour"></div>
-        <p class="look-hint">Accent colour stays on this phone.</p>
+        <p class="look-hint">Background &amp; accent stay on this device.</p>
         <div class="gemini-settings">
           <label class="gemini-field">
             <span>Gemini API key <em id="gemini-key-status" class="gemini-status">off</em></span>
@@ -124,10 +148,13 @@
     <main class="main hidden agents-pane" id="agents-pane">
       <header class="main-head">
         <div class="main-head-text">
-          <h1>Agents</h1>
-          <p class="purpose" id="agents-headline">Loading…</p>
+          <h1>Job Board</h1>
+          <p class="purpose" id="agents-headline">Loading jobs…</p>
         </div>
-        <button type="button" id="agents-refresh" class="ghost">Refresh</button>
+        <div class="job-head-actions">
+          <button type="button" id="new-job-toggle" class="act act-primary">+ New Job</button>
+          <button type="button" id="agents-refresh" class="ghost">Refresh</button>
+        </div>
       </header>
       <section class="agents-body" id="agents-body"></section>
     </main>
@@ -186,15 +213,17 @@
       <section id="messages" class="messages" aria-live="polite"></section>
       <div id="photo-tray" class="photo-tray" hidden></div>
       <div id="quick-chips" class="quick-chips" aria-label="Quick prompts">
-        <button type="button" class="q-chip" data-insert="@Gemini @ChatGPT @Cursor @Claude @Nori @Grokbot ">@All team</button>
-        <button type="button" class="q-chip" data-insert="@Gemini ">@Gemini</button>
-        <button type="button" class="q-chip" data-insert="@ChatGPT ">@ChatGPT</button>
-        <button type="button" class="q-chip" data-insert="@Cursor ">@Cursor</button>
-        <button type="button" class="q-chip" data-insert="@Claude ">@Claude</button>
-        <button type="button" class="q-chip" data-insert="@Nori ">@Nori</button>
-        <button type="button" class="q-chip" data-insert="@Grokbot ">@Grokbot</button>
-        <button type="button" class="q-chip" data-send="@Gemini @ChatGPT @Cursor @Claude @Nori @Grokbot Status check — orchestrate what is open, blocked, or ready right now.">⚡ Orchestrate</button>
-        <button type="button" class="q-chip" data-send="Run E2E verification and drop the receipt.">✅ Verify E2E</button>
+        <button type="button" class="q-chip" data-insert="@Gemini @ChatGPT @Cursor @Claude @Nori @Grokbot ">@All</button>
+        <button type="button" class="q-chip" data-insert="@Gemini ">@Gemini ★</button>
+        <select id="quick-mention-pick" class="q-chip q-chip-select" aria-label="Mention teammate">
+          <option value="">@Teammate…</option>
+          <option value="@ChatGPT ">@ChatGPT</option>
+          <option value="@Cursor ">@Cursor</option>
+          <option value="@Claude ">@Claude</option>
+          <option value="@Nori ">@Nori</option>
+          <option value="@Grokbot ">@Grokbot</option>
+        </select>
+        <button type="button" class="q-chip" data-send="@Gemini @ChatGPT @Cursor @Claude @Nori @Grokbot Status check — orchestrate what is open, blocked, or ready right now.">⚡ Status</button>
         <button type="button" class="q-chip" data-send="Challenge the last claim with repo paths — what works, what's broken, exact fix.">🔥 Challenge</button>
       </div>
       <form id="composer" class="composer">
@@ -271,6 +300,7 @@
           <h1 id="ws-sheet-title">Workstream</h1>
           <p class="purpose" id="ws-sheet-sub">Status &amp; Clarity</p>
         </div>
+        <button type="button" id="ws-sheet-voice" class="ghost" aria-label="Speak job overview">▶ Listen</button>
         <span class="bento-tag live" id="ws-sheet-pct">Active</span>
       </header>
       <section class="host-sheet-body" id="ws-sheet-body"></section>
@@ -279,7 +309,7 @@
     <nav class="tabbar" id="tabbar" aria-label="Sections">
       <button type="button" data-tab="home" class="active"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z"/></svg><span>Home</span></button>
       <button type="button" data-tab="chats"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 16.5 3.5 20V8.5A2.5 2.5 0 0 1 6 6h8a2.5 2.5 0 0 1 2.5 2.5V14A2.5 2.5 0 0 1 14 16.5z"/><path d="M8.5 11h.01M12 11h.01"/></svg><span>Chats</span></button>
-      <button type="button" data-tab="agents"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="2.6"/><circle cx="16" cy="9.2" r="2"/><path d="M4.2 18.5c.7-2.4 2.6-3.6 4.8-3.6s4.1 1.2 4.8 3.6"/><path d="M14.2 15.1c1.3-.3 2.6.2 3.4 1.4.5.8.7 1.4.8 1.9"/></svg><span>Agents</span></button>
+      <button type="button" data-tab="agents"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="16" height="13" rx="2"/><path d="M9 6V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V6M8 11h8M8 15h5"/></svg><span>Jobs</span></button>
       <button type="button" data-tab="notes"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h7.2L19 8.8V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M14 4v5h5M8.5 13h7M8.5 16.5h4.5"/></svg><span>Brief</span></button>
     </nav>
   </div>

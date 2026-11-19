@@ -595,6 +595,48 @@ async function ghLoadWorkstreams() {
   return data && typeof data === "object" ? data : { workstreams: [], opportunities: [], links: {}, vision: {} };
 }
 
+async function ghSaveWorkstreams(payload) {
+  const next = await ghUpdateJson(
+    "workstreams.json",
+    { version: 2, workstreams: [], opportunities: [], links: {}, vision: {} },
+    (cur) => {
+      const merged = {
+        ...(cur && typeof cur === "object" ? cur : {}),
+        ...(payload && typeof payload === "object" ? payload : {}),
+        updated_at: ghNowIso(),
+      };
+      return merged;
+    },
+    "the-stack: update workstreams hub"
+  );
+  return next;
+}
+
+async function ghReadVaultDoc(relPath) {
+  const clean = String(relPath || "").trim().replace(/^\/+/, "").replace(/\/+$/, "");
+  if (!clean || clean.split("/").includes("..")) {
+    throw new Error("Invalid doc path");
+  }
+  const encodedPath = clean.split("/").map((seg) => encodeURIComponent(seg)).join("/");
+  const data = await ghApi(`/repos/${ghState.repo}/contents/${encodedPath}?ref=${encodeURIComponent(ghState.branch)}`);
+  if (Array.isArray(data)) {
+    const readme = data.find((it) => /^(README|BRIEF|STATUS)\.md$/i.test(String(it.name || "")));
+    if (readme && readme.path) {
+      return ghReadVaultDoc(readme.path);
+    }
+    const listing = `# ${clean}\n\n` + data.slice(0, 80).map((it) => `- ${it.name}${it.type === "dir" ? "/" : ""}`).join("\n");
+    return { path: clean, content: listing, truncated: data.length > 80, chars: listing.length };
+  }
+  const raw = b64decode(data.content || "");
+  const maxChars = 24000;
+  return {
+    path: clean,
+    content: raw.slice(0, maxChars),
+    truncated: raw.length > maxChars,
+    chars: raw.length,
+  };
+}
+
 async function ghLoadAgentPrefs() {
   const data = await ghReadJson("agents.json", { agents: {} });
   return data && data.agents ? data : { agents: {} };
@@ -1224,6 +1266,13 @@ async function ghRoute(path, options = {}) {
   }
   if (p === "/api/workstreams" && method === "GET") {
     return ghLoadWorkstreams();
+  }
+  if (p === "/api/workstreams" && method === "POST") {
+    return ghSaveWorkstreams(body || {});
+  }
+  if (p === "/api/doc" && method === "GET") {
+    const rel = url.searchParams.get("path") || "";
+    return ghReadVaultDoc(rel);
   }
   const rowMatch = p.match(/^\/api\/lists\/([^/]+)\/rows$/);
   if (rowMatch && method === "POST") {

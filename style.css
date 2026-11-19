@@ -3872,3 +3872,779 @@ button.bento-av {
   background: color-mix(in srgb, var(--accent) 8%, rgba(255, 255, 255, 0.03));
   border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
 }
+
+/* ==========================================================================
+   v39.1 — True Liquid Glass + Black / White Surface Mode
+   ========================================================================== */
+.rail-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  margin: 0 0.35rem 0.85rem;
+}
+.rail-status-row .live-pill {
+  margin: 0;
+}
+.surface-quick-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.34rem 0.72rem;
+  min-height: 0;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: var(--text);
+  background: var(--glass-strong);
+  box-shadow: var(--rim);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+.surface-quick-btn:active {
+  transform: scale(0.96);
+}
+.surface-quick-btn .sq-ico {
+  font-size: 0.82rem;
+  line-height: 1;
+}
+
+.surface-picker {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  margin: 0 0.35rem 0.5rem;
+  border-radius: 14px;
+  background: var(--fill);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.surface-picker button {
+  border: 0;
+  border-radius: 11px;
+  padding: 0.44rem 0.5rem;
+  min-height: 0;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 650;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+.surface-picker button[aria-checked="true"] {
+  background: var(--glass-strong);
+  color: var(--text);
+  box-shadow: var(--rim-gloss), 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+
+/* Dark (Black) Liquid Glass tokens */
+:root,
+:root[data-look],
+:root[data-surface="dark"],
+:root[data-surface="dark"][data-look] {
+  color-scheme: dark;
+  --bg: #07080c;
+  --text: #f4f5f2;
+  --muted: rgba(236, 238, 232, 0.64);
+  --line: rgba(255, 255, 255, 0.13);
+  --separator: rgba(255, 255, 255, 0.09);
+  --fill: rgba(255, 255, 255, 0.075);
+  --fill-strong: rgba(255, 255, 255, 0.13);
+  --grouped: rgba(255, 255, 255, 0.06);
+  --panel: rgba(255, 255, 255, 0.065);
+  --bubble: rgba(255, 255, 255, 0.085);
+  --glass: linear-gradient(155deg, rgba(255, 255, 255, 0.13) 0%, rgba(255, 255, 255, 0.045) 45%, rgba(255, 255, 255, 0.085) 100%);
+  --glass-strong: linear-gradient(155deg, rgba(255, 255, 255, 0.165) 0%, rgba(255, 255, 255, 0.06) 48%, rgba(255, 255, 255, 0.105) 100%);
+  --glass-subtle: linear-gradient(155deg, rgba(255, 255, 255, 0.085) 0%, rgba(255, 255, 255, 0.03) 62%, rgba(255, 255, 255, 0.055) 100%);
+  --glass-green: linear-gradient(155deg, color-mix(in srgb, var(--accent) 18%, rgba(255, 255, 255, 0.08)), rgba(255, 255, 255, 0.035) 68%);
+  --chrome: linear-gradient(180deg, rgba(24, 26, 36, 0.56), rgba(14, 15, 22, 0.48));
+  --chrome-strong: rgba(18, 20, 28, 0.84);
+  --tabbar-bg: linear-gradient(160deg, rgba(44, 48, 60, 0.68), rgba(18, 20, 28, 0.72));
+  --composer-bg: linear-gradient(160deg, rgba(44, 48, 60, 0.66), rgba(18, 20, 28, 0.74));
+  --sheet-bg: linear-gradient(160deg, rgba(36, 39, 50, 0.86), rgba(16, 18, 24, 0.90));
+  --avatar-bg: rgba(255, 255, 255, 0.10);
+  --rim:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.30),
+    inset 0 -1px 0 0 rgba(255, 255, 255, 0.07),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.13);
+  --rim-gloss:
+    inset 0 1.5px 0 0 rgba(255, 255, 255, 0.42),
+    inset 0 -1px 0 0 rgba(255, 255, 255, 0.10),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  --blur: blur(28px) saturate(190%);
+  --blur-heavy: blur(40px) saturate(210%);
+  --shadow: 0 10px 32px rgba(0, 0, 0, 0.42), 0 2px 6px rgba(0, 0, 0, 0.24);
+  --shadow-float: 0 22px 54px rgba(0, 0, 0, 0.58), 0 4px 12px rgba(0, 0, 0, 0.30);
+  --foil-fill: linear-gradient(155deg, rgba(30, 32, 44, 0.86), rgba(16, 18, 26, 0.88));
+}
+
+body,
+:root[data-iris] body {
+  background:
+    radial-gradient(62% 38% at 16% -4%, rgba(243, 184, 230, 0.22), transparent 64%),
+    radial-gradient(54% 34% at 86% 4%, rgba(169, 220, 255, 0.19), transparent 62%),
+    radial-gradient(48% 36% at 50% 106%, rgba(185, 245, 220, 0.16), transparent 64%),
+    radial-gradient(64% 40% at 50% -10%, color-mix(in srgb, var(--accent) 28%, transparent), transparent 68%),
+    #07080c;
+  background-attachment: fixed;
+}
+
+/* White (Light) Liquid Glass tokens */
+:root[data-surface="light"],
+:root[data-surface="light"][data-look] {
+  color-scheme: light;
+  --bg: #f6f8fc;
+  --text: #0f131a;
+  --muted: rgba(20, 28, 44, 0.62);
+  --line: rgba(15, 23, 42, 0.10);
+  --separator: rgba(15, 23, 42, 0.09);
+  --fill: rgba(15, 23, 42, 0.055);
+  --fill-strong: rgba(15, 23, 42, 0.10);
+  --grouped: rgba(255, 255, 255, 0.62);
+  --panel: rgba(255, 255, 255, 0.76);
+  --bubble: rgba(255, 255, 255, 0.82);
+  --glass: linear-gradient(155deg, rgba(255, 255, 255, 0.82) 0%, rgba(255, 255, 255, 0.46) 52%, rgba(255, 255, 255, 0.68) 100%);
+  --glass-strong: linear-gradient(155deg, rgba(255, 255, 255, 0.92) 0%, rgba(255, 255, 255, 0.62) 52%, rgba(255, 255, 255, 0.80) 100%);
+  --glass-subtle: linear-gradient(155deg, rgba(255, 255, 255, 0.74) 0%, rgba(255, 255, 255, 0.42) 62%, rgba(255, 255, 255, 0.60) 100%);
+  --glass-green: linear-gradient(155deg, color-mix(in srgb, var(--accent) 16%, rgba(255, 255, 255, 0.86)), rgba(255, 255, 255, 0.56) 68%);
+  --chrome: linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(246, 248, 253, 0.58));
+  --chrome-strong: rgba(255, 255, 255, 0.88);
+  --tabbar-bg: linear-gradient(160deg, rgba(255, 255, 255, 0.82), rgba(242, 246, 254, 0.72));
+  --composer-bg: linear-gradient(160deg, rgba(255, 255, 255, 0.86), rgba(244, 247, 255, 0.74));
+  --sheet-bg: linear-gradient(160deg, rgba(255, 255, 255, 0.94), rgba(245, 248, 255, 0.88));
+  --avatar-bg: rgba(255, 255, 255, 0.84);
+  --rim:
+    inset 0 1.5px 0 0 rgba(255, 255, 255, 0.98),
+    inset 0 -1px 0 0 rgba(15, 23, 42, 0.06),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.76);
+  --rim-gloss:
+    inset 0 2px 0 0 rgba(255, 255, 255, 1),
+    inset 0 -1px 0 0 rgba(15, 23, 42, 0.08),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.88);
+  --blur: blur(28px) saturate(200%);
+  --blur-heavy: blur(40px) saturate(215%);
+  --shadow: 0 8px 28px rgba(18, 28, 54, 0.08), 0 1.5px 4px rgba(18, 28, 54, 0.05);
+  --shadow-float: 0 18px 46px rgba(18, 28, 54, 0.14), 0 3px 10px rgba(18, 28, 54, 0.06);
+  --foil-fill: linear-gradient(155deg, rgba(255, 255, 255, 0.94), rgba(244, 247, 255, 0.86));
+  --warn: #b45309;
+  --danger: #dc2626;
+  --violet: #6d4aff;
+}
+
+:root[data-surface="light"] body,
+:root[data-surface="light"][data-iris] body {
+  background:
+    radial-gradient(60% 42% at 14% -6%, rgba(243, 184, 230, 0.40), transparent 62%),
+    radial-gradient(52% 38% at 88% 2%, rgba(169, 220, 255, 0.42), transparent 60%),
+    radial-gradient(50% 38% at 50% 104%, rgba(185, 245, 220, 0.32), transparent 64%),
+    radial-gradient(64% 42% at 50% -10%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 66%),
+    #f6f8fc;
+  background-attachment: fixed;
+}
+
+/* Universal Liquid Glass panel & card elevation */
+.bento-card,
+.cc-panel,
+.stat,
+.boot-card,
+.digest,
+.push-card,
+.seg,
+.brief-banner,
+.debrief-slide,
+.handover-panel,
+.note-compose,
+.note {
+  background: var(--glass);
+  border: 0;
+  box-shadow: var(--rim), var(--shadow);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+}
+.agent-window,
+.job-card,
+.host,
+.home-card,
+.home-todo,
+.home-mention,
+.jump-hit,
+.msg .body,
+.list-row,
+.live-pill,
+.ghost,
+.icon-btn,
+.channel-list,
+.rail-more,
+.session-chip,
+.agent-pill {
+  background: var(--glass-strong);
+  border: 0;
+  box-shadow: var(--rim), var(--shadow);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+}
+.chat-inbox-row,
+.agent-line,
+.bento-mini-stat,
+.bento-av,
+.ws-bar-row,
+.ws-ext-pill,
+.bento-platform-row,
+.since-card,
+.ws-card,
+.ws-detail-card,
+.huddle-card,
+.opp-card,
+.q-chip,
+.home-dispatch .hd-row,
+.host-facts > div,
+.host-mentions li {
+  background: var(--glass-subtle);
+  border: 0;
+  box-shadow: var(--rim);
+}
+.main-head,
+.composer,
+.install-banner,
+.rail,
+.lists-pane,
+.session-strip {
+  background: var(--chrome);
+  -webkit-backdrop-filter: var(--blur-heavy);
+  backdrop-filter: var(--blur-heavy);
+}
+.agents-controls {
+  background: var(--chrome);
+  -webkit-backdrop-filter: var(--blur-heavy);
+  backdrop-filter: var(--blur-heavy);
+  box-shadow: 0 1px 0 var(--separator);
+}
+.toast,
+.host-sheet {
+  background: var(--sheet-bg);
+  border: 0;
+  box-shadow: var(--rim-gloss), var(--shadow-float);
+  -webkit-backdrop-filter: var(--blur-heavy);
+  backdrop-filter: var(--blur-heavy);
+}
+@media (max-width: 720px) {
+  .rail {
+    background: var(--chrome-strong);
+  }
+  .tabbar {
+    background: var(--tabbar-bg);
+    box-shadow: var(--rim-gloss), var(--shadow-float);
+    -webkit-backdrop-filter: var(--blur-heavy);
+    backdrop-filter: var(--blur-heavy);
+  }
+  #chat-pane .composer {
+    background: var(--composer-bg);
+    box-shadow: var(--rim-gloss), var(--shadow-float);
+    -webkit-backdrop-filter: var(--blur-heavy);
+    backdrop-filter: var(--blur-heavy);
+  }
+  #chat-pane .attach-btn {
+    background: var(--fill);
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+  #chat-pane .composer textarea {
+    background: var(--fill);
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+  .sheet-grabber span {
+    background: var(--line);
+  }
+}
+
+/* Holo Foil refinement (works in both Black & White Liquid Glass) */
+:root[data-iris] .act-primary,
+:root[data-iris] .composer button[type="submit"],
+:root[data-iris] .session-chip.active,
+:root[data-iris] button.primary-btn,
+:root[data-iris] .cloud-connect button[type="submit"],
+:root[data-iris] .agent-window.status-active,
+:root[data-iris] .digest,
+:root[data-iris] .tabbar button.active {
+  background:
+    var(--foil-fill) padding-box,
+    var(--accent-grad) border-box;
+  background-size: auto, 220% 100%;
+  color: var(--text);
+  box-shadow: var(--rim-gloss), var(--shadow);
+}
+:root[data-iris] .msg.mine .body {
+  background: linear-gradient(155deg, color-mix(in srgb, var(--accent) 22%, rgba(255, 255, 255, 0.12)), color-mix(in srgb, var(--accent) 12%, var(--chrome-strong)));
+  color: var(--text);
+  box-shadow: var(--rim-gloss), inset 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+:root[data-iris] .msg.mine .body .mention {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* White mode contrast & specular surface refinements */
+:root[data-surface="light"][data-iris] .msg.mine .body {
+  background: linear-gradient(155deg, color-mix(in srgb, var(--accent) 16%, rgba(255, 255, 255, 0.94)), color-mix(in srgb, var(--accent) 10%, rgba(244, 247, 255, 0.88)));
+  color: var(--text);
+  box-shadow: var(--rim-gloss), inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+:root[data-surface="light"] .look-swatch[aria-checked="true"] {
+  box-shadow: 0 0 0 2px #f6f8fc, 0 0 0 4px var(--text), 0 0 12px var(--accent-soft);
+}
+:root[data-surface="light"] .bento-segbar,
+:root[data-surface="light"] .ws-track {
+  background: rgba(15, 23, 42, 0.08);
+}
+:root[data-surface="light"] .bento-bar-pill {
+  background: rgba(15, 23, 42, 0.12);
+}
+:root[data-surface="light"] .bento-bar-pill.peak {
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #ffffff));
+}
+:root[data-surface="light"] .aw-spark rect.off {
+  fill: rgba(15, 23, 42, 0.09);
+}
+:root[data-surface="light"] .aw-spark rect.on {
+  fill: rgba(15, 23, 42, 0.38);
+}
+:root[data-surface="light"] .status-active .aw-spark rect.on,
+:root[data-surface="light"] .aw-spark rect.on:last-of-type {
+  fill: var(--accent);
+}
+:root[data-surface="light"] .bento-seg-tabs {
+  background: var(--fill);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+:root[data-surface="light"] .list-row .tick,
+:root[data-surface="light"] .home-todo .tick {
+  border-color: rgba(15, 23, 42, 0.28);
+}
+:root[data-surface="light"] .list-row.done .list-row-body strong {
+  text-decoration-color: rgba(15, 23, 42, 0.3);
+}
+:root[data-surface="light"] .bento-tag.warn,
+:root[data-surface="light"] .status-recent .aw-pill,
+:root[data-surface="light"] .pill-blocked,
+:root[data-surface="light"] .host-stale .aw-pill,
+:root[data-surface="light"] .kind-note .feed-kind {
+  background: rgba(217, 119, 6, 0.14);
+  color: #92400e;
+}
+:root[data-surface="light"] .bento-tag.done {
+  background: rgba(5, 150, 105, 0.14);
+  color: #047857;
+}
+:root[data-surface="light"] .host-offline .aw-pill,
+:root[data-surface="light"] .pill-closed {
+  background: rgba(220, 38, 38, 0.88);
+  color: #ffffff;
+}
+:root[data-surface="light"] .pill-merged {
+  background: rgba(109, 74, 255, 0.15);
+  color: #4c1d95;
+}
+:root[data-surface="light"] .seg button.active,
+:root[data-surface="light"] .act,
+:root[data-surface="light"] .aw-open {
+  background: var(--glass-strong);
+  color: var(--text);
+  box-shadow: var(--rim);
+}
+:root[data-surface="light"] .channel-list button.active {
+  background: linear-gradient(155deg, color-mix(in srgb, var(--accent) 16%, rgba(255, 255, 255, 0.92)), color-mix(in srgb, var(--accent) 8%, rgba(255, 255, 255, 0.72)));
+  color: var(--accent-strong, var(--accent));
+  box-shadow: var(--rim-gloss), inset 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+:root[data-surface="light"][data-iris] .unread-badge,
+:root[data-surface="light"][data-iris] .new-row button[type="submit"],
+:root[data-surface="light"][data-iris] .new-channel button[type="submit"],
+:root[data-surface="light"][data-iris] .seg button.active .seg-n,
+:root[data-surface="light"][data-iris] .seg button[data-seg="running"].active .seg-n,
+:root[data-surface="light"][data-iris] .status-active .aw-pill,
+:root[data-surface="light"][data-iris] .pill-running,
+:root[data-surface="light"][data-iris] .host-online .aw-pill,
+:root[data-surface="light"][data-iris] .kind-result .feed-kind,
+:root[data-surface="light"][data-iris] .kind-merged .feed-kind,
+:root[data-surface="light"][data-iris] .list-row.done .tick,
+:root[data-surface="light"][data-iris] .home-todo.ticked .tick {
+  color: #151226;
+}
+:root[data-surface="light"] .act.act-primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+:root[data-surface="light"][data-iris] .act.act-primary {
+  background:
+    var(--foil-fill) padding-box,
+    var(--accent-grad) border-box;
+  background-size: auto, 220% 100%;
+  color: var(--text);
+  box-shadow: var(--rim-gloss), var(--shadow);
+}
+:root[data-surface="light"] .stat.live strong {
+  background: linear-gradient(115deg, #c026d3, #6c4ce6, #0284c7, #059669);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+:root[data-surface="light"] .stat.alert {
+  background: linear-gradient(155deg, rgba(245, 158, 11, 0.16), rgba(255, 255, 255, 0.72) 70%);
+}
+:root[data-surface="light"] .needs-mini {
+  background: linear-gradient(155deg, rgba(245, 158, 11, 0.12), rgba(255, 255, 255, 0.78) 70%);
+}
+:root[data-surface="light"] .handover-panel {
+  background: linear-gradient(135deg, rgba(108, 76, 230, 0.08), rgba(14, 165, 233, 0.07));
+  border: 1px solid var(--line);
+}
+:root[data-surface="light"] .huddle-hero {
+  background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 11%, rgba(255, 255, 255, 0.88)), rgba(255, 255, 255, 0.65));
+}
+:root[data-surface="light"] .huddle-card.boss {
+  background: color-mix(in srgb, var(--accent) 8%, rgba(255, 255, 255, 0.84));
+}
+:root[data-surface="light"] .chat-inbox-row.is-floor {
+  background: color-mix(in srgb, var(--accent) 8%, rgba(255, 255, 255, 0.82));
+}
+:root[data-surface="light"] .note-quote {
+  background: rgba(15, 23, 42, 0.045);
+}
+:root[data-surface="light"] .note.pinned {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent), var(--rim), var(--shadow);
+}
+:root[data-surface="light"] .agent-line.is-quiet .aw-pill {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+:root[data-surface="light"] .agent-avatar,
+:root[data-surface="light"] .msg-avatar,
+:root[data-surface="light"] .host-ico,
+:root[data-surface="light"] .dg-av {
+  background: var(--avatar-bg);
+  color: var(--text);
+  box-shadow: var(--rim);
+}
+:root[data-surface="light"] .cloud-connect input,
+:root[data-surface="light"] .cloud-connect input:focus,
+:root[data-surface="light"] .jump input,
+:root[data-surface="light"] .new-channel input,
+:root[data-surface="light"] .new-row input,
+:root[data-surface="light"] .composer input,
+:root[data-surface="light"] .composer textarea,
+:root[data-surface="light"] .note-compose textarea,
+:root[data-surface="light"] .note-compose input,
+:root[data-surface="light"] .note-search,
+:root[data-surface="light"] .model-pick select,
+:root[data-surface="light"] .home-dispatch select {
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+:root[data-surface="light"] .bento-tag {
+  background: var(--fill);
+  color: var(--muted);
+}
+:root[data-surface="light"] .bento-tag.live {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+:root[data-surface="light"] .ws-bar-row:hover,
+:root[data-surface="light"] .ws-bar-row:active,
+:root[data-surface="light"] .bento-platform-row:hover,
+:root[data-surface="light"] .chat-inbox-row:active,
+:root[data-surface="light"] .agent-line:active {
+  background: rgba(255, 255, 255, 0.92);
+}
+:root[data-surface="light"] .tabbar button.active {
+  background: var(--glass-strong);
+  color: var(--text);
+  box-shadow: var(--rim-gloss);
+}
+
+/* ---- v40.0 Collaborative Job Board + Rich Deep Dive + Clean #peer-floor ---- */
+#session-strip[hidden] {
+  display: none !important;
+}
+.quick-chips {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  gap: 6px;
+  padding: 6px 12px 2px;
+  align-items: center;
+}
+.quick-chips::-webkit-scrollbar { display: none; }
+.q-chip {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.q-chip-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--glass-subtle, rgba(255, 255, 255, 0.06));
+  color: var(--text);
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--line, rgba(255, 255, 255, 0.14));
+  border-radius: 999px;
+  padding: 0.28rem 0.75rem;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.25;
+}
+.job-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.job-board-banner {
+  background: var(--glass-subtle, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-radius: 18px;
+  padding: 16px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.job-board-banner h2 {
+  margin: 0;
+  font-size: 16px;
+}
+.job-board-banner p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.new-job-form {
+  background: var(--glass-subtle, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.16));
+  border-radius: 16px;
+  padding: 14px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.new-job-form[hidden] { display: none !important; }
+.new-job-form input,
+.new-job-form select,
+.new-job-form textarea {
+  width: 100%;
+  background: var(--fill, rgba(255, 255, 255, 0.06));
+  color: var(--text);
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.16));
+  border-radius: 11px;
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 13.5px;
+}
+.new-job-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+@media (max-width: 540px) {
+  .new-job-grid { grid-template-columns: 1fr; }
+}
+.job-stage-tabs {
+  margin: 6px 0 12px;
+}
+.job-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.job-card-collab {
+  background: var(--glass-subtle, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-radius: 18px;
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.job-card-collab.done { opacity: 0.78; }
+.job-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.job-card-meta {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+.job-card-title {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 700;
+}
+.job-card-summary {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.job-owners-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.job-owner-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft, rgba(205, 189, 255, 0.14));
+  color: var(--text);
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+}
+.job-check-prog {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.ws-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.ws-metric-pill {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft, rgba(205, 189, 255, 0.14));
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.14));
+}
+.ws-section-card {
+  background: var(--glass-subtle, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-radius: 15px;
+  padding: 13px;
+  margin-top: 10px;
+}
+.ws-section-card h4 {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ws-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.ws-check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 13.5px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.ws-check-row input[type="checkbox"] {
+  margin-top: 3px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.ws-check-row.checked span {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.ws-doc-viewer,
+.ws-ai-output {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 13px;
+  background: var(--fill, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.14));
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ws-doc-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 6px 0 0;
+}
+.ws-order-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ws-order-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.ws-order-row input {
+  flex: 1;
+  min-width: 0;
+  background: var(--fill, rgba(255, 255, 255, 0.06));
+  color: var(--text);
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.16));
+  border-radius: 10px;
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 13.5px;
+}
+.pool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.pool-card {
+  background: var(--glass-subtle, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-radius: 14px;
+  padding: 12px;
+}
+.pool-card strong {
+  display: block;
+  font-size: 13.5px;
+  margin-bottom: 4px;
+}
+.pool-card p {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.brief-done-details {
+  margin-top: 14px;
+}
+.brief-done-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+:root[data-surface="light"] .job-board-banner,
+:root[data-surface="light"] .job-card-collab,
+:root[data-surface="light"] .new-job-form,
+:root[data-surface="light"] .ws-section-card,
+:root[data-surface="light"] .pool-card {
+  background: rgba(255, 255, 255, 0.72);
+}
