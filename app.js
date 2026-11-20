@@ -225,8 +225,12 @@
       if (!qcByBuilder[b] || (r.verified_at || "") > (qcByBuilder[b].verified_at || "")) qcByBuilder[b] = r;
     });
 
+    const hbMap = (state.heartbeats && state.heartbeats.agents && typeof state.heartbeats.agents === "object")
+      ? state.heartbeats.agents
+      : (state.heartbeats || {});
+
     state.agents = DEFAULT_ROSTER.map(function (base) {
-      const hb = state.heartbeats && (state.heartbeats[base.id] || state.heartbeats[base.name]);
+      const hb = hbMap[base.id] || hbMap[base.name] || hbMap[String(base.name || "").toLowerCase()];
       const commit = (state.commits || []).find(function (c) {
         const hay = ((c.message || "") + " " + (c.author || "")).toLowerCase();
         return hay.includes(base.id);
@@ -245,6 +249,7 @@
       let status = "offline";
       let evidence = "No recent Git commit";
       let lastSeen = "Offline";
+      const allowedHb = { working: 1, waiting: 1, blocked: 1, offline: 1, completed: 1 };
 
       if (base.id === "peer-floor") {
         status = "working";
@@ -260,8 +265,20 @@
         lastSeen = relTime(waitingItem.created_at || waitingItem.updated_at);
       } else if (hb && hb.ts) {
         const ageMs = Date.now() - new Date(hb.ts).getTime();
-        status = ageMs < 3600000 ? "working" : "offline";
-        evidence = hb.task || hb.commit || "heartbeat";
+        const declared = String(hb.state || "").toLowerCase();
+        if (allowedHb[declared]) status = declared;
+        else status = ageMs < 3600000 ? "working" : "offline";
+        if (status === "completed" && !(qc && qc.checks_passed && qc.reviewer && String(qc.reviewer).toLowerCase() !== String(qc.builder || "").toLowerCase())) {
+          // Protocol: completed requires peer QC — fall back to working/offline from beat age.
+          status = ageMs < 3600000 ? "working" : "offline";
+        }
+        if (status !== "offline" && ageMs > 86400000 && declared !== "blocked" && declared !== "waiting") {
+          status = "offline";
+        }
+        evidence = hb.evidence_path || hb.task || hb.commit || hb.evidence_sha || "heartbeat";
+        if (hb.evidence_sha || hb.commit) {
+          evidence = (hb.evidence_path ? hb.evidence_path + " · " : "") + "commit " + String(hb.evidence_sha || hb.commit).slice(0, 8);
+        }
         lastSeen = relTime(hb.ts);
       } else if (qc && qc.checks_passed && qc.reviewer && String(qc.reviewer).toLowerCase() !== String(qc.builder || "").toLowerCase()) {
         status = "completed";
@@ -361,6 +378,8 @@
       state.usageRaw = sync.usage || state.usageRaw;
       state.commits = sync.commits || [];
       state.headCommit = sync.head_commit || state.headCommit;
+      state.heartbeats = sync.heartbeats || state.heartbeats || {};
+      state.qcReceipts = Array.isArray(sync.qc_receipts) ? sync.qc_receipts : (state.qcReceipts || []);
       state.sharedMemory = memory || { entries: [] };
       state.online = true;
       state.lastSyncIso = sync.synced_at || new Date().toISOString();
