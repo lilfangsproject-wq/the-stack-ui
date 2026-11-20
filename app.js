@@ -439,7 +439,7 @@ function showCloudConnect(errMsg) {
   if (gemInput && getGeminiKey()) gemInput.value = getGeminiKey();
 }
 
-const STACK_VERSION = "v40.8";
+const STACK_VERSION = "v40.9";
 const GEMINI_KEY_STORAGE = "stack-gemini-key-v1";
 const GEMINI_MODEL_STORAGE = "stack-gemini-model-v1";
 const GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite";
@@ -2020,6 +2020,13 @@ function agentForJob(j) {
   return who === "Cursor-Cloud" ? "Cursor" : who;
 }
 
+function jobRefPrefill(wsId = state.openWsId) {
+  const id = String(wsId || "");
+  if (!id) return "";
+  const ws = (state.lastWorkstreams || []).find((x) => x.id === id);
+  if (!ws) return "";
+  return `[${ws.name}] `;
+}
 async function openAgentDm(agent, prefill) {
   let slug = dmSlugFor(agent);
   if (!slug) {
@@ -2031,8 +2038,10 @@ async function openAgentDm(agent, prefill) {
   state.channelSlug = slug;
   showView("channel");
   const box = document.getElementById("body");
-  if (prefill && box) {
-    box.value = prefill;
+  const text = prefill || jobRefPrefill();
+  if (text && box) {
+    if (!box.value.trim()) box.value = text;
+    else if (text && !box.value.includes(text.trim())) box.value = `${text}${box.value}`;
     autosize(box);
     setTimeout(() => box.focus(), 50);
   }
@@ -2083,6 +2092,8 @@ async function onJobsClick(e) {
   const openAgent = e.target.closest("[data-open-agent]");
   if (openAgent && !e.target.closest("[data-stop-nav], .model-pick, select")) {
     e.preventDefault();
+    const wsCard = openAgent.closest("[data-ws-id]");
+    if (wsCard && wsCard.dataset.wsId) state.openWsId = wsCard.dataset.wsId;
     openAgentDm(openAgent.dataset.openAgent).catch((err) => toast(friendlyError(err), "err"));
     return;
   }
@@ -3157,7 +3168,11 @@ function renderJobCardHtml(w, doneSet = loadWsDoneSet()) {
   const checks = wsChecklistItems(w);
   const checksDone = checks.filter((c) => c.done).length;
   const ownerPills = owners
-    .map((o) => `<span class="job-owner-pill">${esc(o === "Gemini" ? "Gemini ★" : o)}</span>`)
+    .map((o) => {
+      const label = o === "Gemini" ? "Gemini ★" : o;
+      if (o === "Seth") return `<span class="job-owner-pill">${esc(label)}</span>`;
+      return `<button type="button" class="job-owner-pill" data-open-agent="${esc(o)}" title="DM ${esc(o)} about this job">${esc(label)}</button>`;
+    })
     .join("");
   return `<article class="job-card-collab${st.sethDone ? " done" : ""}" data-ws-id="${esc(w.id)}">
     <div class="job-card-top">
@@ -4163,7 +4178,11 @@ function openWorkstreamSheet(wsId) {
   const checks = wsChecklistItems(ws);
   const doneChecks = checks.filter((c) => c.done).length;
   const ownerPills = (ws.owners || ["Seth"])
-    .map((o) => `<span class="job-owner-pill">${esc(o === "Gemini" ? "Gemini ★" : o)}</span>`)
+    .map((o) => {
+      const label = o === "Gemini" ? "Gemini ★" : o;
+      if (o === "Seth") return `<span class="job-owner-pill">${esc(label)}</span>`;
+      return `<button type="button" class="job-owner-pill" data-open-agent="${esc(o)}" title="DM ${esc(o)} about this job">${esc(label)}</button>`;
+    })
     .join("");
   const checklistHtml = checks.length
     ? checks
@@ -6957,6 +6976,8 @@ document.addEventListener("click", async (e) => {
   const openAgentAnywhere = e.target.closest("[data-open-agent]");
   if (openAgentAnywhere && !e.target.closest("#home-pane, #agents-body, [data-stop-nav], .model-pick, select")) {
     e.preventDefault();
+    const wsCard = openAgentAnywhere.closest("[data-ws-id]");
+    if (wsCard && wsCard.dataset.wsId) state.openWsId = wsCard.dataset.wsId;
     openAgentDm(openAgentAnywhere.dataset.openAgent).catch((err) => toast(friendlyError(err), "err"));
     return;
   }
