@@ -1392,7 +1392,7 @@ function closeChatSheetImmediate() {
 
 /* ---- Command centre (v34.0): live agents, model pickers, git-main feed ---- */
 const AGENT_ROSTER = [
-  { name: "Gemini", role: "Orchestrator / boss · Vision + Workspace", aliases: ["gemini"] },
+  { name: "Gemini", role: "Engineering, Research & Workspace", aliases: ["gemini"] },
   { name: "ChatGPT", role: "Ideation + independent verifier", aliases: ["chatgpt", "gpt"] },
   { name: "Cursor", role: "Build + tests + PR integration", aliases: ["cursor"] },
   { name: "Cursor-Cloud", role: "Cloud worker", aliases: ["cursor-cloud", "cursor cloud"] },
@@ -3993,25 +3993,28 @@ function buildBentoHub({ cc, todos }) {
 
   // Right card: 7-Day Activity + By Agent
   const act = build7DayActivity(cc);
+  const selDayIdx = Number.isInteger(state.bentoDayIdx) ? state.bentoDayIdx : act.peakIdx;
   const barsHtml = act.counts
     .map((v, i) => {
       const hPct = v ? Math.max(24, Math.round((v / act.max) * 100)) : 16;
-      const isPeak = i === act.peakIdx && v > 0;
-      return `<div class="bento-bar-col" title="${esc(act.days[i])}: ${v} updates">
-        ${isPeak ? `<em class="bento-peak-badge">${v} updates</em>` : ""}
-        <div class="bento-bar-pill${isPeak ? " peak" : ""}" style="height:${hPct}%"></div>
+      const isSelected = i === selDayIdx && (v > 0 || Number.isInteger(state.bentoDayIdx));
+      return `<button type="button" class="bento-bar-col${isSelected ? " selected" : ""}" data-bento-day="${i}" title="${esc(act.days[i])}: ${v} updates">
+        ${isSelected ? `<em class="bento-peak-badge">${v} updates</em>` : ""}
+        <div class="bento-bar-pill${isSelected ? " peak" : ""}" style="height:${hPct}%"></div>
         <span>${esc(act.days[i].slice(0, 3))}</span>
-      </div>`;
+      </button>`;
     })
     .join("");
   const platformHtml = act.platforms.length
     ? act.platforms
         .map(([name, cnt], idx) => {
           const rMatch = liveAgentRoster().find((a) => a.name === name);
+          const agMatch = (cc.agents || []).find((x) => x.name === name);
+          const isLive = Boolean(agMatch && (agMatch.status === "active" || agMatch.status === "recent"));
           const sub = rMatch ? clip(rMatch.role.split("·")[0], 22) : "Agent";
           return `<button type="button" class="bento-platform-row" data-open-agent="${esc(name)}">
             <span class="bento-plat-left">
-              <i class="bento-dot c${idx % 4}" aria-hidden="true"></i>
+              <i class="bento-dot c${idx % 4}${isLive ? " live" : ""}" aria-hidden="true"></i>
               <span class="bento-plat-text"><strong>${esc(name)}</strong><small>${esc(sub)}</small></span>
             </span>
             <span class="bento-plat-cnt">${cnt}</span>
@@ -4049,9 +4052,21 @@ function buildBentoHub({ cc, todos }) {
     .join("");
 
   let focusPct = overallPct;
+  let focusStepsHtml = "";
   if (urgentWs) {
     const fc = wsChecklistItems(urgentWs);
     focusPct = fc.length ? Math.round((fc.filter((c) => c.done).length / fc.length) * 100) : 25;
+    const nextSteps = fc.filter((c) => !c.done).slice(0, 2);
+    if (nextSteps.length) {
+      focusStepsHtml = `<div class="bento-focus-steps">${nextSteps
+        .map(
+          (c) => `<button type="button" class="bento-step-tick" data-focus-check="${esc(urgentWs.id)}:${esc(c.id)}">
+            <span class="bento-step-box" aria-hidden="true"></span>
+            <span>${esc(clip(c.label, 52))}</span>
+          </button>`
+        )
+        .join("")}</div>`;
+    }
   }
 
   // Bottom-left 3-up Active Queue / Today strip
@@ -4200,6 +4215,7 @@ function buildBentoHub({ cc, todos }) {
           </div>
         </div>
       </div>
+      ${focusStepsHtml}
       <div class="bento-cta-row">
         ${
           urgentWs
@@ -6778,6 +6794,21 @@ document.getElementById("home-body")?.addEventListener("click", (e) => {
     loadHome().catch(() => {});
     return;
   }
+  const dayBtn = e.target.closest("[data-bento-day]");
+  if (dayBtn) {
+    state.bentoDayIdx = Number(dayBtn.dataset.bentoDay);
+    loadHome().catch(() => {});
+    return;
+  }
+  const focusCheck = e.target.closest("[data-focus-check]");
+  if (focusCheck) {
+    const map = loadWsChecksMap();
+    const k = focusCheck.dataset.focusCheck;
+    map[k] = true;
+    saveWsChecksMap(map);
+    loadHome().catch(() => {});
+    return;
+  }
   const openWs = e.target.closest("[data-open-ws]");
   if (openWs) {
     openWorkstreamSheet(openWs.dataset.openWs);
@@ -6793,6 +6824,10 @@ document.getElementById("home-tools-toggle")?.addEventListener("click", () => {
 });
 document.getElementById("top-debrief-btn")?.addEventListener("click", () => {
   openJarvisSheet("debrief", { autoTalk: true });
+});
+document.getElementById("top-new-job-btn")?.addEventListener("click", () => {
+  document.querySelector('[data-tab="agents"]')?.click();
+  setTimeout(() => document.getElementById("new-job-toggle")?.click(), 80);
 });
 document.getElementById("ws-sheet-close")?.addEventListener("click", () => {
   stopDebriefVoice();

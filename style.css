@@ -5275,3 +5275,73 @@ a.ghost {
   background: rgba(255, 255, 255, 0.72);
   border-color: rgba(15, 23, 42, 0.08);
 }
+
+/* ---- v42.0: Perfect Circle Buttons, Mobile Fit, Interactive Bars & Focus Steps ---- */
+.top-ico-btn {
+  width: 2.15rem;
+  height: 2.15rem;
+  min-width: 2.15rem;
+  padding: 0 !important;
+  flex-shrink: 0;
+  aspect-ratio: 1 / 1;
+}
+.top-user-pill { flex-shrink: 0; }
+@media (max-width: 720px) {
+  .top-pill-desk { display: none; }
+  .home-topbar {
+    padding: 0.38rem 0.48rem;
+    gap: 0.3rem;
+  }
+  .top-pill-nav { flex: 1 1 auto; justify-content: center; min-width: 0; }
+  .top-user-pill { padding: 0.16rem; }
+  .home-body {
+    padding-bottom: calc(var(--tabbar-h, 4.2rem) + 3rem + var(--safe-bottom, 0px)) !important;
+  }
+}
+@media (max-width: 899px) {
+  .bento-prog { order: 1; }
+  .bento-focus { order: 2; }
+  .bento-since { order: 3; }
+  .bento-activity { order: 4; }
+}
+button.bento-bar-col {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.bento-dot.live {
+  box-shadow: 0 0 8px currentColor;
+}
+.bento-focus-steps {
+  display: grid;
+  gap: 0.35rem;
+}
+.bento-step-tick {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.42rem 0.55rem;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.74rem;
+  text-align: left;
+  cursor: pointer;
+}
+.bento-step-tick:hover { background: rgba(255, 255, 255, 0.08); }
+.bento-step-box {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 4px;
+  border: 1.5px solid var(--muted);
+  flex-shrink: 0;
+}
+:root[data-surface="light"] .bento-step-tick {
+  background: rgba(255, 255, 255, 0.65);
+  border-color: rgba(15, 23, 42, 0.09);
+}
