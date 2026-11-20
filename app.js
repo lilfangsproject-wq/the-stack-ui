@@ -323,14 +323,30 @@
     state.notifications = notifs;
   }
 
+  function secretsMissing(health) {
+    return !!(health && (health.status === "awaiting_secrets" ||
+      (Array.isArray(health.alerts) && health.alerts.some(function (a) {
+        return String(a.issue || "").indexOf("GITHUB_PAT") !== -1;
+      }))));
+  }
+
   async function syncVault(silent) {
     if (!creds.pin || !creds.bff) return;
     state.syncing = true;
     renderChrome();
     try {
-      const [sync, health, memory] = await Promise.all([
+      const health = await bff("/api/health").catch(function () { return null; });
+      state.health = health;
+      if (secretsMissing(health)) {
+        state.online = false;
+        state.headCommit = "—";
+        if (!silent) {
+          toast("Worker secrets missing — set GITHUB_PAT + STACK_ACCESS_PIN on Worker the-stack-bff (Secret type)");
+        }
+        return;
+      }
+      const [sync, memory] = await Promise.all([
         bff("/api/sync"),
-        bff("/api/health").catch(function () { return null; }),
         bff("/api/memory").catch(function () { return { entries: [] }; })
       ]);
       state.workstreamsRaw = sync.workstreams || state.workstreamsRaw;
@@ -338,7 +354,6 @@
       state.usageRaw = sync.usage || state.usageRaw;
       state.commits = sync.commits || [];
       state.headCommit = sync.head_commit || state.headCommit;
-      state.health = health;
       state.sharedMemory = memory || { entries: [] };
       state.online = true;
       state.lastSyncIso = sync.synced_at || new Date().toISOString();
@@ -352,7 +367,12 @@
         showGate();
         toast("PIN rejected — unlock again");
       } else {
-        toast("Offline — working from local cache");
+        const detail = (err && err.data && err.data.error) || (err && err.message) || "";
+        if (/GITHUB_PAT/i.test(detail)) {
+          toast("Worker needs Secret GITHUB_PAT — Cloudflare → Workers → the-stack-bff → Secrets");
+        } else {
+          toast("Offline — working from local cache" + (detail ? " (" + String(detail).slice(0, 80) + ")" : ""));
+        }
       }
     } finally {
       state.syncing = false;
@@ -408,6 +428,13 @@
           '<button type="button" class="btn btn-sec" data-ping-floor="HOLD: ' + esc(topNeed.title || topNeed.key || "need") + '">Hold</button>' +
           (topNeed.owner ? '<button type="button" class="btn btn-sec" data-jump-agent="' + esc(String(topNeed.owner).toLowerCase().split(/[\s/]+/)[0]) + '">Ping ' + esc(topNeed.owner) + "</button>" : "") +
         "</div>" +
+      "</section>"
+    ) : secretsMissing(state.health) ? (
+      '<section class="hero">' +
+        '<div class="hero-top"><span class="kicker">5-Second Brief · ' + VERSION + '</span><span class="badge amber"><span class="dot amber"></span>Secrets</span></div>' +
+        '<h2 class="hero-title">Worker secrets not armed</h2>' +
+        '<p class="hero-copy">Add <span class="mono">GITHUB_PAT</span> and <span class="mono">STACK_ACCESS_PIN</span> as <strong>Secrets</strong> on Worker <span class="mono">the-stack-bff</span> (not Pages Variables). Then tap the sync pill.</p>' +
+        '<div class="hero-actions"><button type="button" class="btn btn-pri" id="btn-resync">Retry Sync</button><button type="button" class="btn btn-sec" data-go="stats">Usage &amp; Git</button></div>' +
       "</section>"
     ) : (
       '<section class="hero">' +
@@ -608,8 +635,18 @@
 
     const sDot = document.getElementById("sync-dot");
     const sTxt = document.getElementById("sync-text");
-    if (sDot) sDot.className = "dot " + (state.outbox.length ? "amber" : state.online ? "green" : "red");
-    if (sTxt) sTxt.textContent = state.syncing ? "Syncing…" : state.outbox.length ? "Outbox · " + state.outbox.length : "Git · " + state.headCommit;
+    if (sDot) sDot.className = "dot " + (state.outbox.length ? "amber" : secretsMissing(state.health) ? "amber" : state.online ? "green" : "red");
+    if (sTxt) {
+      sTxt.textContent = state.syncing
+        ? "Syncing…"
+        : state.outbox.length
+          ? "Outbox · " + state.outbox.length
+          : secretsMissing(state.health)
+            ? "Secrets missing"
+            : state.online
+              ? "Git · " + state.headCommit
+              : "Offline — local cache";
+    }
 
     const obLbl = document.getElementById("sb-outbox-lbl");
     const obDot = document.getElementById("sb-outbox-dot");
@@ -864,6 +901,8 @@
 
     const qi = document.getElementById("btn-quick-inbox");
     if (qi) qi.addEventListener("click", openQuickInbox);
+    const rs = document.getElementById("btn-resync");
+    if (rs) rs.addEventListener("click", function () { syncVault(false); });
 
     const chatInput = document.getElementById("agent-chat-input");
     root.querySelectorAll("[data-insert]").forEach(function (c) {
@@ -958,10 +997,14 @@
     creds.pin = document.getElementById("stack-pin").value;
     saveCreds();
     try {
-      await bff("/api/health");
+      const health = await bff("/api/health");
+      state.health = health;
       showShell();
       normalizeHubData();
       render();
+      if (secretsMissing(health)) {
+        toast("Unlocked, but Worker has no GITHUB_PAT yet — vault stays offline until Secrets are set");
+      }
       await syncVault(false);
     } catch (err) {
       clearCreds();
