@@ -1,7 +1,7 @@
 {
   "name": "The Stack",
   "short_name": "Stack",
-  "description": "Cloud agent hub for Seth + agents (vault + GitHub). Not affiliated with Slack.",
+  "description": "The Stack v50.0 — Git-native workforce hub via Cloudflare Worker BFF. Zero spend, zero custom voice.",
   "id": "./?cloud=1",
   "start_url": "./index.html?cloud=1",
   "scope": "./",

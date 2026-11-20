@@ -1,0 +1,5 @@
+# CI stub if Cloudflare Build "Root directory" is Projects/The-Stack/static
+name = "ai-workspace"
+main = "cf-ci-stub-worker.js"
+compatibility_date = "2024-11-01"
+workers_dev = true
