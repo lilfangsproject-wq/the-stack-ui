@@ -4931,7 +4931,7 @@ a.ghost {
   gap: 0.65rem;
   padding: 0.55rem 0.85rem;
   border-radius: 999px;
-  margin: 0.55rem 0.75rem 0.25rem;
+  margin: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 0.45rem) 0.75rem 0.25rem;
   background: rgba(255, 255, 255, 0.045);
   border: 1px solid rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(16px);
@@ -5014,7 +5014,11 @@ a.ghost {
 .top-user-name { font-size: 0.74rem; font-weight: 650; color: var(--text); }
 .top-user-status { font-size: 0.62rem; color: var(--muted); max-width: 9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 720px) {
-  .home-topbar { margin: 0.4rem 0.5rem 0.15rem; padding: 0.4rem 0.5rem; gap: 0.35rem; }
+  .home-topbar {
+    margin: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 0.35rem) 0.5rem 0.2rem;
+    padding: 0.4rem 0.5rem;
+    gap: 0.35rem;
+  }
   .top-user-meta { display: none; }
   .top-pill { padding: 0.32rem 0.62rem; font-size: 0.72rem; }
 }
@@ -5106,15 +5110,24 @@ a.ghost {
 }
 .bento-prog-fill {
   height: 100%;
+  min-width: 2.65rem;
   border-radius: 999px;
   background: linear-gradient(90deg, #f59e0b, #fde047);
   color: #1c1917;
   font-size: 0.68rem;
   font-weight: 750;
+  white-space: nowrap;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
   padding: 0 0.45rem;
+}
+.bento-bars {
+  height: 8.6rem;
+  padding-top: 1.55rem;
+}
+.bento-peak-badge {
+  top: -1.35rem;
 }
 .bento-platform-box {
   background: rgba(255, 255, 255, 0.035);
