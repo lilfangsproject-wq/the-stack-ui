@@ -268,7 +268,9 @@
 
     .panel {
       border-radius: 26px; background: var(--glass-panel-bg); border: 1px solid var(--glass-panel-bd);
-      box-shadow: var(--glass-panel-shadow); backdrop-filter: blur(30px) saturate(175%); -webkit-backdrop-filter: blur(30px) saturate(175%);
+      box-shadow: var(--glass-panel-shadow);
+      /* Dense lists: lighter blur so iPhone scroll stays smooth. Hero/dock keep the full lens. */
+      backdrop-filter: blur(14px) saturate(150%); -webkit-backdrop-filter: blur(14px) saturate(150%);
       overflow: hidden; margin-bottom: 14px;
     }
     .row {
@@ -426,13 +428,63 @@
     .mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-3); }
 
     .toast {
-      position: fixed; top: 16px; left: 50%; transform: translateX(-50%) translateY(-14px); z-index: 90;
+      position: fixed; top: calc(env(safe-area-inset-top, 0px) + 12px); left: 50%; transform: translateX(-50%) translateY(-14px); z-index: 90;
       padding: 9px 16px; border-radius: 999px; background: var(--glass-nav-bg); border: 1px solid var(--glass-nav-bd);
       box-shadow: var(--glass-nav-shadow); backdrop-filter: blur(32px); -webkit-backdrop-filter: blur(32px);
       font-size: 12.5px; font-weight: 600; opacity: 0; pointer-events: none;
       transition: opacity 0.18s var(--ease), transform 0.18s var(--ease);
     }
     .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .toast-error { color: var(--st-red); }
+    .toast-warning { color: var(--st-amber-ink); }
+    .toast-info { color: var(--ink-1); }
+
+    .pull-ind {
+      height: 0; overflow: hidden; text-align: center; font-size: 12px; font-weight: 600;
+      color: var(--ink-2); transition: height 0.12s var(--ease);
+    }
+    .pull-ind.on { height: 36px; line-height: 36px; }
+
+    .cmdk-input { font-size: 16px; margin-bottom: 12px; }
+    .cmdk-list { max-height: 48vh; overflow-y: auto; margin-bottom: 0; }
+    .cmdk-row[aria-selected="true"] { background: var(--hover-tint); }
+
+    @media (max-width: 859px) {
+      body::before { filter: blur(8px); }
+      .panel {
+        backdrop-filter: blur(6px) saturate(125%);
+        -webkit-backdrop-filter: blur(6px) saturate(125%);
+      }
+    }
+
+    @media (prefers-reduced-transparency: reduce) {
+      html[data-surface="dark"] {
+        --glass-hero-bg: #1b2330;
+        --glass-panel-bg: #151c27;
+        --glass-orb-bg: #1c2430;
+        --glass-nav-bg: #1b2330;
+        --lens-bg: #243041;
+        --sheet-bg: #121820;
+        --input-bg: #1c2430;
+        --btn-sec-bg: #243041;
+      }
+      html[data-surface="light"] {
+        --glass-hero-bg: #f5f7fb;
+        --glass-panel-bg: #eef2f6;
+        --glass-orb-bg: #f7f9fc;
+        --glass-nav-bg: #f3f6fa;
+        --lens-bg: #ffffff;
+        --sheet-bg: #f4f7fb;
+        --input-bg: #ffffff;
+        --btn-sec-bg: #e7edf4;
+      }
+      body::before { filter: none; }
+      .mac-sidebar, .hero, .panel, .glass-pill-tag, .orb-btn, .agent-pill, .seg,
+      .dock, .dock-fab, .sheet, .toast, .boot-card, .badge, .btn-sec, .overlay {
+        -webkit-backdrop-filter: none !important;
+        backdrop-filter: none !important;
+      }
+    }
     .empty { padding: 22px 16px; text-align: center; font-size: 13px; color: var(--ink-3); }
     .hidden { display: none !important; }
 

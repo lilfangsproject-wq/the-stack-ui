@@ -1,7 +1,8 @@
-# The Stack UI (public shell)
+# The Stack v50.1 static shell
 
-Static phone UI for The Stack. Hub data stays in the private `ai-workspace` vault via GitHub API + PAT (browser localStorage only — never commit tokens).
+PIN unlock → Cloudflare Worker BFF (`../worker/`). No browser `GITHUB_PAT`. No voice.
+SW cache: `the-stack-shell-v50.1-rebirth`.
 
-**Live:** https://lilfangsproject-wq.github.io/the-stack-ui/?cloud=1
+Secrets (Cloudflare only): `GITHUB_PAT`, `STACK_ACCESS_PIN`.
 
-Keep this repo in sync with `Projects/The-Stack/static/` in `ai-workspace`. All asset paths are relative so GitHub Pages project subpath `/the-stack-ui/` works.
+Live mirror: https://lilfangsproject-wq.github.io/the-stack-ui/

@@ -1,5 +1,6 @@
-/* The Stack v50.0 Rebirth — Cloudflare Worker BFF, Zero-Voice, Liquid Glass
+/* The Stack v50.1 Rebirth — Cloudflare Worker BFF, Zero-Voice, Liquid Glass
  * Hard rules: no Jarvis/Aria/mic/TTS/STT; PIN → x-stack-pin; Git is source of truth.
+ * No horizontal swipe. Colour only marks the 5 agent states. Connection pill is honest.
  */
 (function () {
   "use strict";
@@ -40,7 +41,9 @@
     workFilter: "all",
     notifFilter: "all",
     syncing: false,
-    online: true,
+    online: false,
+    link: "offline",
+    conflicts: [],
     lastSyncIso: "",
     headCommit: "—",
     commits: [],
@@ -62,6 +65,10 @@
   };
 
   let toastTimer = null;
+  let toastQueue = [];
+  let toastShowing = false;
+  let toastRankShowing = 0;
+  let pollStarted = false;
 
   function esc(s) {
     return String(s == null ? "" : s)
@@ -69,13 +76,41 @@
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
-  function toast(msg) {
+  function toast(msg, level) {
+    const item = { msg: String(msg), level: level || "info" };
+    if (toastShowing && window.StackPolish.toastRank(item.level) > toastRankShowing) {
+      toastQueue = window.StackPolish.enqueueToast(toastQueue, item);
+      clearTimeout(toastTimer);
+      const live = document.getElementById("toast");
+      if (live) live.classList.remove("show");
+      toastShowing = false;
+      toastRankShowing = 0;
+      pumpToast();
+      return;
+    }
+    toastQueue = window.StackPolish.enqueueToast(toastQueue, item);
+    pumpToast();
+  }
+
+  function pumpToast() {
+    if (toastShowing || !toastQueue.length) return;
+    const item = toastQueue.shift();
     const t = document.getElementById("toast");
     if (!t) return;
-    t.textContent = msg;
-    t.classList.add("show");
+    toastShowing = true;
+    toastRankShowing = window.StackPolish.toastRank(item.level);
+    t.classList.remove("toast-error", "toast-warning", "toast-info");
+    t.classList.add("show", "toast-" + item.level);
+    t.dataset.level = item.level;
+    t.textContent = item.msg;
+    const ms = item.level === "error" ? 4200 : item.level === "warning" ? 3200 : 2200;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.classList.remove("show"); }, 2400);
+    toastTimer = setTimeout(function () {
+      t.classList.remove("show");
+      toastShowing = false;
+      toastRankShowing = 0;
+      setTimeout(pumpToast, 160);
+    }, ms);
   }
 
   function relTime(iso) {
@@ -125,11 +160,24 @@
     } catch (e) {}
   }
 
+  function prefersLight() {
+    return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches);
+  }
+
   function applySurface(mode) {
-    document.documentElement.dataset.surface = mode;
+    const choice = mode === "light" || mode === "system" ? mode : "dark";
+    const surface = window.StackPolish.resolveSurface(choice, prefersLight());
+    document.documentElement.dataset.theme = choice;
+    document.documentElement.dataset.surface = surface;
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", mode === "light" ? "#cfd6e0" : "#0d1117");
-    try { localStorage.setItem(SURFACE_KEY, mode); } catch (e) {}
+    if (meta) meta.setAttribute("content", surface === "light" ? "#cfd6e0" : "#0d1117");
+    const btn = document.getElementById("surface-btn");
+    if (btn) {
+      const label = choice === "system" ? "System" : choice === "light" ? "Light" : "Dark";
+      btn.title = "Theme: " + label + " (neutral glass)";
+      btn.setAttribute("aria-label", "Theme " + label);
+    }
+    try { localStorage.setItem(SURFACE_KEY, choice); } catch (e) {}
   }
 
   function agentMeta(st) { return AGENT_STATES[st] || AGENT_STATES.offline; }
@@ -345,6 +393,15 @@
       });
     }
     state.notifications = notifs;
+    state.conflicts = window.StackPolish.detectConflicts(state.commits || []);
+  }
+
+  function conflictsForRef(ref) {
+    const needle = String(ref || "").trim();
+    if (needle.length < 3) return [];
+    return (state.conflicts || []).filter(function (c) {
+      return c.path === needle || c.path.endsWith("/" + needle) || needle.endsWith("/" + c.path);
+    });
   }
 
   function secretsMissing(health) {
@@ -356,16 +413,26 @@
 
   async function syncVault(silent) {
     if (!creds.pin || !creds.bff) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      state.syncing = false;
+      state.online = false;
+      state.link = "offline";
+      renderChrome();
+      if (!silent) toast("Offline — no network", "warning");
+      return;
+    }
     state.syncing = true;
+    state.link = "polling";
     renderChrome();
     try {
       const health = await bff("/api/health").catch(function () { return null; });
       state.health = health;
       if (secretsMissing(health)) {
         state.online = false;
+        state.link = "offline";
         state.headCommit = "—";
         if (!silent) {
-          toast("Worker secrets missing — set GITHUB_PAT + STACK_ACCESS_PIN on Worker the-stack-bff (Secret type)");
+          toast("Worker secrets missing — set GITHUB_PAT + STACK_ACCESS_PIN on Worker the-stack-bff (Secret type)", "warning");
         }
         return;
       }
@@ -382,22 +449,24 @@
       state.qcReceipts = Array.isArray(sync.qc_receipts) ? sync.qc_receipts : (state.qcReceipts || []);
       state.sharedMemory = memory || { entries: [] };
       state.online = true;
+      state.link = "live";
       state.lastSyncIso = sync.synced_at || new Date().toISOString();
       normalizeHubData();
       if (state.view === "agents") await loadActiveAgentMessages();
-      if (!silent) toast("Vault synced · " + state.headCommit + " · $" + ZERO_SPEND + " cap");
+      if (!silent) toast("Vault synced · " + state.headCommit + " · $" + ZERO_SPEND + " cap", "info");
     } catch (err) {
       state.online = false;
+      state.link = "offline";
       if (err && err.status === 401) {
         clearCreds();
         showGate();
-        toast("PIN rejected — unlock again");
+        toast("PIN rejected — unlock again", "error");
       } else {
         const detail = (err && err.data && err.data.error) || (err && err.message) || "";
         if (/GITHUB_PAT/i.test(detail)) {
-          toast("Worker needs Secret GITHUB_PAT — Cloudflare → Workers → the-stack-bff → Secrets");
+          toast("Worker needs Secret GITHUB_PAT — Cloudflare → Workers → the-stack-bff → Secrets", "error");
         } else {
-          toast("Offline — working from local cache" + (detail ? " (" + String(detail).slice(0, 80) + ")" : ""));
+          toast("Offline — working from local cache" + (detail ? " (" + String(detail).slice(0, 80) + ")" : ""), "warning");
         }
       }
     } finally {
@@ -433,7 +502,7 @@
     state.outbox = remaining;
     saveOutbox();
     render();
-    toast(sent ? "Synced " + sent + " queued event(s) via BFF" : "Outbox still pending");
+    toast(sent ? "Synced " + sent + " queued event(s) via BFF" : "Outbox still pending", sent ? "info" : "warning");
   }
 
   /* ===================== VIEWS ===================== */
@@ -481,6 +550,23 @@
       );
     }).join("");
 
+    const conflictHtml = (state.conflicts || []).length ? (
+      '<div class="section-head"><span class="section-title">File conflicts</span></div>' +
+      '<div class="panel" aria-label="Paths touched by more than one agent">' +
+        (state.conflicts || []).map(function (c) {
+          return (
+            '<div class="row">' +
+              '<div class="row-main">' +
+                '<div class="row-title"><span class="dot amber"></span>Conflict · ' + esc(c.path.split("/").pop()) + "</div>" +
+                '<div class="row-sub">' + esc(c.agents.join(" · ")) + " · " + esc(c.shas.slice(0, 3).join(" ")) + "</div>" +
+              "</div>" +
+              '<span class="badge amber">Conflict</span>' +
+            "</div>"
+          );
+        }).join("") +
+      "</div>"
+    ) : "";
+
     const commitRows = (state.commits || []).slice(0, 5).map(function (c) {
       const sha = String(c.sha || "").slice(0, 8);
       return (
@@ -496,6 +582,7 @@
 
     return (
       heroHtml +
+      conflictHtml +
       '<div class="section-head"><span class="section-title">Workforce State · 5 Explicit States</span><button type="button" class="section-link" data-go="agents">All Agents ›</button></div>' +
       '<div class="agent-strip">' + agentStrip + "</div>" +
       '<div class="section-head"><span class="section-title">Verified Git Commits</span><button type="button" class="section-link" data-go="stats">All ›</button></div>' +
@@ -575,12 +662,13 @@
     const hero = filtered[0] || state.items[0];
     const rest = hero ? filtered.filter(function (i) { return i.id !== hero.id; }) : [];
     const st = hero ? itemStateMeta(hero.state) : { label: "Empty", tone: "muted" };
+    const heroConflict = hero ? conflictsForRef(hero.ref) : [];
 
     const heroHtml = hero ? (
       '<section class="hero">' +
-        '<div class="hero-top"><span class="kicker">' + (hero.rawKind === "opportunity" ? "Featured Opportunity" : "Core Workstream") + '</span><span class="badge ' + st.tone + '"><span class="dot ' + st.tone + '"></span>' + esc(st.label) + "</span></div>" +
+        '<div class="hero-top"><span class="kicker">' + (hero.rawKind === "opportunity" ? "Featured Opportunity" : "Core Workstream") + '</span><span class="badge ' + st.tone + '"><span class="dot ' + st.tone + '"></span>' + esc(st.label) + "</span>" + (heroConflict.length ? '<span class="badge amber">Conflict</span>' : "") + "</div>" +
         '<h2 class="hero-title">' + esc(hero.title) + "</h2>" +
-        '<p class="hero-copy">' + esc(hero.summary) + "</p>" +
+        '<p class="hero-copy">' + esc(hero.summary) + (heroConflict.length ? " Shared path touched by " + esc(heroConflict[0].agents.join(" and ")) + "." : "") + "</p>" +
         '<div class="hero-meta"><span>Owner: <strong>' + esc(hero.owner) + "</strong></span>" + (hero.ref ? '<span class="git-chip">' + esc(hero.ref) + "</span>" : "") + "</div>" +
         '<div class="hero-actions">' +
           '<button type="button" class="btn btn-pri" data-inspect="' + esc(hero.id) + '">Open Details</button>' +
@@ -592,10 +680,11 @@
 
     const rows = rest.map(function (i) {
       const info = itemStateMeta(i.state);
+      const hit = conflictsForRef(i.ref);
       return (
         '<button type="button" class="row" data-inspect="' + esc(i.id) + '">' +
-          '<div class="row-main"><div class="row-title">' + esc(i.title) + ' <span class="dot ' + info.tone + '"></span></div><div class="row-sub">' + esc(i.owner) + (i.deadline ? " · Due " + esc(i.deadline) : "") + "</div></div>" +
-          '<div class="row-right"><span>' + esc(info.label) + "</span><span>›</span></div>" +
+          '<div class="row-main"><div class="row-title">' + esc(i.title) + ' <span class="dot ' + info.tone + '"></span></div><div class="row-sub">' + esc(i.owner) + (i.deadline ? " · Due " + esc(i.deadline) : "") + (hit.length ? " · " + esc(hit[0].agents.join(" · ")) : "") + "</div></div>" +
+          '<div class="row-right">' + (hit.length ? '<span class="badge amber">Conflict</span>' : "") + '<span>' + esc(info.label) + "</span><span>›</span></div>" +
         "</button>"
       );
     }).join("");
@@ -632,10 +721,11 @@
     const healthLine = state.health
       ? ('Health: <strong>' + esc(state.health.status || "—") + "</strong> · open approvals " + esc(String(state.health.open_approvals || 0)) + " · cap $" + esc(String(state.health.zero_spend_cap_usd ?? ZERO_SPEND)))
       : "Health not loaded";
+    const shaTone = state.link === "live" ? "green" : state.link === "polling" ? "amber" : "neutral";
 
     return (
       '<section class="hero">' +
-        '<div class="hero-top"><span class="kicker">Git Source of Truth · ' + VERSION + '</span><span class="badge green"><span class="dot green"></span>' + esc(state.headCommit) + "</span></div>" +
+        '<div class="hero-top"><span class="kicker">Git Source of Truth · ' + VERSION + '</span><span class="badge ' + shaTone + '"><span class="dot ' + (shaTone === "neutral" ? "muted" : shaTone) + '"></span>' + esc(state.headCommit) + "</span></div>" +
         '<h2 class="hero-title">Worker BFF</h2>' +
         '<p class="hero-copy"><span class="mono">' + esc(creds.bff) + "</span><br/>Last sync " + relTime(state.lastSyncIso) + " · " + state.outbox.length + " pending · Queue OFF<br/>" + healthLine + "</p>" +
         '<div class="hero-actions">' +
@@ -659,20 +749,24 @@
     const nc = document.getElementById("notif-count");
     if (nc) { nc.textContent = String(unreadNotifs); nc.classList.toggle("hidden", unreadNotifs === 0); }
 
+    const link = (typeof navigator !== "undefined" && navigator.onLine === false) ? "offline" : (state.syncing ? "polling" : state.link);
     const sDot = document.getElementById("sync-dot");
     const sTxt = document.getElementById("sync-text");
-    if (sDot) sDot.className = "dot " + (state.outbox.length ? "amber" : secretsMissing(state.health) ? "amber" : state.online ? "green" : "red");
-    if (sTxt) {
-      sTxt.textContent = state.syncing
-        ? "Syncing…"
-        : state.outbox.length
-          ? "Outbox · " + state.outbox.length
+    const sPill = document.getElementById("sync-pill");
+    if (sDot) sDot.className = "dot " + window.StackPolish.connectionDot(link);
+    if (sTxt) sTxt.textContent = window.StackPolish.connectionLabel(link, state.outbox.length);
+    if (sPill) {
+      const detail = link === "live"
+        ? ("Live · last sync " + (state.lastSyncIso || "—") + " · " + state.headCommit)
+        : link === "polling"
+          ? "Polling the Worker BFF"
           : secretsMissing(state.health)
-            ? "Secrets missing"
-            : state.online
-              ? "Git · " + state.headCommit
-              : "Offline — local cache";
+            ? "Offline — Worker secrets missing"
+            : "Offline — last sync failed or the network is down";
+      sPill.title = detail + (state.outbox.length ? " · Outbox " + state.outbox.length : "");
     }
+    const refreshDot = document.querySelector("#sb-refresh-btn .dot");
+    if (refreshDot) refreshDot.className = "dot " + window.StackPolish.connectionDot(link);
 
     const obLbl = document.getElementById("sb-outbox-lbl");
     const obDot = document.getElementById("sb-outbox-dot");
@@ -732,13 +826,13 @@
           method: "POST",
           body: JSON.stringify({ slug: "peer-floor", author: "Seth", body: "Quick Action: " + body })
         });
-        toast("Captured to #peer-floor");
+        toast("Captured to #peer-floor", "info");
         closeSheet();
         await syncVault(true);
       } catch (err) {
         state.outbox.unshift({ id: "evt-" + Date.now(), type: "quick", slug: "peer-floor", body: "Quick Action: " + body });
         saveOutbox();
-        toast("Offline — saved to Outbox");
+        toast("Offline — saved to Outbox", "warning");
         closeSheet();
         render();
       }
@@ -767,7 +861,7 @@
       const notes = document.getElementById("qc-notes").value.trim();
       const checksPassed = document.getElementById("qc-pass").checked;
       if (builder.toLowerCase() === reviewer.toLowerCase()) {
-        toast("Reviewer must differ from builder");
+        toast("Reviewer must differ from builder", "warning");
         return;
       }
       try {
@@ -783,12 +877,12 @@
           })
         });
         if (out && out.receipt) state.qcReceipts.unshift(out.receipt);
-        toast("QC receipt committed · " + (out.commitSha || commitSha));
+        toast("QC receipt committed · " + (out.commitSha || commitSha), "info");
         closeSheet();
         normalizeHubData();
         render();
       } catch (err) {
-        toast((err && err.message) || "QC failed");
+        toast((err && err.message) || "QC failed", "error");
       }
     });
   }
@@ -864,30 +958,106 @@
         '<div class="panel">' + (rows || '<div class="empty">No events.</div>') + "</div>"
       );
     } catch (e) {
-      toast("Time machine failed");
+      toast("Time machine failed", "error");
     }
   }
 
-  async function openCommandPalette() {
+  let paletteIndex = 0;
+
+  function paletteRows(query) {
+    return window.StackPolish.buildPalette({
+      query: query,
+      now: Date.now(),
+      view: state.view,
+      activeAgentId: state.activeAgentId,
+      outboxCount: state.outbox.length,
+      agents: state.agents.map(function (a) {
+        return { id: a.id, name: a.name, status: a.status };
+      }),
+      items: state.items.map(function (i) {
+        const meta = itemStateMeta(i.state);
+        return {
+          id: i.id, title: i.title, status: meta.key, agentId: i.ownerId,
+          owner: i.owner, date: i.deadline || "", ref: i.ref || ""
+        };
+      }),
+      commits: state.commits || []
+    });
+  }
+
+  function renderPaletteList(rows) {
+    const host = document.getElementById("cmdk-list");
+    if (!host) return;
+    if (!rows.length) {
+      host.innerHTML = '<div class="empty">Nothing matches. Add text to send it.</div>';
+      return;
+    }
+    if (paletteIndex >= rows.length) paletteIndex = rows.length - 1;
+    if (paletteIndex < 0) paletteIndex = 0;
+    host.innerHTML = rows.map(function (row, i) {
+      const layer = row.layer === 1 ? "Jump" : row.layer === 2 ? "Action" : "Send";
+      return (
+        '<button type="button" class="row cmdk-row" role="option" data-cmdk-index="' + i + '" aria-selected="' + (i === paletteIndex ? "true" : "false") + '">' +
+          '<div class="row-main"><div class="row-title">' + esc(row.title) + '</div><div class="row-sub">' + esc(row.sub || "") + "</div></div>" +
+          '<span class="git-chip">' + layer + "</span>" +
+        "</button>"
+      );
+    }).join("");
+    host.querySelectorAll("[data-cmdk-index]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        runPaletteRow(rows[Number(btn.dataset.cmdkIndex)]);
+      });
+    });
+    const selected = host.querySelector('[aria-selected="true"]');
+    if (selected && selected.scrollIntoView) selected.scrollIntoView({ block: "nearest" });
+  }
+
+  async function runPaletteRow(row) {
+    if (!row) return;
+    closeSheet();
+    if (row.action === "view:today") { state.view = "today"; render(); }
+    else if (row.action === "view:agents") { state.view = "agents"; render(); }
+    else if (row.action === "view:work") { state.view = "work"; render(); }
+    else if (row.action === "view:stats") { state.view = "stats"; render(); }
+    else if (row.action.indexOf("agent:") === 0) await jumpToAgent(row.action.slice(6));
+    else if (row.action.indexOf("inspect:") === 0) openItemSheet(row.action.slice(8));
+    else if (row.action === "new") openQuickInbox();
+    else if (row.action === "sync") await syncVault(false);
+    else if (row.action === "flush") await flushOutbox();
+    else if (row.action === "notif") openNotificationCentre();
+    else if (row.action === "send") await sendToSlug(row.slug, row.body);
+  }
+
+  function openCommandPalette() {
+    paletteIndex = 0;
+    const rows = paletteRows("");
     openSheet(
-      '<div class="sheet-head"><div><h2 class="sheet-title">Quick Jump</h2><p class="sheet-sub">Search workstreams, memory, commits</p></div><button type="button" class="orb-btn" style="width:32px;height:32px;" data-close-sheet>✕</button></div>' +
-      '<form id="search-form" class="composer" style="margin-bottom:12px;"><input id="search-q" class="input" placeholder="Search…" autocomplete="off" /><button class="btn btn-pri btn-sm" type="submit">Go</button></form>' +
-      '<div id="search-hits" class="panel"><div class="empty">Type to search.</div></div>'
+      '<div class="sheet-head"><div><h2 class="sheet-title">Command palette</h2><p class="sheet-sub">Jump · actions · send. Filters: agent: status: date:7d</p></div><button type="button" class="orb-btn" style="width:32px;height:32px;" data-close-sheet aria-label="Close">✕</button></div>' +
+      '<input id="cmdk-input" class="input cmdk-input" placeholder="Jump, act, or send to the floor…" autocomplete="off" enterkeyhint="go" role="combobox" aria-expanded="true" aria-controls="cmdk-list" />' +
+      '<div id="cmdk-list" class="panel cmdk-list" role="listbox"></div>'
     );
-    document.getElementById("search-form").addEventListener("submit", async function (e) {
-      e.preventDefault();
-      const q = document.getElementById("search-q").value.trim();
-      if (!q) return;
-      try {
-        const data = await bff("/api/search?q=" + encodeURIComponent(q));
-        const hits = (data.hits || []).map(function (h) {
-          return '<div class="row"><div class="row-main"><div class="row-title">' + esc(h.title) + '</div><div class="row-sub">' + esc(h.kind) + " · " + esc(h.sub || "") + '</div></div><span class="git-chip">' + esc(h.proof || "") + "</span></div>";
-        }).join("");
-        document.getElementById("search-hits").innerHTML = hits || '<div class="empty">No hits.</div>';
-      } catch (err) {
-        toast("Search failed");
+    const input = document.getElementById("cmdk-input");
+    renderPaletteList(rows);
+    input.addEventListener("input", function () {
+      paletteIndex = 0;
+      renderPaletteList(paletteRows(input.value));
+    });
+    input.addEventListener("keydown", function (e) {
+      const list = paletteRows(input.value);
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        paletteIndex = Math.min(list.length - 1, paletteIndex + 1);
+        renderPaletteList(list);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        paletteIndex = Math.max(0, paletteIndex - 1);
+        renderPaletteList(list);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        runPaletteRow(list[paletteIndex]);
       }
     });
+    setTimeout(function () { input.focus(); }, 30);
   }
 
   async function jumpToAgent(agentId) {
@@ -898,17 +1068,31 @@
     render();
   }
 
-  async function pingFloor(text) {
+  async function sendToSlug(slug, text) {
+    const body = String(text || "").trim();
+    const channel = slug || "peer-floor";
+    if (!body) return;
     try {
-      await bff("/api/ping", { method: "POST", body: JSON.stringify({ slug: "peer-floor", author: "Seth", body: text }) });
-      toast("Posted to #peer-floor");
-      await syncVault(true);
+      await bff("/api/ping", {
+        method: "POST",
+        body: JSON.stringify({ slug: channel, author: "Seth", body: body })
+      });
+      toast("Sent to " + channel, "info");
+      state.messagesBySlug[channel] = (state.messagesBySlug[channel] || []).concat([{
+        author: "Seth", body: body, created_at: new Date().toISOString()
+      }]);
+      if (state.view === "agents") render();
     } catch (e) {
-      state.outbox.unshift({ id: "evt-" + Date.now(), type: "message", slug: "peer-floor", body: text });
+      state.outbox.unshift({ id: "evt-" + Date.now(), type: "message", slug: channel, body: body });
       saveOutbox();
-      toast("Offline — saved to Outbox");
+      state.link = (typeof navigator !== "undefined" && navigator.onLine === false) ? "offline" : state.link;
+      toast("Offline — saved to Outbox", "warning");
       render();
     }
+  }
+
+  async function pingFloor(text) {
+    await sendToSlug("peer-floor", text);
   }
 
   function bindEvents() {
@@ -948,14 +1132,14 @@
             method: "POST",
             body: JSON.stringify({ slug: slug, body: body, author: "Seth" })
           });
-          toast("Ping committed via BFF");
+          toast("Ping committed via BFF", "info");
           state.messagesBySlug[slug] = (state.messagesBySlug[slug] || []).concat([{ author: "Seth", body: body, created_at: new Date().toISOString() }]);
           render();
         } catch (err) {
           state.outbox.unshift({ id: "evt-" + Date.now(), type: "message", agentId: state.activeAgentId, slug: slug, body: body });
           saveOutbox();
           state.messagesBySlug[slug] = (state.messagesBySlug[slug] || []).concat([{ author: "Seth", body: body, created_at: new Date().toISOString(), _queued: true }]);
-          toast("Offline — ping saved to Outbox");
+          toast("Offline — ping saved to Outbox", "warning");
           render();
         }
       });
@@ -1002,7 +1186,9 @@
   document.getElementById("sync-pill").addEventListener("click", function () { state.outbox.length ? flushOutbox() : syncVault(false); });
   document.getElementById("sb-outbox-btn").addEventListener("click", flushOutbox);
   document.getElementById("sb-refresh-btn").addEventListener("click", function () { syncVault(false); });
-  document.getElementById("surface-btn").addEventListener("click", function () { applySurface(document.documentElement.dataset.surface === "light" ? "dark" : "light"); });
+  document.getElementById("surface-btn").addEventListener("click", function () {
+    applySurface(window.StackPolish.nextTheme(document.documentElement.dataset.theme || "dark"));
+  });
   document.getElementById("cmd-btn").addEventListener("click", openCommandPalette);
   document.getElementById("fab-new").addEventListener("click", openQuickInbox);
   document.getElementById("sb-new-btn").addEventListener("click", openQuickInbox);
@@ -1011,9 +1197,98 @@
     if (e.key === "Escape") closeSheet();
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
       e.preventDefault();
-      openCommandPalette();
+      const ov = document.getElementById("overlay");
+      const paletteOpen = ov && ov.classList.contains("open") && document.getElementById("cmdk-input");
+      if (paletteOpen) closeSheet();
+      else openCommandPalette();
     }
   });
+
+  function bindPullToRefresh() {
+    const stage = document.querySelector(".stage");
+    const ind = document.getElementById("pull-ind");
+    if (!stage || !ind) return;
+    let startY = 0;
+    let startX = 0;
+    let pulling = false;
+    let dy = 0;
+
+    function hide() {
+      dy = 0;
+      ind.classList.remove("on");
+      ind.textContent = "";
+    }
+
+    stage.addEventListener("touchstart", function (e) {
+      if (window.innerWidth >= 860) return;
+      if (window.scrollY > 2) return;
+      if (!e.touches || e.touches.length !== 1) return;
+      const ov = document.getElementById("overlay");
+      if (ov && ov.classList.contains("open")) return;
+      startY = e.touches[0].clientY;
+      startX = e.touches[0].clientX;
+      pulling = true;
+      dy = 0;
+    }, { passive: true });
+
+    stage.addEventListener("touchmove", function (e) {
+      if (!pulling || !e.touches || !e.touches.length) return;
+      const rawY = e.touches[0].clientY - startY;
+      const rawX = e.touches[0].clientX - startX;
+      if (Math.abs(rawX) > Math.abs(rawY)) {
+        pulling = false;
+        hide();
+        return;
+      }
+      if (rawY <= 0 || window.scrollY > 2) {
+        dy = 0;
+        hide();
+        return;
+      }
+      dy = Math.min(rawY, 120);
+      if (e.cancelable) e.preventDefault();
+      ind.classList.add("on");
+      ind.textContent = dy > 72 ? "Release to refresh" : "Pull to refresh";
+    }, { passive: false });
+
+    stage.addEventListener("touchend", function () {
+      if (!pulling) return;
+      const should = dy > 72;
+      pulling = false;
+      hide();
+      if (should) syncVault(false);
+    });
+  }
+
+  function startPoller() {
+    if (pollStarted) return;
+    pollStarted = true;
+    setInterval(function () {
+      const shell = document.getElementById("app-shell");
+      if (!shell || shell.classList.contains("hidden")) return;
+      if (state.syncing || document.hidden) return;
+      syncVault(true);
+    }, 60000);
+  }
+
+  window.addEventListener("offline", function () {
+    state.online = false;
+    state.link = "offline";
+    renderChrome();
+  });
+  window.addEventListener("online", function () {
+    state.link = "polling";
+    renderChrome();
+    syncVault(true);
+  });
+  if (window.matchMedia) {
+    window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", function () {
+      if (document.documentElement.dataset.theme === "system") applySurface("system");
+    });
+  }
+
+  bindPullToRefresh();
+  applySurface(document.documentElement.dataset.theme || "dark");
 
   document.getElementById("pin-form").addEventListener("submit", async function (e) {
     e.preventDefault();
@@ -1026,10 +1301,12 @@
       const health = await bff("/api/health");
       state.health = health;
       showShell();
+      state.link = "polling";
       normalizeHubData();
       render();
+      startPoller();
       if (secretsMissing(health)) {
-        toast("Unlocked, but Worker has no GITHUB_PAT yet — vault stays offline until Secrets are set");
+        toast("Unlocked, but Worker has no GITHUB_PAT yet — vault stays offline until Secrets are set", "warning");
       }
       await syncVault(false);
     } catch (err) {
@@ -1045,9 +1322,11 @@
 
   loadCreds();
   if (creds.pin && creds.bff) {
+    state.link = (typeof navigator !== "undefined" && navigator.onLine === false) ? "offline" : "polling";
     showShell();
     normalizeHubData();
     render();
+    startPoller();
     syncVault(true);
   } else {
     showGate();

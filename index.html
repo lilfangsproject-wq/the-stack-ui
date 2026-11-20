@@ -18,7 +18,13 @@
     (function () {
       try {
         var s = localStorage.getItem("stack-surface-v1");
-        document.documentElement.dataset.surface = s === "light" ? "light" : "dark";
+        var mode = s === "light" || s === "dark" || s === "system" ? s : "dark";
+        var light = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches;
+        var surface = mode === "system" ? (light ? "light" : "dark") : mode;
+        document.documentElement.dataset.theme = mode;
+        document.documentElement.dataset.surface = surface;
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", surface === "light" ? "#cfd6e0" : "#0d1117");
       } catch (e) {}
     })();
   </script>
@@ -28,7 +34,7 @@
   <div id="boot-gate" class="boot-gate hidden">
     <div class="boot-card">
       <div class="hero-top">
-        <span class="kicker">The Stack · v50.0 Rebirth</span>
+        <span class="kicker">The Stack · v50.1 Rebirth</span>
         <span class="badge neutral">Zero Spend · Zero Voice</span>
       </div>
       <h1 class="hero-title">Unlock The Stack</h1>
@@ -79,14 +85,15 @@
           <span class="sb-item-left"><span id="sb-outbox-dot" class="dot muted"></span><span id="sb-outbox-lbl">Outbox · 0</span></span>
           <span class="mono">Git</span>
         </button>
-        <button type="button" id="sb-refresh-btn" class="sb-item">
-          <span class="sb-item-left"><span class="dot green"></span><span>Sync Vault</span></span>
+          <button type="button" id="sb-refresh-btn" class="sb-item">
+          <span class="sb-item-left"><span class="dot muted"></span><span>Sync Vault</span></span>
           <span class="mono">↻</span>
         </button>
       </div>
     </aside>
 
     <div class="stage">
+      <div id="pull-ind" class="pull-ind" aria-live="polite"></div>
       <header class="topbar">
         <div class="topbar-left">
           <h1 id="page-heading" class="page-heading">Today</h1>
@@ -100,10 +107,10 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
             <span id="notif-count" class="orb-count hidden">0</span>
           </button>
-          <button type="button" id="cmd-btn" class="orb-btn" aria-label="Quick Jump" title="Quick Jump (⌘K)">
+          <button type="button" id="cmd-btn" class="orb-btn" aria-label="Command palette" title="Command palette (⌘K)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
           </button>
-          <button type="button" id="surface-btn" class="orb-btn" aria-label="Toggle Dark or Light Glass" title="Dark / Light Glass">
+          <button type="button" id="surface-btn" class="orb-btn" aria-label="Theme Dark" title="Theme: Dark (neutral glass)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor" stroke="none"/></svg>
           </button>
         </div>
@@ -141,6 +148,7 @@
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+  <script src="polish.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
