@@ -134,13 +134,28 @@
     </aside>
 
     <main class="main home-pane" id="home-pane">
-      <header class="main-head">
-        <button type="button" id="menu-toggle-home" class="icon-btn" aria-label="Open menu">☰</button>
-        <div class="main-head-text">
-          <h1>Command centre</h1>
-          <p class="purpose" id="home-headline">Loading hub…</p>
+      <header class="main-head home-topbar">
+        <div class="topbar-left">
+          <button type="button" id="menu-toggle-home" class="icon-btn top-ico-btn" aria-label="Open menu">☰</button>
+          <button type="button" id="home-tools-toggle" class="icon-btn top-ico-btn" aria-label="Search and quick dispatch" title="Search &amp; Quick Dispatch">⌕</button>
         </div>
-        <button type="button" id="home-refresh" class="ghost">Refresh</button>
+        <nav class="top-pill-nav" aria-label="Primary sections">
+          <button type="button" class="top-pill active" data-view="home">Overview</button>
+          <button type="button" class="top-pill" data-open-tab="agents">Jobs</button>
+          <button type="button" class="top-pill" data-open-tab="chats">Chats</button>
+          <button type="button" class="top-pill" data-open-tab="notes">Brief</button>
+          <button type="button" class="top-pill" id="top-debrief-btn">Debrief</button>
+        </nav>
+        <div class="topbar-right">
+          <span class="top-user-pill" title="Hub status">
+            <span class="top-user-av" aria-hidden="true">S</span>
+            <span class="top-user-meta">
+              <span class="top-user-name">Seth</span>
+              <span id="home-headline" class="top-user-status">Loading…</span>
+            </span>
+          </span>
+          <button type="button" id="home-refresh" class="icon-btn top-ico-btn" aria-label="Refresh hub" title="Refresh">↻</button>
+        </div>
       </header>
       <section class="home-body" id="home-body"></section>
     </main>

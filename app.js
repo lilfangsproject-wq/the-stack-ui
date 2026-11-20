@@ -3942,6 +3942,12 @@ function renderUsageTrackerCard(usageData) {
     <div class="usage-grid">${rows}</div>
   </article>`;
 }
+function bentoAvatarChip(name, isLive = false, idx = 0) {
+  const clean = String(name || "?").trim();
+  const ini = clean.slice(0, 2).toUpperCase();
+  const tone = idx % 4;
+  return `<span class="bento-av-circle c${tone}${isLive ? " live" : ""}" title="${esc(clean)}">${esc(ini)}</span>`;
+}
 function buildBentoHub({ cc, todos }) {
   const gotIt = loadGotItSet();
   const doneSet = loadWsDoneSet();
@@ -3964,21 +3970,35 @@ function buildBentoHub({ cc, todos }) {
   const gateWs = openWs.filter((w) => w.tone === "warn" || Boolean(w.deadline));
   const sethDoneCount = workstreams.filter((w) => wsEffectiveState(w, doneSet).sethDone).length;
 
-  const doneCount = (cc.doneList || []).length + (cc.commits || []).slice(0, 20).length;
-  const inProgCount = todos.length + (cc.agents || []).filter((a) => a.status === "active").length;
+  // Real checklist completion % across active + done workstreams
+  let totalSteps = 0;
+  let doneSteps = 0;
+  for (const w of workstreams) {
+    const st = wsEffectiveState(w, doneSet);
+    if (st.archived || st.held) continue;
+    const checks = wsChecklistItems(w);
+    totalSteps += checks.length;
+    doneSteps += st.sethDone ? checks.length : checks.filter((c) => c.done).length;
+  }
+  const overallPct = totalSteps
+    ? Math.round((doneSteps / totalSteps) * 100)
+    : Math.round((sethDoneCount / Math.max(1, openWs.length + sethDoneCount)) * 100);
+
   const needsCount = (cc.needsList || []).length;
-  const denom = Math.max(1, doneCount + inProgCount + needsCount);
-  const wDone = Math.round((doneCount / denom) * 100);
-  const wActive = Math.round((inProgCount / denom) * 100);
+  const attentionCount = needsCount + gateWs.length;
+  const denom = Math.max(1, sethDoneCount + openWs.length + attentionCount);
+  const wDone = Math.round((sethDoneCount / denom) * 100);
+  const wActive = Math.round((openWs.length / denom) * 100);
   const wNeeds = Math.max(0, 100 - wDone - wActive);
 
+  // Right card: 7-Day Activity + By Agent
   const act = build7DayActivity(cc);
   const barsHtml = act.counts
     .map((v, i) => {
-      const hPct = v ? Math.max(22, Math.round((v / act.max) * 100)) : 14;
+      const hPct = v ? Math.max(24, Math.round((v / act.max) * 100)) : 16;
       const isPeak = i === act.peakIdx && v > 0;
       return `<div class="bento-bar-col" title="${esc(act.days[i])}: ${v} updates">
-        ${isPeak ? `<em class="bento-peak-badge">${v}</em>` : ""}
+        ${isPeak ? `<em class="bento-peak-badge">${v} updates</em>` : ""}
         <div class="bento-bar-pill${isPeak ? " peak" : ""}" style="height:${hPct}%"></div>
         <span>${esc(act.days[i].slice(0, 3))}</span>
       </div>`;
@@ -3986,139 +4006,207 @@ function buildBentoHub({ cc, todos }) {
     .join("");
   const platformHtml = act.platforms.length
     ? act.platforms
-        .map(
-          ([name, cnt], idx) => `<button type="button" class="bento-platform-row" data-open-agent="${esc(name)}">
-            <span><i class="bento-dot c${idx % 4}" aria-hidden="true"></i><strong>${esc(name)}</strong></span><span>${cnt} updates</span>
-          </button>`
-        )
+        .map(([name, cnt], idx) => {
+          const rMatch = liveAgentRoster().find((a) => a.name === name);
+          const sub = rMatch ? clip(rMatch.role.split("·")[0], 22) : "Agent";
+          return `<button type="button" class="bento-platform-row" data-open-agent="${esc(name)}">
+            <span class="bento-plat-left">
+              <i class="bento-dot c${idx % 4}" aria-hidden="true"></i>
+              <span class="bento-plat-text"><strong>${esc(name)}</strong><small>${esc(sub)}</small></span>
+            </span>
+            <span class="bento-plat-cnt">${cnt}</span>
+          </button>`;
+        })
         .join("")
     : `<p class="home-empty">No recent activity yet.</p>`;
 
-  const rosterPills = liveAgentRoster()
-    .filter((a) => a.name !== "Cursor-Cloud")
-    .map((a) => {
-      const match = (cc.agents || []).find((x) => x.name === a.name);
-      const on = match && (match.status === "active" || match.status === "recent");
-      const label = a.name === "Gemini" ? "Gemini ★" : a.name;
-      return `<button type="button" class="bento-av${on ? " on" : ""}" data-open-agent="${esc(a.name)}" title="${esc(a.role)}">${esc(label)}</button>`;
+  // Middle card: Current Focus (single highest-priority open workstream)
+  const urgentWs = gateWs[0] || openWs[0];
+  const leadItem = kept[0];
+  const focusHeadline = urgentWs
+    ? urgentWs.name
+    : needsCount
+    ? `${needsCount} item${needsCount > 1 ? "s" : ""} waiting on Seth`
+    : leadItem
+    ? leadItem.title
+    : "All clear on main";
+  const focusCopy = urgentWs
+    ? urgentWs.next_action || urgentWs.blocker || "Open workstream to review next steps."
+    : leadItem
+    ? `${leadItem.who}${leadItem.text ? ` — ${clip(leadItem.text, 90)}` : ""}`
+    : "Everything on main is caught up. Tap Debrief anytime for a voice summary.";
+
+  const focusOwners = urgentWs && Array.isArray(urgentWs.owners) && urgentWs.owners.length
+    ? urgentWs.owners
+    : liveAgentRoster().filter((a) => a.name !== "Cursor-Cloud").slice(0, 4).map((a) => a.name);
+  const focusAvatarsHtml = focusOwners
+    .slice(0, 5)
+    .map((name, idx) => {
+      const match = (cc.agents || []).find((x) => x.name === name);
+      const on = Boolean(match && (match.status === "active" || match.status === "recent"));
+      return bentoAvatarChip(name, on, idx);
     })
     .join("");
 
-  // Big inline Workstream cards (zero fake % — jobs disappear from active views once Seth taps Mark Done)
-  const wsFeatured = openWs.slice(0, 4);
-  const wsCardsHtml = wsFeatured.length
-    ? `<div class="ws-cards">${wsFeatured.map((w) => renderWorkstreamCardHtml(w, doneSet)).join("")}</div>`
-    : `<p class="home-empty">All active workstreams marked Done! Open <strong>Jobs</strong> to inspect ✓ Done or add a new job.</p>`;
+  let focusPct = overallPct;
+  if (urgentWs) {
+    const fc = wsChecklistItems(urgentWs);
+    focusPct = fc.length ? Math.round((fc.filter((c) => c.done).length / fc.length) * 100) : 25;
+  }
 
-  const extLinksHtml = [
-    `<button type="button" class="ws-ext-pill" data-open-tab="agents">📋 Collaborative Job Board (${openWs.length})</button>`,
-    `<button type="button" class="ws-ext-pill" data-open-channel="peer-floor">💬 Peer Floor Huddle</button>`,
-    `<button type="button" class="ws-ext-pill" data-open-tab="notes">🧭 Vision &amp; Brief</button>`,
-  ].join("");
-
-  const activeTab = state.bentoTab || "since";
-  let trayTitle = "Since last you looked";
+  // Bottom-left 3-up Active Queue / Today strip
+  const activeTab = state.bentoTab || "workstreams";
+  const pageSize = 3;
+  const pageIdx = Math.max(0, Number(state.bentoQueuePage || 0));
+  let trayTitle = "Active Queue";
+  let totalItems = 0;
   let trayHtml = "";
-  if (activeTab === "workstreams") {
-    trayTitle = "Active Workstreams";
-    trayHtml = openWs.length
-      ? openWs.map((w) => renderWorkstreamCardHtml(w, doneSet)).join("")
-      : `<p class="home-empty">No open workstreams — everything marked Done lives in Jobs → Done.</p>`;
-  } else if (activeTab === "opps") {
-    trayTitle = "Ranked Opportunities";
-    trayHtml = opps.length
-      ? opps
+
+  if (activeTab === "since") {
+    trayTitle = "Since Last Look";
+    totalItems = kept.length;
+    const start = (pageIdx * pageSize) % Math.max(1, totalItems);
+    const slice = kept.slice(start, start + pageSize);
+    trayHtml = slice.length
+      ? slice
           .map(
-            (o) => `<article class="since-card">
-              <div>
-                <div class="since-card-top">
-                  <span class="bento-tag live">#${esc(String(o.rank))} · ${esc(String(o.score))}</span>
-                </div>
-                <div class="since-card-title" style="margin-top:0.35rem">${esc(o.title)}</div>
-                <div class="since-card-text">${esc(o.hook || "")}</div>
+            (it, idx) => `<article class="bento-q-card" data-since-key="${esc(it.key)}">
+              <div class="bento-q-top">
+                <span class="bento-q-time">${esc(it.at ? fmtTime(it.at) : "Recent")}</span>
+                <span class="bento-q-step">${esc(it.kind)}</span>
               </div>
-              <div class="since-card-foot">
-                <span class="since-card-who">${esc(clip(o.doc_path || "", 34))}</span>
-                <button type="button" class="got-it-btn" data-open-channel="peer-floor">💬 Discuss</button>
+              <div class="bento-q-title">${esc(it.title)}</div>
+              <span class="bento-tag ${esc(it.tone || "live")}">${esc(it.kind)}</span>
+              <div class="bento-q-foot">
+                <span class="bento-q-owner">${bentoAvatarChip(it.who, false, idx)}<span>${esc(it.who)}</span></span>
+                <button type="button" class="got-it-btn" data-got-it="${esc(it.key)}">✓ Got it</button>
+              </div>
+            </article>`
+          )
+          .join("")
+      : `<p class="home-empty">All caught up — switch to Active or Opps.</p>`;
+  } else if (activeTab === "opps") {
+    trayTitle = "Opportunities";
+    totalItems = opps.length;
+    const start = (pageIdx * pageSize) % Math.max(1, totalItems);
+    const slice = opps.slice(start, start + pageSize);
+    trayHtml = slice.length
+      ? slice
+          .map(
+            (o, idx) => `<article class="bento-q-card">
+              <div class="bento-q-top">
+                <span class="bento-q-time">Rank #${esc(String(o.rank))}</span>
+                <span class="bento-q-step">Score ${esc(String(o.score))}</span>
+              </div>
+              <div class="bento-q-title">${esc(o.title)}</div>
+              <span class="bento-tag live">Opportunity</span>
+              <div class="bento-q-foot">
+                <span class="bento-q-owner">${bentoAvatarChip("Nori", true, idx)}<span>${esc(clip(o.doc_path || "Brief", 18))}</span></span>
+                <button type="button" class="got-it-btn" data-open-channel="peer-floor">Discuss</button>
               </div>
             </article>`
           )
           .join("")
       : `<p class="home-empty">No opportunities ranked yet.</p>`;
   } else {
-    trayHtml = kept.length
-      ? kept
-          .slice(0, 6)
-          .map(
-            (it) => `<article class="since-card" data-since-key="${esc(it.key)}">
-              <div>
-                <div class="since-card-top">
-                  <span class="bento-tag ${esc(it.tone)}">${esc(it.kind)}</span>
-                  ${it.at ? `<span class="since-card-who">${esc(fmtTime(it.at))}</span>` : ""}
-                </div>
-                <div class="since-card-title" style="margin-top:0.35rem">${esc(it.title)}</div>
-                ${it.text ? `<div class="since-card-text">${esc(it.text)}</div>` : ""}
+    trayTitle = "Active Queue";
+    totalItems = openWs.length;
+    const start = (pageIdx * pageSize) % Math.max(1, totalItems);
+    const slice = openWs.slice(start, start + pageSize);
+    trayHtml = slice.length
+      ? slice
+          .map((w, idx) => {
+            const st = wsEffectiveState(w, doneSet);
+            const checks = wsChecklistItems(w);
+            const doneC = checks.filter((c) => c.done).length;
+            const owner = (w.owners && w.owners[0]) || "Team";
+            const toneCls = st.tone === "warn" ? "warn" : st.tone === "hold" ? "hold" : "live";
+            return `<article class="bento-q-card bento-q-tap" data-open-ws="${esc(w.id)}" role="button" tabindex="0">
+              <div class="bento-q-top">
+                <span class="bento-q-time">${esc(w.deadline ? `Due ${w.deadline}` : (w.category || "Workstream"))}</span>
+                <span class="bento-q-step">${checks.length ? `${doneC}/${checks.length} steps` : "Open"}</span>
               </div>
-              <div class="since-card-foot">
-                <span class="since-card-who">${esc(it.who)}</span>
-                <button type="button" class="got-it-btn" data-got-it="${esc(it.key)}">✓ Got it</button>
+              <div class="bento-q-title">${esc(w.name)}</div>
+              <span class="bento-tag ${toneCls}">${esc(st.status)}</span>
+              <div class="bento-q-foot">
+                <span class="bento-q-owner">${bentoAvatarChip(owner, false, idx)}<span>${esc(owner)}</span></span>
+                <span class="bento-q-arrow" aria-hidden="true">→</span>
               </div>
-            </article>`
-          )
+            </article>`;
+          })
           .join("")
-      : `<p class="home-empty">All caught up — switch to Workstreams or Opportunities above.</p>`;
+      : `<p class="home-empty">All active workstreams marked Done! Open <strong>Jobs</strong> to add one.</p>`;
   }
 
-  const urgentWs = openWs.find((w) => w.deadline) || openWs[0];
-  const leadItem = kept[0];
-  const focusHeadline = needsCount
-    ? `${needsCount} item${needsCount > 1 ? "s" : ""} waiting on Seth`
-    : urgentWs
-    ? `${urgentWs.name}${urgentWs.deadline ? ` · Due ${urgentWs.deadline}` : ""}`
-    : leadItem
-    ? leadItem.title
-    : "All clear on main";
-  const focusCopy = urgentWs && !needsCount
-    ? `${urgentWs.next_action} (${kept.length} kept for debrief)`
-    : leadItem
-    ? `${leadItem.who}${leadItem.text ? ` — ${clip(leadItem.text, 85)}` : ""}`
-    : "Tap Got it on updates you know, or hit Debrief me anytime you have spare time.";
+  const focusTag1 = urgentWs ? (urgentWs.category || "Workstream") : "Command Hub";
+  const focusTag2 = urgentWs
+    ? urgentWs.deadline
+      ? `Due ${urgentWs.deadline}`
+      : urgentWs.tone === "warn"
+      ? "Needs Gate"
+      : "In Progress"
+    : `${kept.length} kept`;
 
   return `<section class="bento-grid" aria-label="Workforce Command Overview">
     <article class="bento-card bento-prog">
       <div class="bento-head">
-        <h2>Workstreams &amp; Focus</h2>
-        <span class="bento-tag${gateWs.length ? " warn" : " live"}">${openWs.length} open · ${sethDoneCount} Seth done</span>
+        <h2>Progress statistics</h2>
+        <span class="bento-tag live">${doneSteps}/${Math.max(1, totalSteps)} steps</span>
       </div>
-      <div class="bento-big"><strong>${openWs.length}</strong><span>open workstreams · ${gateWs.length} gated · ${doneCount} shipped commits</span></div>
+      <div class="bento-big"><strong>${overallPct}%</strong><span>Checklist<br>completion</span></div>
       <div class="bento-segbar" aria-hidden="true">
         <span class="seg-done" style="width:${wDone}%"></span>
         <span class="seg-active" style="width:${wActive}%"></span>
         <span class="seg-needs" style="width:${wNeeds}%"></span>
       </div>
       <div class="bento-mini-stats">
-        <button type="button" class="bento-mini-stat home-tap" data-open-tab="notes"><i class="bento-dot c1"></i><strong>${openWs.length}</strong><span>Open Flows</span></button>
-        <button type="button" class="bento-mini-stat home-tap" data-open-tab="notes"><i class="bento-dot c0"></i><strong>${sethDoneCount}</strong><span>Seth Done</span></button>
-        <button type="button" class="bento-mini-stat home-tap" data-scroll-to="cc-needs"><i class="bento-dot c2"></i><strong>${needsCount}</strong><span>Needs You</span></button>
+        <button type="button" class="bento-mini-stat home-tap" data-bento-tab="workstreams">
+          <span class="bento-stat-ico c0" aria-hidden="true">⚡</span>
+          <strong>${openWs.length}</strong>
+          <span>In Progress</span>
+        </button>
+        <button type="button" class="bento-mini-stat home-tap" data-open-tab="agents">
+          <span class="bento-stat-ico c1" aria-hidden="true">✓</span>
+          <strong>${sethDoneCount}</strong>
+          <span>Completed</span>
+        </button>
+        <button type="button" class="bento-mini-stat home-tap" data-scroll-to="cc-needs">
+          <span class="bento-stat-ico c2" aria-hidden="true">!</span>
+          <strong>${attentionCount}</strong>
+          <span>Needs You</span>
+        </button>
       </div>
-      ${wsCardsHtml}
     </article>
 
     <article class="bento-card bento-focus">
       <div class="bento-head">
-        <span class="bento-tag live">Vision &amp; Opportunity</span>
-        <span class="bento-tag${needsCount || (urgentWs && urgentWs.deadline) ? " warn" : ""}">${kept.length} kept · ${dismissedCount} got it</span>
+        <div class="bento-pill-pair">
+          <span class="bento-tag lime">${esc(focusTag1)}</span>
+          <span class="bento-tag${urgentWs && urgentWs.tone === "warn" ? " warn" : " live"}">${esc(focusTag2)}</span>
+        </div>
+        ${dismissedCount ? `<button type="button" id="bento-reset-got-it" class="ghost">Reset (${dismissedCount})</button>` : ""}
       </div>
       <h3 class="bento-focus-title">${esc(focusHeadline)}</h3>
       <p class="bento-focus-sub">${esc(focusCopy)}</p>
-      <div class="bento-avatars">${rosterPills}</div>
-      <div class="bento-ws-links">${extLinksHtml}</div>
+      <div class="bento-focus-boxes">
+        <div class="bento-subbox">
+          <span class="bento-subbox-lbl">Owners</span>
+          <div class="bento-av-stack">${focusAvatarsHtml}</div>
+        </div>
+        <div class="bento-subbox">
+          <span class="bento-subbox-lbl">Progress</span>
+          <div class="bento-prog-pill" aria-label="${focusPct}% complete">
+            <div class="bento-prog-fill" style="width:${Math.max(12, focusPct)}%"><span>${focusPct}%</span></div>
+          </div>
+        </div>
+      </div>
       <div class="bento-cta-row">
-        <button type="button" id="bento-debrief-btn" class="act act-primary">🎙 Brief me out loud (${kept.length})</button>
-        <button type="button" id="bento-jarvis-voice" class="act" data-open-jarvis="debrief" title="Jarvis talks through the whole board">🎙 Jarvis</button>
-        <a href="https://gemini.google.com/app" target="_blank" rel="noopener" id="bento-gemini-voice" class="ghost" data-voice-handoff="gemini" data-voice-scope="debrief" title="Escape hatch: copy brief &amp; open Gemini Voice Call">Gemini</a>
-        <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" id="bento-notebook-voice" class="ghost" data-voice-handoff="notebook" data-voice-scope="debrief" title="Escape hatch: copy brief &amp; open NotebookLM">Notebook</a>
-        ${dismissedCount ? `<button type="button" id="bento-reset-got-it" class="ghost">Reset (${dismissedCount})</button>` : ""}
+        ${
+          urgentWs
+            ? `<button type="button" class="act act-primary" data-open-ws="${esc(urgentWs.id)}">Continue Workstream →</button>`
+            : `<button type="button" id="bento-debrief-btn" class="act act-primary">✦ Debrief me (${kept.length})</button>`
+        }
+        <button type="button" id="bento-debrief-btn" class="act" title="Voice debrief">🎙 Brief (${kept.length})</button>
       </div>
     </article>
 
@@ -4127,23 +4215,28 @@ function buildBentoHub({ cc, todos }) {
         <h2>Activity</h2>
         <span class="bento-tag">Last 7 days</span>
       </div>
-      <div class="bento-big"><strong>${act.total}</strong><span>commits &amp; handovers</span></div>
+      <div class="bento-big"><strong>${act.total}</strong><span>Updates<br>this week</span></div>
       <div class="bento-bars" aria-label="7-day activity chart">${barsHtml}</div>
-      <div class="bento-platform-list">${platformHtml}</div>
+      <div class="bento-platform-box">
+        <div class="bento-platform-head">By Agent</div>
+        <div class="bento-platform-list">${platformHtml}</div>
+      </div>
     </article>
 
     <article class="bento-card bento-since">
       <div class="bento-head">
         <h2>${esc(trayTitle)}</h2>
-        <div class="bento-seg-tabs" role="tablist" aria-label="Dashboard tray view">
-          <button type="button" class="bento-seg-tab${activeTab === "since" ? " active" : ""}" data-bento-tab="since">Since (${kept.length})</button>
-          <button type="button" class="bento-seg-tab${activeTab === "workstreams" ? " active" : ""}" data-bento-tab="workstreams">Workstreams (${openWs.length})</button>
-          <button type="button" class="bento-seg-tab${activeTab === "opps" ? " active" : ""}" data-bento-tab="opps">Opps (${opps.length})</button>
+        <div class="bento-tray-ctrl">
+          <div class="bento-seg-tabs" role="tablist" aria-label="Dashboard tray view">
+            <button type="button" class="bento-seg-tab${activeTab === "workstreams" ? " active" : ""}" data-bento-tab="workstreams">Active (${openWs.length})</button>
+            <button type="button" class="bento-seg-tab${activeTab === "since" ? " active" : ""}" data-bento-tab="since">Since (${kept.length})</button>
+            <button type="button" class="bento-seg-tab${activeTab === "opps" ? " active" : ""}" data-bento-tab="opps">Opps (${opps.length})</button>
+          </div>
+          ${totalItems > pageSize ? `<div class="bento-pager"><button type="button" class="bento-pg-btn" data-queue-dir="-1" aria-label="Previous">‹</button><button type="button" class="bento-pg-btn" data-queue-dir="1" aria-label="Next">›</button></div>` : ""}
         </div>
       </div>
-      <div class="bento-since-grid">${trayHtml}</div>
+      <div class="bento-queue-grid">${trayHtml}</div>
     </article>
-    ${renderUsageTrackerCard(cc.usageData)}
   </section>`;
 }
 
@@ -5331,31 +5424,35 @@ async function loadHome() {
     ? `<div class="job-list">${needs.map(jobCard).join("")}</div>`
     : `<p class="home-empty">${state.cloudMode ? "Nothing waiting on you." : "Connect the cloud hub to see jobs."}</p>`;
   const bentoHtml = buildBentoHub({ cc, todos });
+  const toolsOpen = Boolean(state.homeToolsOpen);
   const homeHtml = `
     ${emptyBanner}
+    <div id="home-tools-drawer" class="home-tools-drawer${toolsOpen ? "" : " hidden"}">
+      <form id="home-quick-dispatch" class="home-dispatch" aria-label="Quick command to #peer-floor">
+        <div class="hd-row">
+          <select id="hd-target" aria-label="Target agent">
+            <option value="@Gemini @ChatGPT @Cursor @Claude @Nori @Grokbot ">@All team</option>
+            <option value="@Gemini ">@Gemini ★</option>
+            <option value="@ChatGPT ">@ChatGPT</option>
+            <option value="@Cursor ">@Cursor</option>
+            <option value="@Claude ">@Claude</option>
+            <option value="@Nori ">@Nori</option>
+            <option value="@Grokbot ">@Grokbot</option>
+          </select>
+          <input id="hd-input" type="text" placeholder="Orchestrate the team in #peer-floor…" autocomplete="off" enterkeyhint="send" />
+          <button type="submit" class="act act-primary">Send</button>
+        </div>
+      </form>
+      <label class="jump">
+        <span class="jump-icon" aria-hidden="true">⌕</span>
+        <input id="jump-input" type="search" placeholder="Search chats & messages" autocomplete="off" enterkeyhint="go" />
+      </label>
+      <div id="jump-results" class="jump-results" hidden></div>
+    </div>
     ${bentoHtml}
-    <form id="home-quick-dispatch" class="home-dispatch" aria-label="Quick command to #peer-floor">
-      <div class="hd-row">
-        <select id="hd-target" aria-label="Target agent">
-          <option value="@Gemini @ChatGPT @Cursor @Claude @Nori @Grokbot ">@All team</option>
-          <option value="@Gemini ">@Gemini ★</option>
-          <option value="@ChatGPT ">@ChatGPT</option>
-          <option value="@Cursor ">@Cursor</option>
-          <option value="@Claude ">@Claude</option>
-          <option value="@Nori ">@Nori</option>
-          <option value="@Grokbot ">@Grokbot</option>
-        </select>
-        <input id="hd-input" type="text" placeholder="Orchestrate the team in #peer-floor…" autocomplete="off" enterkeyhint="send" />
-        <button type="submit" class="act act-primary">Send</button>
-      </div>
-    </form>
-    <label class="jump">
-      <span class="jump-icon" aria-hidden="true">⌕</span>
-      <input id="jump-input" type="search" placeholder="Search chats & messages" autocomplete="off" enterkeyhint="go" />
-    </label>
-    <div id="jump-results" class="jump-results" hidden></div>
     ${state.cloudMode ? pushPromptHtml() : ""}
     ${needs.length ? `<section class="home-section cc-panel" id="cc-needs"><div class="cc-head"><h2>Needs you</h2><span class="cc-src">${needs.length} open</span></div>${needsBlock}</section>` : ""}
+    ${renderUsageTrackerCard(cc.usageData)}
     <details class="home-more">
       <summary>To-dos (${todos.length}), Agents, Computers &amp; Feed</summary>
       ${cc.digestHtml || ""}
@@ -6669,7 +6766,15 @@ document.getElementById("home-body")?.addEventListener("click", (e) => {
   }
   const segTab = e.target.closest("[data-bento-tab]");
   if (segTab) {
-    state.bentoTab = segTab.dataset.bentoTab || "since";
+    state.bentoTab = segTab.dataset.bentoTab || "workstreams";
+    state.bentoQueuePage = 0;
+    loadHome().catch(() => {});
+    return;
+  }
+  const qDir = e.target.closest("[data-queue-dir]");
+  if (qDir) {
+    const delta = Number(qDir.dataset.queueDir || 1);
+    state.bentoQueuePage = Math.max(0, Number(state.bentoQueuePage || 0) + delta);
     loadHome().catch(() => {});
     return;
   }
@@ -6677,6 +6782,17 @@ document.getElementById("home-body")?.addEventListener("click", (e) => {
   if (openWs) {
     openWorkstreamSheet(openWs.dataset.openWs);
   }
+});
+document.getElementById("home-tools-toggle")?.addEventListener("click", () => {
+  state.homeToolsOpen = !state.homeToolsOpen;
+  const drawer = document.getElementById("home-tools-drawer");
+  if (drawer) {
+    drawer.classList.toggle("hidden", !state.homeToolsOpen);
+    if (state.homeToolsOpen) document.getElementById("jump-input")?.focus();
+  }
+});
+document.getElementById("top-debrief-btn")?.addEventListener("click", () => {
+  openJarvisSheet("debrief", { autoTalk: true });
 });
 document.getElementById("ws-sheet-close")?.addEventListener("click", () => {
   stopDebriefVoice();
