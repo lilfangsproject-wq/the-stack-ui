@@ -35,7 +35,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>our app · zero spend · <span data-stack-version>v40.7</span></small>
+          <small>our app · zero spend · <span data-stack-version>v40.8</span></small>
         </div>
       </div>
       <p id="boot-status">Opening the vault…</p>
@@ -68,7 +68,7 @@
         <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
         <div>
           <strong>The Stack</strong>
-          <small>agent command centre · <span data-stack-version>v40.7</span></small>
+          <small>agent command centre · <span data-stack-version>v40.8</span></small>
         </div>
       </div>
       <div class="rail-status-row">
@@ -302,30 +302,31 @@
         <button type="button" id="jarvis-close" class="icon-btn" aria-label="Close">‹</button>
         <div class="main-head-text">
           <h1 id="jarvis-title">Jarvis</h1>
-          <p class="purpose" id="jarvis-sub">In-Stack voice debrief · no clipboard hop</p>
+          <p class="purpose" id="jarvis-sub">Talking debrief · full Stack picture</p>
         </div>
         <span class="bento-tag" id="jarvis-state-tag">Idle</span>
       </header>
+      <nav id="jarvis-tabs" class="debrief-tabs" aria-label="Briefing sections"></nav>
       <section class="host-sheet-body jarvis-body" id="jarvis-body">
-        <p class="jarvis-hint" id="jarvis-hint">Speak your thoughts. Jarvis keeps the Stack brief in context, answers here, and can drop a Workhorse prompt into #peer-floor.</p>
-        <details class="jarvis-context" id="jarvis-context">
-          <summary>Brief in play</summary>
-          <pre id="jarvis-brief-preview"></pre>
+        <p class="jarvis-now-speaking" id="jarvis-now-speaking" aria-live="polite">Opening briefing…</p>
+        <article class="jarvis-slide" id="jarvis-slide">
+          <h3 id="jarvis-slide-title">Briefing</h3>
+          <ul id="jarvis-slide-bullets"></ul>
+        </article>
+        <div class="jarvis-log" id="jarvis-log" aria-live="polite" hidden></div>
+        <details class="jarvis-context" id="jarvis-followup" hidden>
+          <summary>After the briefing · ask / Workhorse prompt</summary>
+          <label class="jarvis-prompt-label" for="jarvis-prompt">Workhorse prompt</label>
+          <textarea id="jarvis-prompt" rows="4" placeholder="After Jarvis finishes, talk back or Ask — prompt lands here."></textarea>
+          <pre id="jarvis-brief-preview" hidden></pre>
         </details>
-        <div class="jarvis-log" id="jarvis-log" aria-live="polite"></div>
-        <label class="jarvis-prompt-label" for="jarvis-prompt">Workhorse prompt</label>
-        <textarea id="jarvis-prompt" rows="5" placeholder="Ask Jarvis after talking — the tight prompt lands here."></textarea>
       </section>
       <footer class="host-sheet-actions jarvis-actions" id="jarvis-actions">
-        <button type="button" id="jarvis-mic" class="act act-primary">🎙 Hold to talk</button>
-        <button type="button" id="jarvis-speak-brief" class="act">▶ Speak brief</button>
+        <button type="button" id="jarvis-speak-brief" class="act act-primary">▶ Brief me</button>
+        <button type="button" id="jarvis-mic" class="act">🎙 Talk back</button>
         <button type="button" id="jarvis-ask" class="act">✦ Ask Jarvis</button>
-        <button type="button" id="jarvis-drop" class="act">⤵ Drop to #peer-floor</button>
+        <button type="button" id="jarvis-drop" class="ghost">⤵ Drop to #peer-floor</button>
         <button type="button" id="jarvis-copy" class="ghost">📋 Copy prompt</button>
-        <div class="jarvis-escape">
-          <a href="https://gemini.google.com/app" target="_blank" rel="noopener" class="ghost" data-voice-handoff="gemini" data-voice-scope="debrief">Escape → Gemini Voice</a>
-          <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" class="ghost" data-voice-handoff="notebook" data-voice-scope="debrief">Escape → NotebookLM</a>
-        </div>
       </footer>
     </aside>
     <aside class="host-sheet" id="workstream-sheet" hidden>

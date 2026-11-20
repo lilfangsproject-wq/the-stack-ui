@@ -439,7 +439,7 @@ function showCloudConnect(errMsg) {
   if (gemInput && getGeminiKey()) gemInput.value = getGeminiKey();
 }
 
-const STACK_VERSION = "v40.7";
+const STACK_VERSION = "v40.8";
 const GEMINI_KEY_STORAGE = "stack-gemini-key-v1";
 const GEMINI_MODEL_STORAGE = "stack-gemini-model-v1";
 const GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite";
@@ -2440,7 +2440,7 @@ function paintAgentsView() {
       <p>Talk in-Stack with <strong>Jarvis</strong> (brief stays here). Escape hatch: consumer Gemini Voice / NotebookLM if you still want an external call.</p>
     </div>
     <div class="ws-card-actions">
-      <button type="button" id="jobs-jarvis-link" class="act act-primary" data-open-jarvis="debrief">🎙 Open Jarvis</button>
+      <button type="button" id="jobs-jarvis-link" class="act act-primary" data-open-jarvis="debrief">🎙 Brief me out loud</button>
       <a href="https://gemini.google.com/app" target="_blank" rel="noopener" id="jobs-gemini-link" class="ghost" data-voice-handoff="gemini" data-voice-scope="debrief">Gemini Voice</a>
       <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" id="jobs-notebook-link" class="ghost" data-voice-handoff="notebook" data-voice-scope="debrief">NotebookLM</a>
       <button type="button" id="copy-voice-brief" class="ghost">📋 Copy Brief Only</button>
@@ -3360,13 +3360,13 @@ function paintBriefView() {
             : ""
         }
         <div class="ws-card-actions">
-          <button type="button" class="act act-primary" data-open-jarvis="debrief">🎙 Jarvis Voice</button>
+          <button type="button" class="act act-primary" data-open-jarvis="debrief">🎙 Brief me out loud</button>
           <button type="button" class="act" data-open-channel="peer-floor">🗣️ Orchestrate #peer-floor</button>
           <a href="https://gemini.google.com/app" target="_blank" rel="noopener" class="ghost" data-voice-handoff="gemini" data-voice-scope="debrief">Gemini Voice</a>
           <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" class="ghost" data-voice-handoff="notebook" data-voice-scope="debrief">NotebookLM</a>
           <a href="https://docs.google.com/document/d/1mfBzM1SN9a4thNZpq1Jyvk8jEd5tfpkNq7-tr2NzRyo/edit" target="_blank" rel="noopener" class="ghost">📄 Exec Brief GDoc</a>
           <button type="button" class="act" data-brief-tab="master">📋 All Workstreams (${workstreams.length})</button>
-          <button type="button" id="brief-run-debrief" class="act">✦ Debrief</button>
+          <button type="button" id="brief-run-debrief" class="act">🎙 Brief me out loud</button>
         </div>
       </article>
       <h3 class="brief-section-title">Ranked Opportunities (Clarity &amp; Upside)</h3>
@@ -4099,8 +4099,8 @@ function buildBentoHub({ cc, todos }) {
       <div class="bento-avatars">${rosterPills}</div>
       <div class="bento-ws-links">${extLinksHtml}</div>
       <div class="bento-cta-row">
-        <button type="button" id="bento-debrief-btn" class="act act-primary">✦ Debrief me (${kept.length})</button>
-        <button type="button" id="bento-jarvis-voice" class="act" data-open-jarvis="debrief" title="In-Stack Jarvis voice room">🎙 Jarvis</button>
+        <button type="button" id="bento-debrief-btn" class="act act-primary">🎙 Brief me out loud (${kept.length})</button>
+        <button type="button" id="bento-jarvis-voice" class="act" data-open-jarvis="debrief" title="Jarvis talks through the whole board">🎙 Jarvis</button>
         <a href="https://gemini.google.com/app" target="_blank" rel="noopener" id="bento-gemini-voice" class="ghost" data-voice-handoff="gemini" data-voice-scope="debrief" title="Escape hatch: copy brief &amp; open Gemini Voice Call">Gemini</a>
         <a href="https://notebooklm.google.com/" target="_blank" rel="noopener" id="bento-notebook-voice" class="ghost" data-voice-handoff="notebook" data-voice-scope="debrief" title="Escape hatch: copy brief &amp; open NotebookLM">Notebook</a>
         ${dismissedCount ? `<button type="button" id="bento-reset-got-it" class="ghost">Reset (${dismissedCount})</button>` : ""}
@@ -4331,6 +4331,7 @@ let stackVoiceSeq = 0;
 function stopDebriefVoice() {
   stackVoiceSeq += 1;
   window.__stackUtterances = [];
+  if (typeof jarvis !== "undefined") jarvis.presenting = false;
   try {
     if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
   } catch {
@@ -4346,6 +4347,8 @@ function stopDebriefVoice() {
   if (qv) qv.textContent = "▶ Voice";
   const wv = document.getElementById("ws-sheet-voice");
   if (wv) wv.textContent = "▶ Listen";
+  const jv = document.getElementById("jarvis-speak-brief");
+  if (jv) jv.textContent = "▶ Brief me";
 }
 
 function pickEnglishVoice() {
@@ -4431,15 +4434,18 @@ function speakStackText(text, btnEl, idleLabel = "▶ Voice") {
   toast("Speaking summary…");
 }
 
-/* ---- v40.7 Jarvis: in-Stack voice debrief (replaces clipboard → Gemini hop) ---- */
+/* ---- v40.8 Jarvis: auto-spoken full Stack briefing ---- */
 const jarvis = {
   scope: "debrief",
   listening: false,
   asking: false,
+  presenting: false,
   recognition: null,
   finalTranscript: "",
   interim: "",
   wantListen: false,
+  sections: [],
+  sectionIdx: 0,
 };
 
 function jarvisSpeechRecognition() {
@@ -4456,6 +4462,7 @@ function setJarvisState(label, live = false) {
 function jarvisAppendLog(role, text, { interim = false } = {}) {
   const log = document.getElementById("jarvis-log");
   if (!log || !text) return;
+  log.hidden = false;
   let el = interim ? log.querySelector(".jarvis-bubble.interim") : null;
   if (!el) {
     el = document.createElement("div");
@@ -4487,10 +4494,9 @@ function stopJarvisListening() {
   const mic = document.getElementById("jarvis-mic");
   if (mic) {
     mic.classList.remove("listening");
-    mic.textContent = "🎙 Hold to talk";
+    mic.textContent = "🎙 Talk back";
   }
   jarvisClearInterim();
-  if (!jarvis.asking) setJarvisState("Idle", false);
 }
 
 function startJarvisListening() {
@@ -4499,8 +4505,12 @@ function startJarvisListening() {
     toast("Speech recognition needs Chrome/Safari with mic access", "err");
     return;
   }
-  stopDebriefVoice();
+  stopJarvisPresentation();
   jarvis.wantListen = true;
+  const follow = document.getElementById("jarvis-followup");
+  if (follow) follow.hidden = false;
+  const log = document.getElementById("jarvis-log");
+  if (log) log.hidden = false;
   if (!jarvis.recognition) {
     const rec = new SR();
     rec.continuous = true;
@@ -4512,7 +4522,7 @@ function startJarvisListening() {
       const mic = document.getElementById("jarvis-mic");
       if (mic) {
         mic.classList.add("listening");
-        mic.textContent = "⏹ Release / stop";
+        mic.textContent = "⏹ Stop mic";
       }
     };
     rec.onerror = (ev) => {
@@ -4535,14 +4545,10 @@ function startJarvisListening() {
       const mic = document.getElementById("jarvis-mic");
       if (mic) {
         mic.classList.remove("listening");
-        mic.textContent = "🎙 Hold to talk";
+        mic.textContent = "🎙 Talk back";
       }
       jarvisClearInterim();
-      if (!jarvis.asking) setJarvisState("Idle", false);
-      const finalBit = jarvis.finalTranscript.trim();
-      if (finalBit && /\b(jarvis|hey stack|okay stack)\b/i.test(finalBit)) {
-        askJarvisFromVoice().catch(() => {});
-      }
+      if (!jarvis.asking && !jarvis.presenting) setJarvisState("Ready", false);
     };
     rec.onresult = (event) => {
       let interim = "";
@@ -4569,37 +4575,327 @@ function startJarvisListening() {
   }
 }
 
-function openJarvisSheet(scope = "debrief") {
+function buildJarvisBriefing(scope = "debrief") {
+  const cc = state.lastCc || state.agentsCC || {};
+  const kept = state.lastKeptDebrief || [];
+  const todos = state.lastTodos || [];
+  const workstreams = state.lastWorkstreams || cc?.workstreamsData?.workstreams || [];
+  const doneSet = loadWsDoneSet();
+  const reopenSet = loadWsReopenSet();
+  const activeWs = workstreams.filter((w) => {
+    const st = wsEffectiveState(w, doneSet, reopenSet);
+    return !st.sethDone && !st.archived && !st.held;
+  });
+  const heldWs = workstreams.filter((w) => {
+    const st = wsEffectiveState(w, doneSet, reopenSet);
+    return !st.sethDone && !st.archived && st.held;
+  });
+  const doneWs = workstreams.filter((w) => {
+    const st = wsEffectiveState(w, doneSet, reopenSet);
+    return st.sethDone || st.archived;
+  });
+  const needs = (cc?.needsList || []).filter((n, i) => !isSethGateDeleted(i) && !isSethGateHeld(i));
+  const providers = Array.isArray(cc?.usageData?.providers) ? cc.usageData.providers : [];
+  const quotaAlerts = providers.filter(
+    (p) => p.status === "hold" || p.status === "warn" || (typeof p.pct_used === "number" && p.pct_used >= 75)
+  );
+  const sections = [];
+
+  if (scope === "job" && state.openWsId) {
+    const ws = workstreams.find((w) => w.id === state.openWsId);
+    if (ws) {
+      const st = wsEffectiveState(ws, doneSet, reopenSet);
+      const checks = wsChecklistItems(ws);
+      sections.push({
+        tab: "Job",
+        title: ws.name,
+        bullets: [
+          `Status: ${st.status || ws.status || "Active"}`,
+          ws.summary || "No summary on file.",
+          `Next: ${ws.next_action || "TBD"}`,
+          `Gate: ${ws.blocker || "None"}`,
+          `Owners: ${(ws.owners || []).join(", ") || "Seth"}`,
+          ...checks.slice(0, 6).map((c) => `${c.done ? "Done" : "Open"} — ${c.label}`),
+        ],
+        speak: [
+          `Focusing on ${ws.name}.`,
+          ws.summary || "",
+          `Status is ${st.status || ws.status || "active"}.`,
+          `Next move: ${ws.next_action || "not set yet"}.`,
+          ws.blocker ? `Blocker: ${ws.blocker}.` : "No blocker logged.",
+          `Owners: ${(ws.owners || []).join(", ") || "Seth"}.`,
+          checks.length ? `Checklist has ${checks.length} items. ${checks.filter((c) => !c.done).length} still open.` : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      });
+      return sections;
+    }
+  }
+
+  sections.push({
+    tab: "Now",
+    title: "Everything on The Stack right now",
+    bullets: [
+      `${activeWs.length} active jobs · ${heldWs.length} on hold · ${doneWs.length} marked done`,
+      `${needs.length} decisions waiting on you`,
+      `${kept.length} kept updates since last clear`,
+      providers.length ? `${providers.length} quota pools tracked${quotaAlerts.length ? ` · ${quotaAlerts.length} need attention` : ""}` : "No quota rows loaded",
+    ],
+    speak: `Seth, here's everything on The Stack right now. ${activeWs.length} active jobs, ${heldWs.length} on hold, ${needs.length} decisions waiting on you, and ${kept.length} kept updates. I'll walk the whole board.`,
+  });
+
+  sections.push({
+    tab: "Jobs",
+    title: activeWs.length ? "Active jobs — all of them" : "No active jobs",
+    bullets: activeWs.length
+      ? activeWs.map((w) => {
+          const owners = (w.owners || []).join(", ") || "unassigned";
+          const due = w.deadline ? ` · due ${w.deadline}` : "";
+          const gate = w.blocker ? ` · gate: ${w.blocker}` : "";
+          return `${w.name} — ${w.next_action || "no next action"} (${owners}${due}${gate})`;
+        })
+      : ["Board is clear of active jobs."],
+    speak: activeWs.length
+      ? `Active jobs. ${activeWs
+          .map((w, i) => {
+            const owners = (w.owners || []).join(" and ") || "unassigned";
+            const due = w.deadline ? ` Due ${w.deadline}.` : "";
+            const gate = w.blocker ? ` Blocker: ${w.blocker}.` : "";
+            return `Number ${i + 1}: ${w.name}. Next: ${w.next_action || "not set"}. Owners: ${owners}.${due}${gate}`;
+          })
+          .join(" ")}`
+      : "There are no active jobs on the board right now.",
+  });
+
+  if (heldWs.length) {
+    sections.push({
+      tab: "Hold",
+      title: "On hold",
+      bullets: heldWs.map((w) => `${w.name} — ${w.next_action || "paused"}${w.blocker ? ` · ${w.blocker}` : ""}`),
+      speak: `On hold: ${heldWs.map((w) => `${w.name}${w.blocker ? `, because ${w.blocker}` : ""}`).join(". ")}.`,
+    });
+  }
+
+  sections.push({
+    tab: "You",
+    title: needs.length ? "Waiting on Seth" : "Nothing waiting on you",
+    bullets: needs.length
+      ? needs.map((n) => `${n.title || "Decision"}: ${n.detail || n.action || "Needs your call"}`)
+      : ["No open Seth gates."],
+    speak: needs.length
+      ? `Decisions waiting on you. ${needs
+          .map((n, i) => `${i + 1}. ${n.title || "Decision"}. ${n.detail || n.action || "Needs your call"}.`)
+          .join(" ")}`
+      : "Nothing is blocked waiting on you right now.",
+  });
+
+  if (quotaAlerts.length || providers.length) {
+    sections.push({
+      tab: "Quota",
+      title: quotaAlerts.length ? "Quota pressure" : "Quota snapshot",
+      bullets: (quotaAlerts.length ? quotaAlerts : providers.slice(0, 6)).map((p) => {
+        const pct = typeof p.pct_used === "number" ? `${p.pct_used}%` : p.status || "ok";
+        return `${p.agent || p.provider || "pool"} — ${pct}${p.note ? `: ${p.note}` : ""}`;
+      }),
+      speak: quotaAlerts.length
+        ? `Quota watch. ${quotaAlerts
+            .map((p) => {
+              const pct = typeof p.pct_used === "number" ? `${p.pct_used} percent` : p.status || "attention";
+              return `${p.agent || p.provider}: ${pct}.`;
+            })
+            .join(" ")}`
+        : `Quotas look calm across ${providers.length} tracked pools.`,
+    });
+  }
+
+  const moved = kept.filter((k) => k.kind !== "Needs You").slice(0, 8);
+  sections.push({
+    tab: "Moved",
+    title: moved.length ? "What moved" : "No kept updates",
+    bullets: moved.length
+      ? moved.map((k) => `${k.kind}: ${k.title}${k.text ? ` — ${k.text}` : ""} (${k.who || "team"})`)
+      : ["Board is quiet on kept updates."],
+    speak: moved.length
+      ? `What moved. ${moved.map((k) => `${k.kind}: ${k.title}. ${k.text || ""} From ${k.who || "the team"}.`).join(" ")}`
+      : "No kept updates sitting on the home board.",
+  });
+
+  const nextMoves = [
+    ...activeWs.slice(0, 4).map((w) => `${w.name} (${(w.owners || ["Team"]).join(", ")}): ${w.next_action || "Review"}`),
+    ...todos.slice(0, 3).map((t) => `Todo: ${t.item}${t.owner ? ` (${t.owner})` : ""}`),
+  ];
+  sections.push({
+    tab: "Next",
+    title: "Highest-leverage next moves",
+    bullets: nextMoves.length ? nextMoves : ["Open #peer-floor and pick the next priority with Gemini."],
+    speak: nextMoves.length
+      ? `Highest leverage next. ${nextMoves.join(". ")}. That's the full picture. Tap talk back if you want to dig in, or Ask Jarvis for a Workhorse prompt.`
+      : "That's the full picture. Nothing urgent is queued — open peer floor if you want to set the next job.",
+  });
+
+  return sections;
+}
+
+function renderJarvisSection(idx) {
+  const sections = jarvis.sections || [];
+  const i = Math.max(0, Math.min(idx, Math.max(0, sections.length - 1)));
+  jarvis.sectionIdx = i;
+  const sec = sections[i];
+  const tabs = document.getElementById("jarvis-tabs");
+  const title = document.getElementById("jarvis-slide-title");
+  const bullets = document.getElementById("jarvis-slide-bullets");
+  const now = document.getElementById("jarvis-now-speaking");
+  if (tabs) {
+    tabs.innerHTML = sections
+      .map(
+        (s, n) =>
+          `<button type="button" class="debrief-tab${n === i ? " active" : ""}" data-jarvis-slide="${n}">${esc(s.tab)}</button>`
+      )
+      .join("");
+  }
+  if (title) title.textContent = sec?.title || "Briefing";
+  if (bullets) {
+    bullets.innerHTML = (sec?.bullets || []).map((b) => `<li>${esc(b)}</li>`).join("");
+  }
+  if (now && sec?.speak) now.textContent = sec.speak;
+}
+
+function stopJarvisPresentation() {
+  jarvis.presenting = false;
+  stopDebriefVoice();
+  const btn = document.getElementById("jarvis-speak-brief");
+  if (btn) btn.textContent = "▶ Brief me";
+  if (!jarvis.listening && !jarvis.asking) setJarvisState("Ready", false);
+}
+
+function speakJarvisBriefing() {
+  if (typeof speechSynthesis === "undefined" || typeof SpeechSynthesisUtterance === "undefined") {
+    toast("Voice playback is not supported in this browser", "err");
+    return;
+  }
+  const sections = jarvis.sections || [];
+  if (!sections.length) {
+    toast("Nothing to brief");
+    return;
+  }
+  stopJarvisListening();
+  stopDebriefVoice();
+  jarvis.presenting = true;
+  setJarvisState("Speaking", true);
+  const btn = document.getElementById("jarvis-speak-brief");
+  if (btn) btn.textContent = "⏹ Stop";
+  const voice = pickEnglishVoice();
+  const seq = ++stackVoiceSeq;
+  stackVoiceBtn = btn;
+  stackVoiceIdleLabel = "▶ Brief me";
+
+  const speakSection = (idx) => {
+    if (seq !== stackVoiceSeq || !jarvis.presenting) return;
+    if (idx >= sections.length) {
+      jarvis.presenting = false;
+      stopDebriefVoice();
+      setJarvisState("Done", false);
+      const follow = document.getElementById("jarvis-followup");
+      if (follow) follow.hidden = false;
+      toast("Briefing done — talk back or Ask Jarvis if you want a Workhorse prompt");
+      return;
+    }
+    const sec = sections[idx];
+    renderJarvisSection(idx);
+    const chunks = chunkSpeechText(sec.speak || sec.title || "", 180);
+    if (!chunks.length) {
+      speakSection(idx + 1);
+      return;
+    }
+    let c = 0;
+    const speakChunk = () => {
+      if (seq !== stackVoiceSeq || !jarvis.presenting) return;
+      if (c >= chunks.length) {
+        speakSection(idx + 1);
+        return;
+      }
+      const now = document.getElementById("jarvis-now-speaking");
+      if (now) now.textContent = chunks[c];
+      const lis = document.querySelectorAll("#jarvis-slide-bullets li");
+      lis.forEach((li, n) => li.classList.toggle("speaking", n === Math.min(c, lis.length - 1)));
+      const u = new SpeechSynthesisUtterance(chunks[c]);
+      if (voice) u.voice = voice;
+      u.lang = (voice && voice.lang) || "en-AU";
+      u.rate = 1.05;
+      window.__stackUtterances.push(u);
+      u.onend = () => {
+        c += 1;
+        speakChunk();
+      };
+      u.onerror = () => {
+        if (seq === stackVoiceSeq) {
+          jarvis.presenting = false;
+          stopDebriefVoice();
+          setJarvisState("Error", false);
+          toast("Voice interrupted — tap Brief me again", "err");
+        }
+      };
+      try {
+        speechSynthesis.resume();
+        speechSynthesis.speak(u);
+      } catch {
+        jarvis.presenting = false;
+        stopDebriefVoice();
+        toast("Tap Brief me again to allow Safari voice", "err");
+      }
+    };
+    speakChunk();
+  };
+
+  // Warm voices (Safari/Chrome often return [] until getVoices fires)
+  try {
+    speechSynthesis.getVoices();
+  } catch {
+    /* ignore */
+  }
+  speakSection(0);
+}
+
+function openJarvisSheet(scope = "debrief", { autoTalk = true } = {}) {
   const sheet = document.getElementById("jarvis-sheet");
   if (!sheet) return;
   jarvis.scope = scope === "job" ? "job" : "debrief";
   jarvis.finalTranscript = "";
   jarvis.interim = "";
-  const brief = buildVoiceHandoffText(jarvis.scope);
+  jarvis.sections = buildJarvisBriefing(jarvis.scope);
+  jarvis.sectionIdx = 0;
   const preview = document.getElementById("jarvis-brief-preview");
-  if (preview) preview.textContent = brief;
+  if (preview) preview.textContent = jarvis.sections.map((s) => `${s.title}\n- ${(s.bullets || []).join("\n- ")}`).join("\n\n");
   const log = document.getElementById("jarvis-log");
-  if (log) log.innerHTML = "";
+  if (log) {
+    log.innerHTML = "";
+    log.hidden = true;
+  }
   const prompt = document.getElementById("jarvis-prompt");
-  if (prompt && !prompt.value.trim()) prompt.value = "";
+  if (prompt) prompt.value = "";
+  const follow = document.getElementById("jarvis-followup");
+  if (follow) follow.hidden = true;
   const sub = document.getElementById("jarvis-sub");
   if (sub) {
     sub.textContent =
-      jarvis.scope === "job"
-        ? "Job voice room · brief stays here · drop prompt to #peer-floor"
-        : "In-Stack voice debrief · no clipboard hop";
+      jarvis.scope === "job" ? "Talking job deep-dive" : `Talking debrief · ${jarvis.sections.length} sections`;
   }
   sheet.hidden = false;
-  setJarvisState("Ready", false);
-  jarvisAppendLog("meta", "Brief loaded. Hold mic, talk it through, then Ask Jarvis.");
-  if (!getGeminiKey()) {
-    jarvisAppendLog("meta", "No Gemini key yet — Speak brief + mic still work; Ask Jarvis needs Menu → Gemini key (AI Studio free tier).");
+  renderJarvisSection(0);
+  setJarvisState(autoTalk ? "Speaking" : "Ready", !!autoTalk);
+  if (autoTalk) {
+    // Same tap that opened the sheet counts as the user gesture Safari needs for TTS
+    requestAnimationFrame(() => speakJarvisBriefing());
+  } else {
+    const now = document.getElementById("jarvis-now-speaking");
+    if (now) now.textContent = "Tap Brief me and I'll talk you through the whole board.";
   }
 }
 
 function closeJarvisSheet() {
   stopJarvisListening();
-  stopDebriefVoice();
+  stopJarvisPresentation();
   const sheet = document.getElementById("jarvis-sheet");
   if (sheet) sheet.hidden = true;
 }
@@ -4616,10 +4912,12 @@ function extractWorkhorsePrompt(text) {
 
 async function askJarvisFromVoice() {
   if (jarvis.asking) return;
-  const spoken = jarvis.finalTranscript.trim() || document.getElementById("jarvis-log")?.querySelector(".jarvis-bubble.you:not(.interim)")?.textContent?.trim() || "";
-  const typedExtra = "";
-  if (!spoken && !typedExtra) {
-    toast("Say something first (hold mic), then Ask Jarvis");
+  const spoken =
+    jarvis.finalTranscript.trim() ||
+    document.getElementById("jarvis-log")?.querySelector(".jarvis-bubble.you:not(.interim)")?.textContent?.trim() ||
+    "";
+  if (!spoken) {
+    toast("Talk back first, then Ask Jarvis — or just let the briefing play");
     return;
   }
   if (!getGeminiKey()) {
@@ -4627,21 +4925,26 @@ async function askJarvisFromVoice() {
     return;
   }
   stopJarvisListening();
+  stopJarvisPresentation();
   jarvis.asking = true;
   setJarvisState("Thinking", true);
   const askBtn = document.getElementById("jarvis-ask");
   if (askBtn) askBtn.disabled = true;
-  const brief = buildVoiceHandoffText(jarvis.scope);
+  const follow = document.getElementById("jarvis-followup");
+  if (follow) follow.hidden = false;
+  const log = document.getElementById("jarvis-log");
+  if (log) log.hidden = false;
+  const brief = (jarvis.sections || []).map((s) => `${s.title}: ${(s.bullets || []).join("; ")}`).join("\n");
   const userText = [
-    "You are Jarvis inside The Stack — Seth's voice debrief partner.",
-    "Use ONLY the Stack brief below plus Seth's spoken notes. Do not invent metrics or status.",
-    "Reply with: (1) a short spoken answer (2-6 sentences), then (2) a fenced ```workhorse block with ONE tight Workhorse prompt ready for #peer-floor.",
+    "You are Jarvis inside The Stack — you just briefed Seth out loud.",
+    "Use ONLY the briefing state below plus Seth's spoken follow-up. Do not invent metrics.",
+    "Reply with: (1) a short spoken answer (2-8 sentences), then (2) a fenced ```workhorse block with ONE tight Workhorse prompt for #peer-floor.",
     "",
-    "STACK BRIEF:",
+    "BRIEFING STATE:",
     brief,
     "",
     "SETH SAID:",
-    spoken || "(no extra notes — brief him from the Stack state and propose the next Workhorse prompt)",
+    spoken,
   ].join("\n");
   jarvisAppendLog("meta", "Asking Jarvis…");
   let live = "";
@@ -4661,9 +4964,11 @@ async function askJarvisFromVoice() {
     const promptEl = document.getElementById("jarvis-prompt");
     if (promptEl) promptEl.value = extractWorkhorsePrompt(finalText);
     const speakPart = finalText.split(/```/)[0].trim() || finalText;
-    speakStackText(speakPart, document.getElementById("jarvis-speak-brief"), "▶ Speak brief");
+    const now = document.getElementById("jarvis-now-speaking");
+    if (now) now.textContent = speakPart;
+    speakStackText(speakPart, document.getElementById("jarvis-speak-brief"), "▶ Brief me");
     setJarvisState("Answered", false);
-    toast("Jarvis ready — review prompt or drop to #peer-floor");
+    toast("Jarvis answered out loud");
   } catch (err) {
     jarvisAppendLog("meta", friendlyError(err));
     setJarvisState("Error", false);
@@ -4677,7 +4982,7 @@ async function askJarvisFromVoice() {
 async function dropJarvisPromptToPeerFloor() {
   const prompt = (document.getElementById("jarvis-prompt")?.value || "").trim();
   if (!prompt) {
-    toast("No Workhorse prompt yet — Ask Jarvis first");
+    toast("No Workhorse prompt yet — talk back then Ask Jarvis");
     return;
   }
   const body = `@Gemini @Cursor Jarvis voice debrief → Workhorse prompt:\n\n${prompt}`;
@@ -4701,21 +5006,13 @@ function wireJarvisControls() {
     else startJarvisListening();
   };
   mic?.addEventListener("click", start);
-  mic?.addEventListener(
-    "touchstart",
-    (e) => {
-      if (e.cancelable) e.preventDefault();
-      if (!jarvis.wantListen) startJarvisListening();
-    },
-    { passive: false }
-  );
-  mic?.addEventListener("touchend", () => {
-    if (jarvis.wantListen) stopJarvisListening();
-  });
   document.getElementById("jarvis-close")?.addEventListener("click", () => closeJarvisSheet());
-  document.getElementById("jarvis-speak-brief")?.addEventListener("click", (e) => {
-    const brief = buildVoiceHandoffText(jarvis.scope);
-    speakStackText(brief, e.currentTarget, "▶ Speak brief");
+  document.getElementById("jarvis-speak-brief")?.addEventListener("click", () => {
+    if (jarvis.presenting || (typeof speechSynthesis !== "undefined" && speechSynthesis.speaking)) {
+      stopJarvisPresentation();
+      return;
+    }
+    speakJarvisBriefing();
   });
   document.getElementById("jarvis-ask")?.addEventListener("click", () => {
     askJarvisFromVoice().catch(() => {});
@@ -4736,11 +5033,23 @@ function wireJarvisControls() {
       toast("Clipboard blocked", "err");
     }
   });
+  document.getElementById("jarvis-tabs")?.addEventListener("click", (e) => {
+    const tab = e.target.closest("[data-jarvis-slide]");
+    if (!tab) return;
+    const idx = Number(tab.dataset.jarvisSlide) || 0;
+    stopJarvisPresentation();
+    renderJarvisSection(idx);
+    const sec = jarvis.sections[idx];
+    if (sec?.speak) {
+      const now = document.getElementById("jarvis-now-speaking");
+      if (now) now.textContent = sec.speak;
+    }
+  });
   document.addEventListener("click", (e) => {
     const open = e.target.closest("[data-open-jarvis]");
     if (!open) return;
     e.preventDefault();
-    openJarvisSheet(open.dataset.openJarvis || "debrief");
+    openJarvisSheet(open.dataset.openJarvis || "debrief", { autoTalk: true });
   });
 }
 wireJarvisControls();
@@ -6331,7 +6640,7 @@ document.getElementById("home-body")?.addEventListener("click", (e) => {
     return;
   }
   if (e.target.closest("#bento-debrief-btn")) {
-    openDebriefSheet({ useGemini: true });
+    openJarvisSheet("debrief", { autoTalk: true });
     return;
   }
   if (e.target.closest("#bento-reset-got-it")) {
@@ -6555,7 +6864,7 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (e.target.closest("#brief-run-debrief")) {
-    openDebriefSheet({ useGemini: true, explicit: true });
+    openJarvisSheet("debrief", { autoTalk: true });
     return;
   }
   const holdWs = e.target.closest("[data-toggle-ws-hold]");
