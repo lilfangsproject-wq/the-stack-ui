@@ -168,9 +168,22 @@
     .sb-item svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.85; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
     .sb-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--hairline); display: flex; flex-direction: column; gap: 4px; }
 
-    /* Main Stage */
-    .stage { flex: 1; min-width: 0; max-width: 680px; margin: 0 auto; padding: 18px 16px 116px; }
-    @media (min-width: 860px) { .stage { padding: 24px 32px 48px; } }
+    /* Main Stage — iOS PWA safe-area (Dynamic Island / home indicator) */
+    .stage {
+      flex: 1; min-width: 0; max-width: 680px; margin: 0 auto;
+      padding-top: calc(env(safe-area-inset-top, 0px) + 18px);
+      padding-right: 16px;
+      padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 116px);
+      padding-left: 16px;
+    }
+    @media (min-width: 860px) {
+      .stage {
+        padding-top: calc(env(safe-area-inset-top, 0px) + 24px);
+        padding-right: 32px;
+        padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 48px);
+        padding-left: 32px;
+      }
+    }
 
     .topbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 18px; }
     .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
@@ -428,7 +441,10 @@
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 20px;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 18px);
+  padding-right: 20px;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  padding-left: 20px;
 }
 .boot-card {
   width: 100%;

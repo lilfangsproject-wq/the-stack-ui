@@ -134,6 +134,13 @@
 
   function agentMeta(st) { return AGENT_STATES[st] || AGENT_STATES.offline; }
 
+  function agentAgeText(agent) {
+    const m = agentMeta(agent && agent.status);
+    const seen = (agent && agent.lastSeen) || "Offline";
+    if (m.label === "Offline" && seen === "Offline") return "Offline · No recent commit";
+    return m.label + " · " + seen;
+  }
+
   function itemStateMeta(st) {
     const s = String(st || "").toLowerCase();
     if (s.includes("block")) return { label: "Blocked", tone: "red", key: "blocked" };
@@ -450,7 +457,7 @@
       return (
         '<button type="button" class="agent-pill" data-jump-agent="' + esc(a.id) + '">' +
           '<span class="agent-pill-top"><span class="dot ' + m.tone + '"></span>' + esc(a.name) + "</span>" +
-          '<span class="agent-pill-age">' + esc(m.label) + " · " + esc(a.lastSeen) + "</span>" +
+          '<span class="agent-pill-age">' + esc(agentAgeText(a)) + "</span>" +
         "</button>"
       );
     }).join("");
@@ -493,7 +500,7 @@
       return (
         '<button type="button" class="agent-pill ' + (a.id === agent.id ? "active" : "") + '" data-select-agent="' + esc(a.id) + '">' +
           '<span class="agent-pill-top"><span class="dot ' + am.tone + '"></span>' + esc(a.name) + "</span>" +
-          '<span class="agent-pill-age">' + esc(am.label) + " · " + esc(a.lastSeen) + "</span>" +
+          '<span class="agent-pill-age">' + esc(agentAgeText(a)) + "</span>" +
         "</button>"
       );
     }).join("");
