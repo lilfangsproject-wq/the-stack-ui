@@ -2346,6 +2346,18 @@
     });
   }
 
+  // iOS can shrink the visual viewport while leaving the layout viewport at full height.
+  const viewport = window.visualViewport;
+  if (viewport) {
+    const updateChatViewport = function () {
+      if (viewport.scale !== 1) return;
+      document.documentElement.style.setProperty("--chat-visible-height", viewport.height + "px");
+      document.documentElement.classList.toggle("chat-keyboard", window.innerHeight - viewport.height > 120);
+    };
+    viewport.addEventListener("resize", updateChatViewport);
+    updateChatViewport();
+  }
+
   loadCreds();
   if (creds.pin && creds.bff) {
     state.link = (typeof navigator !== "undefined" && navigator.onLine === false) ? "offline" : "polling";

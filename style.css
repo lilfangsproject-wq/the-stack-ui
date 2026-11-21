@@ -648,7 +648,7 @@ body.view-agents {
   overflow: hidden;
 }
 body.view-agents .shell {
-  height: 100dvh;
+  height: var(--chat-visible-height, 100dvh);
   min-height: 0;
 }
 body.view-agents .stage {
@@ -726,19 +726,25 @@ html[data-surface="light"] .chat-subbar {
 }
 .chat-hero #chat-log {
   flex: 1;
-  height: calc(100dvh - 320px);
-  min-height: 300px;
-  max-height: 560px;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
   touch-action: pan-y;
   margin-bottom: 0;
 }
-@media (max-height: 680px) {
-  .chat-hero #chat-log {
-    min-height: 180px;
-  }
+@media (max-width: 859px) {
+  .composer .input { font-size: 16px; }
+  html.chat-keyboard body.view-agents .mobile-dock-wrap { display: none; }
+  html.chat-keyboard body.view-agents .stage { padding-bottom: 8px; }
+  html.chat-keyboard .chat-subbar { display: none; }
+}
+@media (max-height: 550px) and (max-width: 859px) {
+  body.view-agents .chat-subbar { display: none; }
+  .chat-hero .hero-top, .chat-hero .hero-top-actions { flex-wrap: nowrap; }
+  .chat-hero .hero-top { overflow-x: auto; }
+  .chat-hero .hero-top > * { flex: none; }
 }
 .chat-hero .chip-strip,
 .chat-hero .composer-wrap {
