@@ -178,7 +178,7 @@
     document.documentElement.dataset.theme = choice;
     document.documentElement.dataset.surface = surface;
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", surface === "light" ? "#d4e3f3" : "#061529");
+    if (meta) meta.setAttribute("content", surface === "light" ? "#0a1930" : "#020408");
     const btn = document.getElementById("surface-btn");
     if (btn) {
       const label = choice === "system" ? "System" : choice === "light" ? "Light" : "Dark";

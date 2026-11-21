@@ -1,72 +1,87 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1800" preserveAspectRatio="xMidYMid slice">
   <defs>
-    <linearGradient id="sky" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1966b8"/>
-      <stop offset="35%" stop-color="#2889d8"/>
-      <stop offset="70%" stop-color="#0a52e0"/>
-      <stop offset="100%" stop-color="#05228a"/>
+    <!-- Pitch obsidian base matching Mac Pro Midnight wallpaper -->
+    <linearGradient id="obsidian" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#030710"/>
+      <stop offset="50%" stop-color="#010205"/>
+      <stop offset="100%" stop-color="#040b18"/>
     </linearGradient>
-    <linearGradient id="pearl" x1="0%" y1="0%" x2="85%" y2="85%">
-      <stop offset="0%" stop-color="#eef3f7" stop-opacity="0.96"/>
-      <stop offset="45%" stop-color="#a8d4f2" stop-opacity="0.88"/>
-      <stop offset="100%" stop-color="#2c8ee6" stop-opacity="0.0"/>
+
+    <!-- Upper-left metallic steel-blue & silver sweep -->
+    <linearGradient id="ribbonTop" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c6d9f5" stop-opacity="0.95"/>
+      <stop offset="16%" stop-color="#5a8bd6" stop-opacity="0.92"/>
+      <stop offset="42%" stop-color="#193b78" stop-opacity="0.95"/>
+      <stop offset="76%" stop-color="#08152e" stop-opacity="0.98"/>
+      <stop offset="100%" stop-color="#010308" stop-opacity="1"/>
     </linearGradient>
-    <linearGradient id="waveMid" x1="0%" y1="100%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#0033ff"/>
-      <stop offset="42%" stop-color="#1078ff"/>
-      <stop offset="78%" stop-color="#48c4f5"/>
-      <stop offset="100%" stop-color="#d8eef8"/>
-    </linearGradient>
-    <linearGradient id="waveCrest" x1="0%" y1="0%" x2="100%" y2="100%">
+
+    <!-- Diagonal iridescent prism rim (cool ice-blue + whisper of warm copper) -->
+    <linearGradient id="iridescentEdge" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
-      <stop offset="35%" stop-color="#86d8ff" stop-opacity="0.72"/>
-      <stop offset="100%" stop-color="#0055ff" stop-opacity="0.0"/>
+      <stop offset="35%" stop-color="#8ec5ff" stop-opacity="0.88"/>
+      <stop offset="68%" stop-color="#f2b88c" stop-opacity="0.72"/>
+      <stop offset="100%" stop-color="#2c66c8" stop-opacity="0.0"/>
     </linearGradient>
-    <radialGradient id="aquaGlow" cx="72%" cy="54%" r="52%">
-      <stop offset="0%" stop-color="#6ce2ff" stop-opacity="0.82"/>
-      <stop offset="55%" stop-color="#1c86ff" stop-opacity="0.35"/>
-      <stop offset="100%" stop-color="#062270" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="deepCobalt" cx="24%" cy="84%" r="58%">
-      <stop offset="0%" stop-color="#0038ff" stop-opacity="0.92"/>
-      <stop offset="55%" stop-color="#0024a8" stop-opacity="0.45"/>
-      <stop offset="100%" stop-color="#001050" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="lowerSilk" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#9ee4ff" stop-opacity="0.88"/>
-      <stop offset="48%" stop-color="#1a76ff" stop-opacity="0.76"/>
-      <stop offset="100%" stop-color="#0636d4" stop-opacity="0.95"/>
+
+    <!-- Center deep slate-navy curved fold -->
+    <linearGradient id="ribbonCenter" x1="15%" y1="10%" x2="85%" y2="95%">
+      <stop offset="0%" stop-color="#214d94"/>
+      <stop offset="32%" stop-color="#0d2550"/>
+      <stop offset="68%" stop-color="#061229"/>
+      <stop offset="100%" stop-color="#010308"/>
     </linearGradient>
-    <filter id="silkBlur" x="-15%" y="-15%" width="130%" height="130%">
-      <feGaussianBlur stdDeviation="24"/>
+
+    <!-- Lower-right luminous midnight-blue & warm amber rim fold -->
+    <linearGradient id="ribbonRight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd5b0" stop-opacity="0.92"/>
+      <stop offset="10%" stop-color="#7eb6ff" stop-opacity="0.88"/>
+      <stop offset="34%" stop-color="#1a54a8" stop-opacity="0.94"/>
+      <stop offset="70%" stop-color="#09214a" stop-opacity="0.98"/>
+      <stop offset="100%" stop-color="#020712" stop-opacity="1"/>
+    </linearGradient>
+
+    <!-- Left-edge electric cobalt glint -->
+    <linearGradient id="leftGlint" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f48b8" stop-opacity="0.90"/>
+      <stop offset="45%" stop-color="#3c8aff" stop-opacity="0.82"/>
+      <stop offset="80%" stop-color="#d8ecff" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#02050c" stop-opacity="0"/>
+    </linearGradient>
+
+    <filter id="softGlow" x="-15%" y="-15%" width="130%" height="130%">
+      <feGaussianBlur stdDeviation="16"/>
     </filter>
-    <filter id="rimSoft" x="-10%" y="-10%" width="120%" height="120%">
-      <feGaussianBlur stdDeviation="6"/>
+    <filter id="rimBlur" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="5"/>
     </filter>
   </defs>
 
-  <!-- Base vibrant ocean sky -->
-  <rect width="1200" height="1800" fill="url(#sky)"/>
+  <!-- Obsidian black base -->
+  <rect width="1200" height="1800" fill="url(#obsidian)"/>
 
-  <!-- Upper-left luminous pearl/warm sky mist -->
-  <path d="M-120 -80 L980 -80 C720 180 340 380 -120 760 Z" fill="url(#pearl)" filter="url(#silkBlur)"/>
+  <!-- Upper-left sculpted steel-blue ribbon -->
+  <path d="M-80 -60 L480 -60 C620 280 540 560 220 920 L-80 1120 Z" fill="url(#ribbonTop)"/>
+  <!-- Subtle iridescent specular highlight along upper-left fold -->
+  <path d="M460 -40 C600 290 520 560 210 910" fill="none" stroke="url(#iridescentEdge)" stroke-width="26" filter="url(#softGlow)"/>
+  <path d="M468 -40 C608 290 528 560 218 910" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="3"/>
 
-  <!-- Sweeping Tahoe main cobalt-to-aqua silk wave -->
-  <path d="M-160 880 C160 440 580 180 1320 40 L1320 1880 L-160 1880 Z" fill="url(#waveMid)"/>
+  <!-- Left curved electric cobalt glint -->
+  <path d="M-100 540 C80 780 180 1120 120 1840 L-100 1840 Z" fill="url(#leftGlint)" opacity="0.85"/>
 
-  <!-- Crisp luminous crest line arcing diagonally across screen -->
-  <path d="M-140 860 C180 420 590 165 1300 32" fill="none" stroke="url(#waveCrest)" stroke-width="18" filter="url(#rimSoft)"/>
-  <path d="M-140 852 C180 412 590 158 1300 26" fill="none" stroke="#ffffff" stroke-opacity="0.72" stroke-width="4"/>
+  <!-- Center sweeping midnight-navy arch slicing diagonally -->
+  <path d="M80 1840 C120 1260 360 880 1080 180 L1260 180 L1260 1840 Z" fill="url(#ribbonCenter)"/>
 
-  <!-- Luminous aqua refraction core -->
-  <ellipse cx="860" cy="960" rx="640" ry="520" fill="url(#aquaGlow)"/>
+  <!-- Crisp metallic arch highlight cutting across center -->
+  <path d="M110 1840 C150 1260 385 885 1110 165" fill="none" stroke="#7cb6ff" stroke-opacity="0.72" stroke-width="10" filter="url(#rimBlur)"/>
+  <path d="M116 1840 C156 1260 390 888 1116 168" fill="none" stroke="#e4f1ff" stroke-opacity="0.75" stroke-width="2.5"/>
 
-  <!-- Secondary lower sweeping blue ribbon -->
-  <path d="M-120 1420 C240 1020 680 940 1320 660 L1320 1900 L-120 1900 Z" fill="url(#lowerSilk)" opacity="0.86" filter="url(#silkBlur)"/>
+  <!-- Pitch-black negative-space pocket (upper-right) for high-contrast glass -->
+  <path d="M620 -60 L1260 -60 L1260 640 C980 860 720 960 560 820 C420 700 480 280 620 -60 Z" fill="#010205"/>
 
-  <!-- Deep cobalt lower-left anchor for rich glass contrast -->
-  <ellipse cx="260" cy="1540" rx="720" ry="540" fill="url(#deepCobalt)"/>
-
-  <!-- Subtle bright pearl sheen bottom-right -->
-  <path d="M520 1860 C760 1560 980 1360 1300 1240 L1300 1860 Z" fill="#dff4ff" opacity="0.46" filter="url(#silkBlur)"/>
+  <!-- Lower-right metallic cobalt ribbon with signature warm amber-white edge glow -->
+  <path d="M620 900 C840 940 1060 800 1260 580 L1260 1860 L780 1860 C720 1480 660 1160 620 900 Z" fill="url(#ribbonRight)"/>
+  <path d="M628 908 C675 1180 735 1500 805 1860" fill="none" stroke="#ffd2a6" stroke-opacity="0.88" stroke-width="18" filter="url(#softGlow)"/>
+  <path d="M626 906 C672 1180 732 1500 800 1860" fill="none" stroke="#fff2e2" stroke-opacity="0.85" stroke-width="3.5"/>
+  <path d="M620 900 C840 940 1060 800 1260 580" fill="none" stroke="#6aaeff" stroke-opacity="0.65" stroke-width="8" filter="url(#rimBlur)"/>
 </svg>

@@ -20,8 +20,8 @@
     }
 
     html[data-surface="dark"] {
-      --bg-base: #061d46;
-      --bg-filter: brightness(0.68) contrast(1.14) saturate(1.16);
+      --bg-base: #020408;
+      --bg-filter: brightness(0.96) contrast(1.06) saturate(1.08);
 
       --ink-1: rgba(255, 255, 255, 0.98);
       --ink-2: rgba(255, 255, 255, 0.80);
@@ -70,8 +70,8 @@
     }
 
     html[data-surface="light"] {
-      --bg-base: #1562c0;
-      --bg-filter: brightness(1.02) saturate(1.12);
+      --bg-base: #0a1930;
+      --bg-filter: brightness(1.18) contrast(1.04) saturate(1.12);
 
       /* Crisp white glass ink over vivid Tahoe wave — matches macOS Tahoe Control Center */
       --ink-1: rgba(255, 255, 255, 0.98);
@@ -131,7 +131,7 @@
 
     body::before {
       content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
-      background: url("./bg-tahoe.svg?v=50.3.0") center / cover no-repeat;
+      background: url("./bg-tahoe.svg?v=50.3.3") center / cover no-repeat;
       filter: var(--bg-filter);
     }
 
