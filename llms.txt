@@ -1,0 +1,12 @@
+# The Stack — Git-native AI Workforce Control Centre
+
+The Stack is a zero-spend, git-native control centre for orchestrating AI agents, jobs, notes, and chats. Built on vanilla JS web components, PWA-enabled, and deployed to GitHub Pages.
+
+## Key Pages
+- https://lilfangsproject-wq.github.io/the-stack-ui/ — Main command centre
+- https://lilfangsproject-wq.github.io/the-stack-ui/phone.html — Mobile companion
+- https://lilfangsproject-wq.github.io/the-stack-ui/pair.html — Device pairing
+- https://lilfangsproject-wq.github.io/the-stack-ui/cloud.html — Cloud sync view
+
+## Repository
+https://github.com/lilfangsproject-wq/the-stack-ui
