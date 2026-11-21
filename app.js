@@ -1,16 +1,19 @@
-/* The Stack v50.1 Rebirth — Cloudflare Worker BFF, Zero-Voice, Liquid Glass
- * Hard rules: no Jarvis/Aria/mic/TTS/STT; PIN → x-stack-pin; Git is source of truth.
+/* The Stack v50.4 Tahoe — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
+ * Hard rules: no always-on mic/Jarvis; opt-in TTS (/api/tts + $0 Web Speech fallback); PIN → x-stack-pin; Git is source of truth.
  * No horizontal swipe. Colour only marks the 5 agent states. Connection pill is honest.
  */
 (function () {
   "use strict";
 
-  const VERSION = window.STACK_VERSION || "v50.0-rebirth";
+  const VERSION = window.STACK_VERSION || "v50.4-tahoe";
   const SURFACE_KEY = "stack-surface-v1";
   const OUTBOX_KEY = "stack-rebirth-outbox-v1";
   const READ_NOTIF_KEY = "stack-rebirth-read-notifs-v1";
   const PIN_KEY = "stack-access-pin-v1";
   const BFF_KEY = "stack-bff-url-v1";
+  const ELEVEN_KEY_STORAGE = "stack-elevenlabs-key-v1";
+  const ELEVEN_VOICE_STORAGE = "stack-elevenlabs-voice-v1";
+  const DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
   const ZERO_SPEND = Number(window.ZERO_SPEND_CAP_USD || 0);
 
   const AGENT_STATES = {
@@ -299,6 +302,30 @@
     const hbMap = (state.heartbeats && state.heartbeats.agents && typeof state.heartbeats.agents === "object")
       ? state.heartbeats.agents
       : (state.heartbeats || {});
+    const nowMs = Date.now();
+    const dayMs = 86400000;
+    const floorMsgsAll = state.messagesBySlug["peer-floor"] || [];
+
+    function isRecentIso(iso) {
+      if (!iso) return false;
+      const t = new Date(iso).getTime();
+      return !isNaN(t) && (nowMs - t) <= dayMs && (nowMs - t) >= -300000;
+    }
+
+    function findUsageProvider(list, base) {
+      const idLower = String(base.id || "").toLowerCase();
+      const nameLower = String(base.name || "").toLowerCase();
+      const aliases = idLower === "nori" ? ["nori", "stackbot"] : [idLower];
+      return list.find(function (p) {
+        return aliases.indexOf(String(p.id || "").toLowerCase()) !== -1;
+      }) || list.find(function (p) {
+        const pa = String(p.agent || p.name || "").toLowerCase();
+        return pa === nameLower || pa === idLower;
+      }) || list.find(function (p) {
+        const hay = String(p.id || p.name || p.agent || p.provider || "").toLowerCase();
+        return new RegExp("\\b" + idLower + "\\b").test(hay);
+      }) || null;
+    }
 
     state.agents = DEFAULT_ROSTER.map(function (base) {
       const hb = hbMap[base.id] || hbMap[base.name] || hbMap[String(base.name || "").toLowerCase()];
@@ -312,9 +339,7 @@
       const blockedItem = state.items.find(function (i) {
         return i.ownerId === base.id && itemStateMeta(i.state).key === "blocked";
       });
-      const prov = providers.find(function (p) {
-        return String(p.id || p.name || p.agent || p.provider || "").toLowerCase().includes(base.id);
-      });
+      const prov = base.id === "peer-floor" ? null : findUsageProvider(providers, base);
       const qc = qcByBuilder[base.id] || qcByBuilder[base.name.toLowerCase()];
 
       let status = "offline";
@@ -325,7 +350,7 @@
       if (base.id === "peer-floor") {
         status = "working";
         evidence = "channels/peer-floor/messages.jsonl";
-        lastSeen = "Git-native";
+        lastSeen = floorMsgsAll.length ? relTime(floorMsgsAll[floorMsgsAll.length - 1].created_at) : "Git-native";
       } else if (blockedItem) {
         status = "blocked";
         evidence = blockedItem.ref || blockedItem.blocker || blockedItem.id;
@@ -335,7 +360,7 @@
         evidence = waitingItem.ref || waitingItem.key || "needs_seth.json";
         lastSeen = relTime(waitingItem.created_at || waitingItem.updated_at);
       } else if (hb && hb.ts) {
-        const ageMs = Date.now() - new Date(hb.ts).getTime();
+        const ageMs = nowMs - new Date(hb.ts).getTime();
         const declared = String(hb.state || "").toLowerCase();
         if (allowedHb[declared]) status = declared;
         else status = ageMs < 3600000 ? "working" : "offline";
@@ -343,7 +368,7 @@
           // Protocol: completed requires peer QC — fall back to working/offline from beat age.
           status = ageMs < 3600000 ? "working" : "offline";
         }
-        if (status !== "offline" && ageMs > 86400000 && declared !== "blocked" && declared !== "waiting") {
+        if (status !== "offline" && ageMs > dayMs && declared !== "blocked" && declared !== "waiting") {
           status = "offline";
         }
         evidence = hb.evidence_path || hb.task || hb.commit || hb.evidence_sha || "heartbeat";
@@ -356,25 +381,80 @@
         evidence = "QC " + String(qc.commit_sha || "").slice(0, 8) + " · reviewer " + qc.reviewer;
         lastSeen = relTime(qc.verified_at);
       } else if (commit) {
-        const ageMs = Date.now() - new Date(commit.date || commit.created_at || 0).getTime();
+        const ageMs = nowMs - new Date(commit.date || commit.created_at || 0).getTime();
         // Commit alone = Working (in progress). Completed requires peer QC receipt.
-        status = ageMs < 86400000 ? "working" : "offline";
+        status = ageMs < dayMs ? "working" : "offline";
         evidence = "commit " + String(commit.sha || "").slice(0, 8);
         lastSeen = relTime(commit.date || commit.created_at);
       }
 
-      const rawPct = prov ? (prov.pct ?? prov.pct_used ?? prov.used_pct ?? prov.usage_pct ?? prov.percent ?? (typeof prov.used === "number" && typeof prov.limit === "number" && prov.limit > 0 ? Math.round((prov.used / prov.limit) * 100) : null)) : null;
-      const hasLiveUsage = typeof rawPct === "number" && !isNaN(rawPct);
-      const usagePct = hasLiveUsage ? Math.max(0, Math.min(100, Math.round(rawPct))) : 0;
+      const commits24h = (state.commits || []).filter(function (c) {
+        if (!isRecentIso(c.date || c.created_at)) return false;
+        if (base.id === "peer-floor") return true;
+        const hay = ((c.message || "") + " " + (c.author || "")).toLowerCase();
+        return hay.includes(base.id);
+      }).length;
+
+      const dmMsgs = base.id === "peer-floor" ? [] : (state.messagesBySlug[dmSlugForAgent(base.id)] || []);
+      const floorMsgs24h = base.id === "peer-floor"
+        ? floorMsgsAll.filter(function (m) { return isRecentIso(m.created_at); }).length
+        : floorMsgsAll.filter(function (m) {
+            if (!isRecentIso(m.created_at)) return false;
+            const auth = String(m.author || "").toLowerCase();
+            const body = String(m.body || "").toLowerCase();
+            return auth.includes(base.id) || body.includes("@" + base.id);
+          }).length + dmMsgs.filter(function (m) {
+            return isRecentIso(m.created_at) && String(m.author || "").toLowerCase().includes(base.id);
+          }).length;
+
+      const hbActive24h = (hb && hb.ts && isRecentIso(hb.ts)) ? 1 : 0;
+      const callsToday = prov && prov.calls_today != null ? Math.max(0, Number(prov.calls_today) || 0) : 0;
+      const activity24h = callsToday + commits24h + floorMsgs24h + hbActive24h;
+
+      const rawPct = prov ? (prov.pct_used ?? prov.pct ?? prov.used_pct ?? prov.usage_pct ?? prov.percent ?? (typeof prov.used === "number" && typeof prov.limit === "number" && prov.limit > 0 ? Math.round((prov.used / prov.limit) * 100) : null)) : null;
+      const hasNumericPct = typeof rawPct === "number" && !isNaN(rawPct);
+      let usagePct = 0;
+      let pctEstimated = false;
+      if (hasNumericPct) {
+        usagePct = Math.max(0, Math.min(100, Math.round(rawPct)));
+      } else if (callsToday > 0) {
+        usagePct = Math.min(100, Math.max(1, Math.round((callsToday / 250) * 100)));
+        pctEstimated = true;
+      } else if (activity24h > 0) {
+        usagePct = Math.min(100, Math.max(1, activity24h * 4));
+        pctEstimated = true;
+      }
+      const hasLiveUsage = hasNumericPct || activity24h > 0;
+
+      const lastCallAt = (prov && (prov.last_call_at || prov.updated_at)) || (hb && hb.ts) || (commit && (commit.date || commit.created_at)) || "";
+      const usageNote = (prov && prov.note) || (hb && hb.task) || "";
+      const activityParts = [];
+      if (callsToday > 0) activityParts.push(callsToday + " call" + (callsToday === 1 ? "" : "s"));
+      if (commits24h > 0) activityParts.push(commits24h + " commit" + (commits24h === 1 ? "" : "s"));
+      if (floorMsgs24h > 0) activityParts.push(floorMsgs24h + " msg" + (floorMsgs24h === 1 ? "" : "s"));
+      if (hbActive24h > 0 && !activityParts.length) activityParts.push("1 beat");
+      const activitySummary = activityParts.length
+        ? (activityParts.join(" · ") + " (24h)")
+        : (lastCallAt ? ("Seen " + relTime(lastCallAt)) : "0 events (24h)");
 
       return Object.assign({}, base, {
         status: status,
         evidence: evidence,
         lastSeen: lastSeen,
         usagePct: usagePct,
+        pctEstimated: pctEstimated,
         hasLiveUsage: hasLiveUsage,
+        callsToday: callsToday,
+        commits24h: commits24h,
+        floorMsgs24h: floorMsgs24h,
+        activity24h: activity24h,
+        activitySummary: activitySummary,
+        lastCallAt: lastCallAt,
+        usageNote: usageNote,
+        resetAt: (prov && prov.reset_at) || "",
+        providerId: (prov && prov.id) || base.id,
         model: (prov && prov.model) || base.model,
-        reset: (prov && (prov.reset || prov.reset_at)) || base.reset,
+        reset: (prov && (prov.window_label || prov.reset || prov.reset_at)) || base.reset,
         qc: qc || null
       });
     });
@@ -482,6 +562,7 @@
       normalizeHubData();
       await loadMessagesForSlug("peer-floor");
       if (state.view === "agents" && state.activeAgentId !== "peer-floor") await loadActiveAgentMessages();
+      normalizeHubData();
       if (!silent) toast("Vault synced · " + state.headCommit + " · $" + ZERO_SPEND + " cap", "info");
     } catch (err) {
       const defaultBff = (window.STACK_BFF_URL || "").replace(/\/$/, "");
@@ -576,11 +657,183 @@
     toast(sent ? "Synced " + sent + " queued event(s) via BFF" : "Outbox still pending", sent ? "info" : "warning");
   }
 
+  /* ===================== VOICE (OPT-IN) ===================== */
+
+  let activeAudio = null;
+  let activeAudioUrl = "";
+  let activeSpeechBtn = null;
+  let speakingNow = false;
+
+  function getSavedElevenKey() {
+    try { return localStorage.getItem(ELEVEN_KEY_STORAGE) || ""; } catch (e) { return ""; }
+  }
+  function getSavedVoiceId() {
+    try { return localStorage.getItem(ELEVEN_VOICE_STORAGE) || DEFAULT_VOICE_ID; } catch (e) { return DEFAULT_VOICE_ID; }
+  }
+
+  function setSpeakingBtn(btn, isOn) {
+    if (!btn) return;
+    if (isOn) {
+      if (!btn.dataset.idleLabel) btn.dataset.idleLabel = btn.textContent;
+      btn.classList.add("speaking");
+      btn.textContent = "⏹ Stop";
+      btn.setAttribute("aria-pressed", "true");
+      activeSpeechBtn = btn;
+    } else {
+      btn.classList.remove("speaking");
+      if (btn.dataset.idleLabel) btn.textContent = btn.dataset.idleLabel;
+      btn.removeAttribute("aria-pressed");
+    }
+  }
+
+  function stopSpeaking() {
+    if (activeAudio) {
+      try { activeAudio.pause(); activeAudio.src = ""; } catch (e) {}
+      activeAudio = null;
+    }
+    if (activeAudioUrl) {
+      try { URL.revokeObjectURL(activeAudioUrl); } catch (e) {}
+      activeAudioUrl = "";
+    }
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      try { window.speechSynthesis.cancel(); } catch (e) {}
+    }
+    if (activeSpeechBtn) {
+      setSpeakingBtn(activeSpeechBtn, false);
+      activeSpeechBtn = null;
+    }
+    speakingNow = false;
+  }
+
+  function pickNeuralWebVoice() {
+    if (typeof window === "undefined" || !window.speechSynthesis || !window.speechSynthesis.getVoices) return null;
+    const voices = window.speechSynthesis.getVoices() || [];
+    const preferred = ["Samantha", "Daniel", "Karen", "Arthur", "Siri", "Google US English", "Natural"];
+    for (let i = 0; i < preferred.length; i++) {
+      const hit = voices.find(function (v) {
+        return v && v.name && v.name.indexOf(preferred[i]) !== -1 && /^en/i.test(v.lang || "en");
+      });
+      if (hit) return hit;
+    }
+    return voices.find(function (v) { return v && /^en/i.test(v.lang || ""); }) || voices[0] || null;
+  }
+
+  function fallbackWebSpeech(cleanText, btnEl) {
+    if (typeof window === "undefined" || !("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
+      stopSpeaking();
+      toast("Speech synthesis unavailable in this browser", "warning");
+      return;
+    }
+    const utt = new SpeechSynthesisUtterance(cleanText);
+    const voice = pickNeuralWebVoice();
+    if (voice) utt.voice = voice;
+    utt.rate = 1.02;
+    utt.pitch = 1.0;
+    speakingNow = true;
+    if (btnEl) setSpeakingBtn(btnEl, true);
+    utt.onend = function () { stopSpeaking(); };
+    utt.onerror = function () { stopSpeaking(); };
+    window.speechSynthesis.speak(utt);
+  }
+
+  async function speakText(text, btnEl, opts) {
+    const cleanText = String(text || "").trim().slice(0, 1200);
+    if (!cleanText) {
+      toast("Nothing to read", "info");
+      return;
+    }
+    if (speakingNow && btnEl && activeSpeechBtn === btnEl) {
+      stopSpeaking();
+      return;
+    }
+    stopSpeaking();
+
+    const options = opts || {};
+    const elKey = typeof options.apiKey === "string" ? options.apiKey.trim() : getSavedElevenKey().trim();
+    const voiceId = (typeof options.voiceId === "string" && options.voiceId.trim()) ? options.voiceId.trim() : getSavedVoiceId();
+
+    if (creds.bff && creds.pin && (typeof navigator === "undefined" || navigator.onLine !== false)) {
+      try {
+        const headers = {
+          "content-type": "application/json",
+          "x-stack-pin": creds.pin
+        };
+        if (elKey) headers["x-elevenlabs-key"] = elKey;
+        const res = await fetch(creds.bff.replace(/\/$/, "") + "/api/tts", {
+          method: "POST",
+          headers: headers,
+          body: JSON.stringify({
+            text: cleanText,
+            voiceId: voiceId || DEFAULT_VOICE_ID,
+            modelId: "eleven_turbo_v2_5"
+          })
+        });
+        const ct = String(res.headers.get("content-type") || "").toLowerCase();
+        if (res.ok && ct.indexOf("audio/") !== -1) {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          activeAudioUrl = url;
+          activeAudio = new Audio(url);
+          speakingNow = true;
+          if (btnEl) setSpeakingBtn(btnEl, true);
+          activeAudio.onended = function () { stopSpeaking(); };
+          activeAudio.onerror = function () {
+            stopSpeaking();
+            fallbackWebSpeech(cleanText, btnEl);
+          };
+          await activeAudio.play().catch(function () {
+            stopSpeaking();
+            fallbackWebSpeech(cleanText, btnEl);
+          });
+          return;
+        }
+        if (res.status !== 501) {
+          toast("ElevenLabs unavailable — using $0 Web Speech", "warning");
+        }
+      } catch (e) {
+        // Offline or network issue — fall back cleanly to $0 Web Speech.
+      }
+    }
+
+    fallbackWebSpeech(cleanText, btnEl);
+  }
+
+  function buildTodayBriefText() {
+    const topNeed = state.needsSeth[0] || null;
+    if (topNeed) {
+      return "Decision needed: " + (topNeed.title || topNeed.summary || "Approval") + ". " + (topNeed.body || topNeed.reason || "");
+    }
+    const rosterOnly = state.agents.filter(function (a) { return a.id !== "peer-floor"; });
+    const working = rosterOnly.filter(function (a) { return a.status === "working" || a.status === "completed"; }).length;
+    const waiting = rosterOnly.filter(function (a) { return a.status === "waiting"; }).length;
+    const blocked = rosterOnly.filter(function (a) { return a.status === "blocked"; }).length;
+    const floorMsgs = state.messagesBySlug["peer-floor"] || [];
+    const last = floorMsgs[floorMsgs.length - 1];
+    let text = "The Stack pulse. " + working + " active, " + waiting + " waiting, " + blocked + " blocked. Head commit " + state.headCommit + ".";
+    if (last && last.body) {
+      text += " Latest on peer floor from " + (last.author || "Agent") + ": " + last.body;
+    }
+    return text;
+  }
+
+  function buildAgentLatestText(agent) {
+    if (!agent) return "";
+    const slug = dmSlugForAgent(agent.id);
+    const msgs = state.messagesBySlug[slug] || [];
+    const last = msgs[msgs.length - 1];
+    if (last && last.body) {
+      return (last.author || agent.name) + " wrote: " + last.body;
+    }
+    const st = agentMeta(agent.status);
+    return agent.name + " is " + st.label + ". " + (agent.activitySummary || "") + ". Evidence: " + agent.evidence;
+  }
+
   /* ===================== VIEWS ===================== */
 
   function renderToday() {
     const topNeed = state.needsSeth[0] || null;
-    const floorMsgs = (state.messagesBySlug["peer-floor"] || []).slice(-6);
+    const allFloorMsgs = state.messagesBySlug["peer-floor"] || [];
+    const floorMsgs = allFloorMsgs.slice(-8);
     const floorHtml = floorMsgs.map(function (m) {
       const isMe = String(m.author || "").toLowerCase() === "seth";
       return (
@@ -595,50 +848,6 @@
       return '<button type="button" class="ctx-chip" data-floor-mention="@' + esc(a.name) + ' ">@' + esc(a.name) + "</button>";
     }).join("");
 
-    const floorHeroHtml = (
-      '<section class="hero">' +
-        '<div class="hero-top">' +
-          '<div><span class="kicker">Shared Floor · ' + VERSION + '</span><h2 class="hero-title" style="margin:3px 0 0;">#peer-floor</h2></div>' +
-          '<span class="badge green"><span class="dot green"></span>Everyone</span>' +
-        "</div>" +
-        '<div id="today-floor-log" class="chat-log" style="max-height:220px;">' +
-          (floorHtml || '<div class="empty">Message everyone on #peer-floor — commits straight to Git.</div>') +
-        "</div>" +
-        '<div class="chip-strip">' + mentionChips + "</div>" +
-        '<div class="composer-wrap">' +
-          '<div id="today-mention-pop" class="mention-pop hidden" role="listbox" aria-label="Mention suggestions"></div>' +
-          '<form id="today-floor-form" class="composer">' +
-            '<input id="today-floor-input" class="input" placeholder="Message #peer-floor… type @ to mention" autocomplete="off" enterkeyhint="send" required />' +
-            '<button type="submit" class="btn btn-pri btn-sm">Send</button>' +
-          "</form>" +
-        "</div>" +
-      "</section>"
-    );
-
-    const heroHtml = topNeed ? (
-      '<section class="hero">' +
-        '<div class="hero-top"><span class="kicker">5-Second Brief · Needs Your Call</span><span class="badge amber"><span class="dot amber"></span>Waiting</span></div>' +
-        '<h2 class="hero-title">' + esc(topNeed.title || topNeed.summary || "Decision Needed") + "</h2>" +
-        '<p class="hero-copy">' + esc(topNeed.body || topNeed.reason || "") + "</p>" +
-        '<div class="hero-meta">' +
-          (topNeed.owner ? '<span>Owner: <strong>' + esc(topNeed.owner) + "</strong></span>" : "") +
-          '<span class="git-chip">' + esc(topNeed.ref || topNeed.key || "needs_seth.json") + "</span>" +
-        "</div>" +
-        '<div class="hero-actions">' +
-          '<button type="button" class="btn btn-pri" data-ping-floor="Approved go on: ' + esc(topNeed.title || topNeed.key || "need") + '">Approve Go</button>' +
-          '<button type="button" class="btn btn-sec" data-ping-floor="HOLD: ' + esc(topNeed.title || topNeed.key || "need") + '">Hold</button>' +
-          '<button type="button" class="btn btn-sec" data-jump-agent="peer-floor">#peer-floor</button>' +
-        "</div>" +
-      "</section>"
-    ) : secretsMissing(state.health) ? (
-      '<section class="hero">' +
-        '<div class="hero-top"><span class="kicker">5-Second Brief · ' + VERSION + '</span><span class="badge amber"><span class="dot amber"></span>Secrets</span></div>' +
-        '<h2 class="hero-title">Worker secrets not armed</h2>' +
-        '<p class="hero-copy">Add <span class="mono">GITHUB_PAT</span> and <span class="mono">STACK_ACCESS_PIN</span> as <strong>Secrets</strong> on Worker <span class="mono">the-stack-bff</span> (not Pages Variables). Then tap the sync pill.</p>' +
-        '<div class="hero-actions"><button type="button" class="btn btn-pri" id="btn-resync">Retry Sync</button><button type="button" class="btn btn-sec" data-go="stats">Usage &amp; Git</button></div>' +
-      "</section>"
-    ) : floorHeroHtml;
-
     const rosterOnly = state.agents.filter(function (a) { return a.id !== "peer-floor"; });
     const workingCount = rosterOnly.filter(function (a) { return a.status === "working" || a.status === "completed"; }).length;
     const waitingCount = rosterOnly.filter(function (a) { return a.status === "waiting"; }).length;
@@ -648,36 +857,104 @@
     const conflictCount = (state.conflicts || []).length;
     const commitCount = (state.commits || []).length;
 
-    const sheetsPanel =
-      '<div class="section-head"><span class="section-title">One Sheet Per Thing</span></div>' +
-      '<div class="panel">' +
-        (topNeed ? (
-          '<button type="button" class="row" data-jump-agent="peer-floor">' +
-            '<div class="row-main"><div class="row-title"><span class="dot green"></span>#peer-floor</div><div class="row-sub">Message all agents · ' + floorMsgs.length + " recent</div></div>" +
-            '<div class="row-right"><span>Open</span><span>›</span></div>' +
-          "</button>"
-        ) : "") +
-        '<button type="button" class="row" id="btn-sheet-workforce">' +
-          '<div class="row-main"><div class="row-title"><span class="dot ' + wfTone + '"></span>Workforce</div><div class="row-sub">' + esc(wfSub) + "</div></div>" +
-          '<div class="row-right"><span>' + rosterOnly.length + " agents</span><span>›</span></div>" +
-        "</button>" +
-        (conflictCount ? (
-          '<button type="button" class="row" id="btn-sheet-conflicts">' +
-            '<div class="row-main"><div class="row-title"><span class="dot amber"></span>File Conflicts</div><div class="row-sub">Paths touched by multiple agents</div></div>' +
-            '<div class="row-right"><span class="badge amber">' + conflictCount + "</span><span>›</span></div>" +
-          "</button>"
-        ) : "") +
-        '<button type="button" class="row" id="btn-sheet-commits">' +
-          '<div class="row-main"><div class="row-title">Git Commits</div><div class="row-sub">Head ' + esc(state.headCommit) + " · " + relTime(state.lastSyncIso) + "</div></div>" +
-          '<div class="row-right"><span class="git-chip">' + commitCount + "</span><span>›</span></div>" +
-        "</button>" +
-        '<button type="button" class="row" id="btn-quick-inbox">' +
-          '<div class="row-main"><div class="row-title">Quick-Action Inbox</div><div class="row-sub">Capture an idea or dictation to #peer-floor</div></div>' +
-          '<div class="row-right"><span>Capture</span><span>›</span></div>' +
-        "</button>" +
+    const composerHtml =
+      '<div class="hero-composer">' +
+        '<div class="chip-strip">' + mentionChips + "</div>" +
+        '<div class="composer-wrap">' +
+          '<div id="today-mention-pop" class="mention-pop hidden" role="listbox" aria-label="Mention suggestions"></div>' +
+          '<form id="today-floor-form" class="composer">' +
+            '<input id="today-floor-input" class="input" placeholder="Dispatch to #peer-floor… type @ to mention" autocomplete="off" enterkeyhint="send" required />' +
+            '<button type="submit" class="btn btn-pri btn-sm">Send</button>' +
+          "</form>" +
+        "</div>" +
       "</div>";
 
-    return heroHtml + sheetsPanel;
+    const pulseTone = state.link === "live" ? "green" : state.link === "polling" ? "amber" : "neutral";
+    const heroKicker = topNeed ? "5-Second Brief · Needs Your Call" : ("Executive Command · " + VERSION);
+    const heroBadge = topNeed
+      ? '<span class="badge amber"><span class="dot amber"></span>Waiting</span>'
+      : secretsMissing(state.health)
+        ? '<span class="badge amber"><span class="dot amber"></span>Secrets</span>'
+        : '<span class="badge ' + pulseTone + '"><span class="dot ' + (pulseTone === "neutral" ? "muted" : pulseTone) + '"></span>' + esc(state.headCommit) + "</span>";
+
+    const heroBodyHtml = topNeed ? (
+      '<h2 class="hero-title">' + esc(topNeed.title || topNeed.summary || "Decision Needed") + "</h2>" +
+      '<p class="hero-copy">' + esc(topNeed.body || topNeed.reason || "") + "</p>" +
+      '<div class="hero-meta">' +
+        (topNeed.owner ? '<span>Owner: <strong>' + esc(topNeed.owner) + "</strong></span>" : "") +
+        '<span class="git-chip">' + esc(topNeed.ref || topNeed.key || "needs_seth.json") + "</span>" +
+      "</div>" +
+      '<div class="hero-actions">' +
+        '<button type="button" class="btn btn-pri" data-ping-floor="Approved go on: ' + esc(topNeed.title || topNeed.key || "need") + '">Approve Go</button>' +
+        '<button type="button" class="btn btn-sec" data-ping-floor="HOLD: ' + esc(topNeed.title || topNeed.key || "need") + '">Hold</button>' +
+        '<button type="button" class="btn btn-sec" data-jump-agent="peer-floor">#peer-floor</button>' +
+      "</div>"
+    ) : secretsMissing(state.health) ? (
+      '<h2 class="hero-title">Worker secrets not armed</h2>' +
+      '<p class="hero-copy">Add <span class="mono">GITHUB_PAT</span> and <span class="mono">STACK_ACCESS_PIN</span> as <strong>Secrets</strong> on Worker <span class="mono">the-stack-bff</span> (not Pages Variables). Then tap the sync pill.</p>' +
+      '<div class="hero-actions"><button type="button" class="btn btn-pri" id="btn-resync">Retry Sync</button><button type="button" class="btn btn-sec" data-go="stats">Usage &amp; Git</button></div>'
+    ) : (
+      '<h2 class="hero-title">Workforce Pulse</h2>' +
+      '<p class="hero-copy"><strong>' + workingCount + " active</strong> · " + waitingCount + " waiting · " + blockedCount + ' blocked · Head <span class="git-chip">' + esc(state.headCommit) + "</span></p>" +
+      '<div class="hero-meta">' +
+        "<span>Synced " + relTime(state.lastSyncIso) + "</span>" +
+        "<span>$" + ZERO_SPEND + " cap</span>" +
+        "<span>Queue OFF</span>" +
+        (conflictCount ? '<span class="badge amber">' + conflictCount + " conflict" + (conflictCount === 1 ? "" : "s") + "</span>" : "") +
+      "</div>"
+    );
+
+    const heroHtml =
+      '<section class="hero">' +
+        '<div class="hero-top">' +
+          '<span class="kicker">' + esc(heroKicker) + "</span>" +
+          '<div class="hero-top-actions">' +
+            heroBadge +
+            '<button type="button" class="btn btn-sec btn-sm voice-btn" id="btn-voice-brief">🔊 Voice Brief</button>' +
+          "</div>" +
+        "</div>" +
+        heroBodyHtml +
+        composerHtml +
+      "</section>";
+
+    const streamCol =
+      '<div class="today-col">' +
+        '<div class="section-head"><span class="section-title">Live #peer-floor Stream</span><button type="button" class="section-link" data-jump-agent="peer-floor">Open Room ›</button></div>' +
+        '<div class="panel">' +
+          '<div class="stream-head">' +
+            '<span class="row-title" style="font-size:13.5px;"><span class="dot green"></span>#peer-floor <span class="mono">· ' + allFloorMsgs.length + " msgs</span></span>" +
+            '<button type="button" class="btn btn-sec btn-sm" data-jump-agent="peer-floor">Jump ›</button>' +
+          "</div>" +
+          '<div id="today-floor-log" class="chat-log today-floor-log">' +
+            (floorHtml || '<div class="empty">Message everyone on #peer-floor — commits straight to Git.</div>') +
+          "</div>" +
+        "</div>" +
+      "</div>";
+
+    const sheetsCol =
+      '<div class="today-col">' +
+        '<div class="section-head"><span class="section-title">Command Sheets</span></div>' +
+        '<div class="panel">' +
+          '<button type="button" class="row" id="btn-sheet-workforce">' +
+            '<div class="row-main"><div class="row-title"><span class="dot ' + wfTone + '"></span>Workforce</div><div class="row-sub">' + esc(wfSub) + "</div></div>" +
+            '<div class="row-right"><span>' + rosterOnly.length + " agents</span><span>›</span></div>" +
+          "</button>" +
+          '<button type="button" class="row" id="btn-sheet-conflicts">' +
+            '<div class="row-main"><div class="row-title"><span class="dot ' + (conflictCount ? "amber" : "green") + '"></span>File Conflicts</div><div class="row-sub">' + (conflictCount ? "Paths touched by multiple agents" : "No multi-agent path overlaps") + "</div></div>" +
+            '<div class="row-right">' + (conflictCount ? '<span class="badge amber">' + conflictCount + "</span>" : "<span>Clean</span>") + "<span>›</span></div>" +
+          "</button>" +
+          '<button type="button" class="row" id="btn-sheet-commits">' +
+            '<div class="row-main"><div class="row-title">Git Commits</div><div class="row-sub">Head ' + esc(state.headCommit) + " · " + relTime(state.lastSyncIso) + "</div></div>" +
+            '<div class="row-right"><span class="git-chip">' + commitCount + "</span><span>›</span></div>" +
+          "</button>" +
+          '<button type="button" class="row" id="btn-quick-inbox">' +
+            '<div class="row-main"><div class="row-title">Quick-Action Inbox</div><div class="row-sub">Capture an idea or dictation to #peer-floor</div></div>' +
+            '<div class="row-right"><span>Capture</span><span>›</span></div>' +
+          "</button>" +
+        "</div>" +
+      "</div>";
+
+    return heroHtml + '<div class="today-grid">' + streamCol + sheetsCol + "</div>";
   }
 
   function renderAgents() {
@@ -687,9 +964,7 @@
     const slug = dmSlugForAgent(agent.id);
     const msgs = state.messagesBySlug[slug] || [];
     const usageTone = agent.usagePct >= 85 ? "red" : agent.usagePct >= 70 ? "amber" : "";
-    const memBits = (state.sharedMemory.entries || []).slice(0, 3).map(function (e) {
-      return '<div class="row-sub">• ' + esc(e.fact) + ' <span class="git-chip">' + esc(e.source || "memory") + "</span></div>";
-    }).join("");
+    const pctText = (agent.pctEstimated ? "~" : "") + agent.usagePct + "% used";
 
     const switcher = state.agents.map(function (a) {
       const am = agentMeta(a.status);
@@ -712,21 +987,40 @@
       );
     }).join("");
 
+    const memEntries = state.sharedMemory.entries || [];
+    const memRows = memEntries.map(function (e) {
+      return (
+        '<div class="row">' +
+          '<div class="row-main">' +
+            '<div class="row-title" style="white-space:normal;">' + esc(e.fact || "") + "</div>" +
+            '<div class="row-sub" style="margin-top:4px;"><span class="git-chip">' + esc(e.source || "memory") + '</span>' + (e.updated_at ? " · " + relTime(e.updated_at) : "") + "</div>" +
+          "</div>" +
+        "</div>"
+      );
+    }).join("");
+
     return (
       '<div class="agent-strip" style="margin-bottom:14px;">' + switcher + "</div>" +
       '<section class="hero">' +
         '<div class="hero-top">' +
           '<div><span class="kicker">' + esc(agent.role) + " · " + esc(agent.model) + '</span><h2 class="hero-title" style="margin:3px 0 0;">' + esc(agent.name) + "</h2></div>" +
-          '<span class="badge ' + st.tone + '"><span class="dot ' + st.tone + '"></span>' + esc(st.label) + "</span>" +
-        "</div>" +
-        '<div style="margin-bottom:12px;">' +
-          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;">' +
-            '<span class="git-chip">Evidence: ' + esc(agent.evidence) + "</span>" +
-            (agent.id !== "peer-floor" ? '<span class="mono">' + agent.usagePct + "% used</span>" : "") +
+          '<div class="hero-top-actions">' +
+            '<span class="badge ' + st.tone + '"><span class="dot ' + st.tone + '"></span>' + esc(st.label) + "</span>" +
+            '<button type="button" class="btn btn-sec btn-sm voice-btn" id="btn-voice-agent">🔊 Read Latest</button>' +
           "</div>" +
-          (agent.id !== "peer-floor" ? '<div class="meter"><div class="meter-fill ' + usageTone + '" style="width:' + agent.usagePct + '%"></div></div>' : "") +
         "</div>" +
-        (memBits ? '<div class="panel" style="margin-bottom:12px;"><div class="section-title" style="margin-bottom:6px;">Shared Memory</div>' + memBits + "</div>" : "") +
+        '<div class="quota-box">' +
+          '<div class="quota-top">' +
+            '<span class="git-chip">Evidence: ' + esc(agent.evidence) + "</span>" +
+            (agent.id !== "peer-floor"
+              ? '<div class="usage-row-actions"><span class="mono">' + esc(pctText) + " · " + esc(agent.activitySummary) + '</span><button type="button" class="btn btn-sec btn-sm" data-edit-usage="' + esc(agent.id) + '">Update Quota</button></div>'
+              : '<span class="mono">' + esc(agent.activitySummary) + "</span>") +
+          "</div>" +
+          (agent.id !== "peer-floor"
+            ? '<div class="meter"><div class="meter-fill ' + usageTone + '" style="width:' + agent.usagePct + '%"></div></div>' +
+              '<div class="quota-meta"><span>Window: ' + esc(agent.reset) + '</span><span>' + esc(agent.usageNote || ("Last activity " + relTime(agent.lastCallAt))) + "</span></div>"
+            : "") +
+        "</div>" +
         '<div id="chat-log" class="chat-log">' + (msgHtml || '<div class="empty">No local messages yet — pings commit via BFF to ' + esc(slug) + ".</div>") + "</div>" +
         '<div class="chip-strip">' +
           (agent.id === "peer-floor" ? '<button type="button" class="ctx-chip" data-insert="@all">@all</button>' + state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
@@ -742,7 +1036,9 @@
             '<button type="submit" class="btn btn-pri btn-sm">' + (agent.id === "peer-floor" ? "Send" : "Ping") + "</button>" +
           "</form>" +
         "</div>" +
-      "</section>"
+      "</section>" +
+      '<div class="section-head"><span class="section-title">Shared Team Memory</span><span class="mono">' + memEntries.length + " entries</span></div>" +
+      '<div class="panel">' + (memRows || '<div class="empty">No shared team memory entries yet.</div>') + "</div>"
     );
   }
 
@@ -755,7 +1051,7 @@
       if (state.workFilter === "hold") return m.label === "On Hold";
       return true;
     });
-    const hero = filtered[0] || state.items[0];
+    const hero = filtered[0] || (state.workFilter === "all" ? state.items[0] : null);
     const rest = hero ? filtered.filter(function (i) { return i.id !== hero.id; }) : [];
     const st = hero ? itemStateMeta(hero.state) : { label: "Empty", tone: "muted" };
     const heroConflict = hero ? conflictsForRef(hero.ref) : [];
@@ -772,7 +1068,17 @@
           '<button type="button" class="btn btn-sec" data-qc="' + esc(hero.id) + '">File QC</button>' +
         "</div>" +
       "</section>"
-    ) : '<div class="empty">No workstreams found.</div>';
+    ) : (
+      '<section class="hero">' +
+        '<div class="hero-top"><span class="kicker">Work Board · ' + VERSION + '</span><span class="badge neutral">Empty Filter</span></div>' +
+        '<h2 class="hero-title">No items in this view</h2>' +
+        '<p class="hero-copy">Nothing matches the selected work filter right now. Switch back to Active workstreams or sync with Git.</p>' +
+        '<div class="hero-actions">' +
+          '<button type="button" class="btn btn-pri" data-work-filter="all">Show Active</button>' +
+          '<button type="button" class="btn btn-sec" id="btn-sync-now">Sync Now</button>' +
+        "</div>" +
+      "</section>"
+    );
 
     const rows = rest.map(function (i) {
       const info = itemStateMeta(i.state);
@@ -800,19 +1106,39 @@
   function renderStats() {
     const modelAgents = state.agents.filter(function (a) { return a.id !== "peer-floor"; });
     const anyLiveUsage = modelAgents.some(function (a) { return a.hasLiveUsage; });
+    const totalPct = modelAgents.reduce(function (sum, a) { return sum + (a.usagePct || 0); }, 0);
+    const avgPct = modelAgents.length ? Math.round(totalPct / modelAgents.length) : 0;
+    const totalEvents = modelAgents.reduce(function (sum, a) { return sum + (a.activity24h || 0); }, 0);
+    const activeCount = modelAgents.filter(function (a) { return a.status === "working" || a.status === "completed"; }).length;
+    const peakAgent = modelAgents.reduce(function (best, a) {
+      return !best || (a.usagePct || 0) > (best.usagePct || 0) ? a : best;
+    }, null);
+    const avgTone = avgPct >= 85 ? "red" : avgPct >= 70 ? "amber" : "";
+
     const usageRows = modelAgents.map(function (a) {
       const m = agentMeta(a.status);
       const tone = a.usagePct >= 85 ? "red" : a.usagePct >= 70 ? "amber" : "";
-      const pctLabel = a.hasLiveUsage ? (a.usagePct + "%") : (state.online ? "0%" : "—");
+      const pctLabel = a.hasLiveUsage ? ((a.pctEstimated ? "~" : "") + a.usagePct + "%") : (state.online ? "0%" : "—");
+      const lastCallTxt = a.lastCallAt ? (" · last " + relTime(a.lastCallAt)) : "";
       return (
-        '<button type="button" class="row" data-jump-agent="' + esc(a.id) + '" style="flex-direction:column;align-items:stretch;gap:7px;">' +
-          '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">' +
-            '<div class="row-main"><div class="row-title"><span class="dot ' + m.tone + '"></span>' + esc(a.name) + ' <span class="mono">· ' + esc(a.model) + '</span></div><div class="row-sub">' + esc(m.label) + " · " + esc(a.reset) + "</div></div>" +
-            '<strong class="mono">' + pctLabel + "</strong>" +
+        '<div class="usage-row">' +
+          '<div class="usage-row-top">' +
+            '<div class="usage-row-main">' +
+              '<div class="row-title"><span class="dot ' + m.tone + '"></span>' + esc(a.name) + ' <span class="mono">· ' + esc(a.model) + "</span></div>" +
+              '<div class="row-sub">' + esc(m.label) + " · " + esc(a.reset) + esc(lastCallTxt) + " · " + esc(a.activitySummary) + "</div>" +
+            "</div>" +
+            '<div class="usage-row-actions">' +
+              '<strong class="mono">' + esc(pctLabel) + "</strong>" +
+              '<button type="button" class="btn btn-sec btn-sm" data-edit-usage="' + esc(a.id) + '">Update Quota</button>' +
+              '<button type="button" class="btn btn-sec btn-sm" data-jump-agent="' + esc(a.id) + '">DM ›</button>' +
+            "</div>" +
           "</div>" +
           '<div class="meter" style="margin-top:0;"><div class="meter-fill ' + tone + '" style="width:' + a.usagePct + '%"></div></div>' +
-          '<div><span class="git-chip">' + esc(a.evidence) + "</span></div>" +
-        "</button>"
+          '<div class="usage-row-meta">' +
+            '<span class="git-chip">' + esc(a.evidence) + "</span>" +
+            (a.usageNote ? '<span class="row-sub" style="margin-top:0;">' + esc(a.usageNote) + "</span>" : "") +
+          "</div>" +
+        "</div>"
       );
     }).join("");
 
@@ -820,21 +1146,23 @@
       ? ('Health: <strong>' + esc(state.health.status || "—") + "</strong> · open approvals " + esc(String(state.health.open_approvals || 0)) + " · cap $" + esc(String(state.health.zero_spend_cap_usd ?? ZERO_SPEND)))
       : "Health not loaded";
     const shaTone = state.link === "live" ? "green" : state.link === "polling" ? "amber" : "neutral";
-    const usageStatus = anyLiveUsage ? "Live telemetry" : (state.online ? "No usage data in vault" : "Offline — tap Sync Now");
+    const usageStatus = anyLiveUsage ? "Live telemetry" : (state.online ? "Live Git & floor activity" : "Offline — tap Sync Now");
 
     return (
       '<section class="hero">' +
-        '<div class="hero-top"><span class="kicker">Git Source of Truth · ' + VERSION + '</span><span class="badge ' + shaTone + '"><span class="dot ' + (shaTone === "neutral" ? "muted" : shaTone) + '"></span>' + esc(state.headCommit) + "</span></div>" +
-        '<h2 class="hero-title">Worker BFF</h2>' +
-        '<p class="hero-copy"><span class="mono">' + esc(creds.bff) + "</span><br/>Last sync " + relTime(state.lastSyncIso) + " · " + state.outbox.length + " pending · Queue OFF<br/>" + healthLine + "</p>" +
+        '<div class="hero-top"><span class="kicker">System &amp; Quota Pulse · ' + esc(VERSION) + '</span><span class="badge ' + shaTone + '"><span class="dot ' + (shaTone === "neutral" ? "muted" : shaTone) + '"></span>' + esc(state.headCommit) + "</span></div>" +
+        '<h2 class="hero-title">Workforce &amp; BFF Pulse</h2>' +
+        '<p class="hero-copy">Avg quota <strong>' + avgPct + "%</strong> across " + modelAgents.length + " agents (" + activeCount + " active · " + totalEvents + " events 24h" + (peakAgent ? (" · peak " + esc(peakAgent.name) + " " + peakAgent.usagePct + "%") : "") + ')<br/><span class="mono">' + esc(creds.bff) + "</span> · Last sync " + relTime(state.lastSyncIso) + " · " + state.outbox.length + " pending · Queue OFF · $" + ZERO_SPEND + " cap<br/>" + healthLine + "</p>" +
+        '<div class="meter" style="margin-bottom:14px;"><div class="meter-fill ' + avgTone + '" style="width:' + avgPct + '%"></div></div>' +
         '<div class="hero-actions">' +
           '<button type="button" class="btn btn-pri btn-sm" id="btn-sync-now">Sync Now</button>' +
           '<button type="button" class="btn btn-sec btn-sm" id="btn-timemachine">Time Machine</button>' +
+          '<button type="button" class="btn btn-sec btn-sm" id="btn-voice-settings">Voice Settings</button>' +
           (state.outbox.length ? '<button type="button" class="btn btn-sec btn-sm" id="btn-flush-ob">Flush Outbox (' + state.outbox.length + ")</button>" : "") +
           '<button type="button" class="btn btn-danger btn-sm" id="btn-sign-out">Lock</button>' +
         "</div>" +
       "</section>" +
-      '<div class="section-head"><span class="section-title">All-Agent Model &amp; Usage Tracker</span><span class="mono">' + usageStatus + "</span></div>" +
+      '<div class="section-head"><span class="section-title">Live All-Agent Usage Tracker</span><span class="mono">' + esc(usageStatus) + "</span></div>" +
       '<div class="panel">' + usageRows + "</div>"
     );
   }
@@ -920,7 +1248,7 @@
 
   function openQuickInbox() {
     openSheet(
-      '<div class="sheet-head"><div><h2 class="sheet-title">Quick-Action Inbox</h2><p class="sheet-sub">Type or use iPhone keyboard dictation — zero custom voice</p></div><button type="button" class="orb-btn" style="width:32px;height:32px;" data-close-sheet>✕</button></div>' +
+      '<div class="sheet-head"><div><h2 class="sheet-title">Quick-Action Inbox</h2><p class="sheet-sub">Type or use iPhone keyboard dictation — commits to #peer-floor</p></div><button type="button" class="orb-btn" style="width:32px;height:32px;" data-close-sheet>✕</button></div>' +
       '<form id="quick-form">' +
         '<div class="field"><label for="quick-body">Idea / instruction</label>' +
         '<textarea id="quick-body" class="input" rows="5" placeholder="Dictate with the iPhone keyboard mic, then tap Capture…" required></textarea></div>' +
@@ -1128,6 +1456,157 @@
     }
   }
 
+  function openUsageEditSheet(agentId) {
+    const agent = state.agents.find(function (a) { return a.id === agentId; });
+    if (!agent) return;
+    openSheet(
+      '<div class="sheet-head"><div><h2 class="sheet-title">Update Quota · ' + esc(agent.name) + '</h2><p class="sheet-sub">' + esc(agent.model) + " · commits to usage.json</p></div><button type=\"button\" class=\"orb-btn\" style=\"width:32px;height:32px;\" data-close-sheet>✕</button></div>" +
+      '<form id="usage-edit-form">' +
+        '<div class="field"><label for="usage-pct">% Used (0–100)</label>' +
+        '<input id="usage-pct" class="input mono" type="number" min="0" max="100" step="1" value="' + esc(String(agent.usagePct || 0)) + '" required /></div>' +
+        '<div class="field"><label for="usage-reset">Reset Window</label>' +
+        '<input id="usage-reset" class="input" type="text" value="' + esc(agent.reset || "") + '" placeholder="e.g. 4h window, Daily, or ISO reset time" /></div>' +
+        '<div class="field"><label for="usage-note">Note</label>' +
+        '<textarea id="usage-note" class="input" rows="3" placeholder="Current quota note or pool status">' + esc(agent.usageNote || "") + "</textarea></div>" +
+        '<div class="hero-actions"><button type="submit" id="usage-save-btn" class="btn btn-pri" style="width:100%;">Save Quota Update</button></div>' +
+      "</form>"
+    );
+
+    document.getElementById("usage-edit-form").addEventListener("submit", async function (e) {
+      e.preventDefault();
+      const rawVal = Number(document.getElementById("usage-pct").value);
+      if (isNaN(rawVal) || rawVal < 0 || rawVal > 100) {
+        toast("% Used must be between 0 and 100", "warning");
+        return;
+      }
+      const pctVal = Math.max(0, Math.min(100, Math.round(rawVal)));
+      const resetVal = document.getElementById("usage-reset").value.trim();
+      const noteVal = document.getElementById("usage-note").value.trim();
+      const statusVal = pctVal >= 95 ? "capped" : pctVal >= 80 ? "attention" : "ok";
+      const providerId = agent.providerId || agent.id;
+      const saveBtn = document.getElementById("usage-save-btn");
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
+
+      const payload = {
+        id: providerId,
+        pct_used: pctVal,
+        window_label: resetVal || agent.reset,
+        reset_at: resetVal || agent.resetAt || null,
+        note: noteVal,
+        status: statusVal,
+        model: agent.model
+      };
+
+      try {
+        const out = await bff("/api/usage", {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+        if (out && out.usage && Array.isArray(out.usage.providers)) {
+          state.usageRaw = out.usage;
+        } else {
+          if (!state.usageRaw || typeof state.usageRaw !== "object" || Array.isArray(state.usageRaw)) {
+            state.usageRaw = { version: 1, providers: Array.isArray(state.usageRaw) ? state.usageRaw : [] };
+          }
+          if (!Array.isArray(state.usageRaw.providers)) state.usageRaw.providers = [];
+          const list = state.usageRaw.providers;
+          const idx = list.findIndex(function (p) {
+            const pid = String(p.id || "").toLowerCase();
+            const pag = String(p.agent || "").toLowerCase();
+            return pid === String(providerId).toLowerCase() || pid === agent.id.toLowerCase() || pag === agent.name.toLowerCase();
+          });
+          const nextEntry = Object.assign({}, idx >= 0 ? list[idx] : {}, {
+            id: providerId,
+            agent: (idx >= 0 && list[idx].agent) || agent.name,
+            model: agent.model,
+            pct_used: pctVal,
+            window_label: payload.window_label,
+            reset_at: payload.reset_at,
+            note: noteVal,
+            status: statusVal,
+            source: "manual-ui",
+            updated_at: new Date().toISOString()
+          });
+          if (idx >= 0) list[idx] = nextEntry;
+          else list.push(nextEntry);
+          state.usageRaw.updated_at = nextEntry.updated_at;
+        }
+        normalizeHubData();
+        closeSheet();
+        render();
+        toast("Updated " + agent.name + " quota (" + pctVal + "%)", "info");
+      } catch (err) {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save Quota Update"; }
+        toast((err && err.message) || "Failed to update quota", "error");
+      }
+    });
+  }
+
+  function openVoiceSettingsSheet() {
+    const savedKey = getSavedElevenKey();
+    const savedVoice = getSavedVoiceId();
+    openSheet(
+      '<div class="sheet-head"><div><h2 class="sheet-title">Voice Settings</h2><p class="sheet-sub">$0 Web Speech by default · Optional ElevenLabs Turbo v2.5</p></div><button type="button" class="orb-btn" style="width:32px;height:32px;" data-close-sheet>✕</button></div>' +
+      '<form id="voice-settings-form">' +
+        '<div class="field"><label for="voice-el-key">ElevenLabs API Key (optional · browser localStorage only)</label>' +
+        '<input id="voice-el-key" class="input mono" type="password" value="' + esc(savedKey) + '" placeholder="xi-… leave blank for $0 Web Speech" autocomplete="off" /></div>' +
+        '<div class="field"><label for="voice-el-id">ElevenLabs Voice ID</label>' +
+        '<input id="voice-el-id" class="input mono" type="text" value="' + esc(savedVoice) + '" placeholder="' + DEFAULT_VOICE_ID + '" autocomplete="off" /></div>' +
+        '<div class="chip-strip">' +
+          '<button type="button" class="ctx-chip" data-voice-preset="JBFqnCBsd6RMkjVDRZzb">George (Default)</button>' +
+          '<button type="button" class="ctx-chip" data-voice-preset="21m00Tcm4TlvDq8ikWAM">Rachel</button>' +
+          '<button type="button" class="ctx-chip" data-voice-preset="pNInz6obpgDQGcFmaJgB">Adam</button>' +
+        "</div>" +
+        '<div class="hero-actions" style="margin-top:8px;">' +
+          '<button type="submit" class="btn btn-pri btn-sm">Save Settings</button>' +
+          '<button type="button" class="btn btn-sec btn-sm voice-btn" id="btn-voice-test">🔊 Test Voice</button>' +
+          '<button type="button" class="btn btn-danger btn-sm" id="btn-voice-clear">Clear Key ($0)</button>' +
+        "</div>" +
+      "</form>"
+    );
+
+    const keyEl = document.getElementById("voice-el-key");
+    const idEl = document.getElementById("voice-el-id");
+    document.getElementById("sheet").querySelectorAll("[data-voice-preset]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        if (idEl) idEl.value = b.dataset.voicePreset;
+      });
+    });
+
+    document.getElementById("voice-settings-form").addEventListener("submit", function (e) {
+      e.preventDefault();
+      const k = keyEl ? keyEl.value.trim() : "";
+      const v = (idEl && idEl.value.trim()) || DEFAULT_VOICE_ID;
+      try {
+        if (k) localStorage.setItem(ELEVEN_KEY_STORAGE, k);
+        else localStorage.removeItem(ELEVEN_KEY_STORAGE);
+        localStorage.setItem(ELEVEN_VOICE_STORAGE, v);
+      } catch (err) {}
+      toast(k ? "Saved ElevenLabs key + voice " + v : "Saved $0 Web Speech mode", "info");
+      closeSheet();
+    });
+
+    const testBtn = document.getElementById("btn-voice-test");
+    if (testBtn) {
+      testBtn.addEventListener("click", function () {
+        speakText("The Stack voice agent is online. Zero spend cap confirmed.", testBtn, {
+          apiKey: keyEl ? keyEl.value.trim() : "",
+          voiceId: (idEl && idEl.value.trim()) || DEFAULT_VOICE_ID
+        });
+      });
+    }
+
+    const clearBtn = document.getElementById("btn-voice-clear");
+    if (clearBtn) {
+      clearBtn.addEventListener("click", function () {
+        stopSpeaking();
+        try { localStorage.removeItem(ELEVEN_KEY_STORAGE); } catch (err) {}
+        if (keyEl) keyEl.value = "";
+        toast("Cleared ElevenLabs key — $0 Web Speech active", "info");
+      });
+    }
+  }
+
   let paletteIndex = 0;
 
   function paletteRows(query) {
@@ -1248,10 +1727,14 @@
       state.messagesBySlug[channel] = (state.messagesBySlug[channel] || []).concat([{
         author: "Seth", body: body, created_at: new Date().toISOString()
       }]);
-      if (state.view === "agents") render();
+      normalizeHubData();
+      if (state.view === "agents" || state.view === "today") render();
     } catch (e) {
       state.outbox.unshift({ id: "evt-" + Date.now(), type: "message", slug: channel, body: body });
       saveOutbox();
+      state.messagesBySlug[channel] = (state.messagesBySlug[channel] || []).concat([{
+        author: "Seth", body: body, created_at: new Date().toISOString(), _queued: true
+      }]);
       state.link = (typeof navigator !== "undefined" && navigator.onLine === false) ? "offline" : state.link;
       toast("Offline — saved to Outbox", "warning");
       render();
@@ -1275,6 +1758,19 @@
     root.querySelectorAll("[data-work-filter]").forEach(function (b) { b.addEventListener("click", function () { state.workFilter = b.dataset.workFilter; render(); }); });
     root.querySelectorAll("[data-inspect]").forEach(function (b) { b.addEventListener("click", function () { openItemSheet(b.dataset.inspect); }); });
     root.querySelectorAll("[data-qc]").forEach(function (b) { b.addEventListener("click", function () { openQcSheet(b.dataset.qc); }); });
+    root.querySelectorAll("[data-edit-usage]").forEach(function (b) { b.addEventListener("click", function () { openUsageEditSheet(b.dataset.editUsage); }); });
+
+    const vbBtn = document.getElementById("btn-voice-brief");
+    if (vbBtn) vbBtn.addEventListener("click", function () { speakText(buildTodayBriefText(), vbBtn); });
+    const vaBtn = document.getElementById("btn-voice-agent");
+    if (vaBtn) {
+      vaBtn.addEventListener("click", function () {
+        const agent = state.agents.find(function (a) { return a.id === state.activeAgentId; }) || state.agents[0];
+        speakText(buildAgentLatestText(agent), vaBtn);
+      });
+    }
+    const vsBtn = document.getElementById("btn-voice-settings");
+    if (vsBtn) vsBtn.addEventListener("click", openVoiceSettingsSheet);
 
     const qi = document.getElementById("btn-quick-inbox");
     if (qi) qi.addEventListener("click", openQuickInbox);
@@ -1370,7 +1866,6 @@
         if (!body) return;
         todayFloorInput.value = "";
         await sendToSlug("peer-floor", body);
-        render();
       });
     }
     const todayFloorLog = document.getElementById("today-floor-log");
@@ -1399,6 +1894,7 @@
           });
           toast("Ping committed via BFF", "info");
           state.messagesBySlug[slug] = (state.messagesBySlug[slug] || []).concat([{ author: "Seth", body: body, created_at: new Date().toISOString() }]);
+          normalizeHubData();
           render();
         } catch (err) {
           state.outbox.unshift({ id: "evt-" + Date.now(), type: "message", agentId: resolvedId, slug: slug, body: body });
