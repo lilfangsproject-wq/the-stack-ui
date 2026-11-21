@@ -621,7 +621,7 @@
           '<button type="button" class="row" data-jump-agent="peer-floor">' +
             '<div class="row-main"><div class="row-title"><span class="dot green"></span>#peer-floor</div><div class="row-sub">Message all agents · ' + floorMsgs.length + " recent</div></div>" +
             '<div class="row-right"><span>Open</span><span>›</span></div>' +
-          "</button>" +
+          "</button>"
         ) : "") +
         '<button type="button" class="row" id="btn-sheet-workforce">' +
           '<div class="row-main"><div class="row-title"><span class="dot ' + wfTone + '"></span>Workforce</div><div class="row-sub">' + esc(wfSub) + "</div></div>" +
@@ -631,7 +631,7 @@
           '<button type="button" class="row" id="btn-sheet-conflicts">' +
             '<div class="row-main"><div class="row-title"><span class="dot amber"></span>File Conflicts</div><div class="row-sub">Paths touched by multiple agents</div></div>' +
             '<div class="row-right"><span class="badge amber">' + conflictCount + "</span><span>›</span></div>" +
-          "</button>" +
+          "</button>"
         ) : "") +
         '<button type="button" class="row" id="btn-sheet-commits">' +
           '<div class="row-main"><div class="row-title">Git Commits</div><div class="row-sub">Head ' + esc(state.headCommit) + " · " + relTime(state.lastSyncIso) + "</div></div>" +
