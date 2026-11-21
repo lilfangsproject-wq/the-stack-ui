@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Sitemap: https://lilfangsproject-wq.github.io/the-stack-ui/sitemap.xml
+
+User-agent: GPTBot
+Disallow: /
