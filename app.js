@@ -276,7 +276,20 @@
     });
     state.items = combined;
 
-    const providers = Array.isArray(state.usageRaw.providers) ? state.usageRaw.providers : [];
+    const rawUsage = state.usageRaw || {};
+    let providers = [];
+    if (Array.isArray(rawUsage)) providers = rawUsage;
+    else if (Array.isArray(rawUsage.providers)) providers = rawUsage.providers;
+    else if (Array.isArray(rawUsage.agents)) providers = rawUsage.agents;
+    else if (rawUsage.providers && typeof rawUsage.providers === "object") {
+      providers = Object.keys(rawUsage.providers).map(function (k) { return Object.assign({ id: k }, rawUsage.providers[k]); });
+    } else if (rawUsage.agents && typeof rawUsage.agents === "object") {
+      providers = Object.keys(rawUsage.agents).map(function (k) { return Object.assign({ id: k }, rawUsage.agents[k]); });
+    } else if (typeof rawUsage === "object") {
+      providers = Object.keys(rawUsage).filter(function (k) {
+        return rawUsage[k] && typeof rawUsage[k] === "object" && !Array.isArray(rawUsage[k]);
+      }).map(function (k) { return Object.assign({ id: k }, rawUsage[k]); });
+    }
     const qcByBuilder = {};
     (state.qcReceipts || []).forEach(function (r) {
       const b = String(r.builder || "").toLowerCase();
@@ -350,15 +363,16 @@
         lastSeen = relTime(commit.date || commit.created_at);
       }
 
-      const usagePct = prov && typeof prov.pct === "number" ? prov.pct
-        : (prov && typeof prov.pct_used === "number" ? prov.pct_used
-          : (prov && typeof prov.used_pct === "number" ? prov.used_pct : 0));
+      const rawPct = prov ? (prov.pct ?? prov.pct_used ?? prov.used_pct ?? prov.usage_pct ?? prov.percent ?? (typeof prov.used === "number" && typeof prov.limit === "number" && prov.limit > 0 ? Math.round((prov.used / prov.limit) * 100) : null)) : null;
+      const hasLiveUsage = typeof rawPct === "number" && !isNaN(rawPct);
+      const usagePct = hasLiveUsage ? Math.max(0, Math.min(100, Math.round(rawPct))) : 0;
 
       return Object.assign({}, base, {
         status: status,
         evidence: evidence,
         lastSeen: lastSeen,
         usagePct: usagePct,
+        hasLiveUsage: hasLiveUsage,
         model: (prov && prov.model) || base.model,
         reset: (prov && (prov.reset || prov.reset_at)) || base.reset,
         qc: qc || null
@@ -368,13 +382,14 @@
     const notifs = [];
     (state.needsSeth || []).forEach(function (n) {
       const id = "ns-" + (n.key || n.id || n.title);
+      const ownerId = n.owner || n.agent ? String(n.owner || n.agent).toLowerCase().split(/[\s/]+/)[0] : "";
       notifs.push({
         id: id, cat: "action", unread: !state.readNotifs.has(id),
         time: relTime(n.created_at || n.updated_at),
         title: n.title || n.summary || "Decision needed",
         body: n.body || n.reason || "Waiting in needs_seth.json",
         proof: n.ref || n.key || "needs_seth.json",
-        targetType: "needs", targetId: n.key || ""
+        targetType: "needs", targetId: n.key || n.id || "", targetRef: n.ref || "", targetAgent: ownerId
       });
     });
     (state.commits || []).slice(0, 5).forEach(function (c) {
@@ -386,19 +401,22 @@
         title: String(c.message || "Commit").split("\n")[0].slice(0, 72),
         body: "By " + (c.author || "Git"),
         proof: "commit " + sha,
-        targetType: "stats", targetId: ""
+        targetType: "commit", targetId: sha, targetUrl: c.url || ""
       });
     });
     if (state.health && Array.isArray(state.health.alerts)) {
       state.health.alerts.forEach(function (a, i) {
         const id = "hl-" + i + "-" + (a.agent || "x");
+        const agMatch = state.agents.find(function (ag) {
+          return ag.id === String(a.agent || "").toLowerCase() || ag.name.toLowerCase() === String(a.agent || "").toLowerCase();
+        });
         notifs.push({
           id: id, cat: "action", unread: !state.readNotifs.has(id),
           time: "now",
           title: (a.agent || "Agent") + " · " + (a.issue || "Health"),
           body: a.recovery || "",
           proof: "health",
-          targetType: "stats", targetId: ""
+          targetType: agMatch ? "agent" : "stats", targetId: agMatch ? agMatch.id : ""
         });
       });
     }
@@ -573,7 +591,7 @@
       );
     }).join("");
 
-    const mentionChips = state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
+    const mentionChips = '<button type="button" class="ctx-chip" data-floor-mention="@all ">@all</button>' + state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
       return '<button type="button" class="ctx-chip" data-floor-mention="@' + esc(a.name) + ' ">@' + esc(a.name) + "</button>";
     }).join("");
 
@@ -587,10 +605,13 @@
           (floorHtml || '<div class="empty">Message everyone on #peer-floor — commits straight to Git.</div>') +
         "</div>" +
         '<div class="chip-strip">' + mentionChips + "</div>" +
-        '<form id="today-floor-form" class="composer">' +
-          '<input id="today-floor-input" class="input" placeholder="Message #peer-floor…" autocomplete="off" enterkeyhint="send" required />' +
-          '<button type="submit" class="btn btn-pri btn-sm">Send</button>' +
-        "</form>" +
+        '<div class="composer-wrap">' +
+          '<div id="today-mention-pop" class="mention-pop hidden" role="listbox" aria-label="Mention suggestions"></div>' +
+          '<form id="today-floor-form" class="composer">' +
+            '<input id="today-floor-input" class="input" placeholder="Message #peer-floor… type @ to mention" autocomplete="off" enterkeyhint="send" required />' +
+            '<button type="submit" class="btn btn-pri btn-sm">Send</button>' +
+          "</form>" +
+        "</div>" +
       "</section>"
     );
 
@@ -708,16 +729,19 @@
         (memBits ? '<div class="panel" style="margin-bottom:12px;"><div class="section-title" style="margin-bottom:6px;">Shared Memory</div>' + memBits + "</div>" : "") +
         '<div id="chat-log" class="chat-log">' + (msgHtml || '<div class="empty">No local messages yet — pings commit via BFF to ' + esc(slug) + ".</div>") + "</div>" +
         '<div class="chip-strip">' +
-          (agent.id === "peer-floor" ? state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
+          (agent.id === "peer-floor" ? '<button type="button" class="ctx-chip" data-insert="@all">@all</button>' + state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
             return '<button type="button" class="ctx-chip" data-insert="@' + esc(a.name) + '">@' + esc(a.name) + "</button>";
           }).join("") : "") +
           '<button type="button" class="ctx-chip" data-insert="Ping: confirm active commit SHA, current blocker, and next gate.">Reliable Ping</button>' +
           '<button type="button" class="ctx-chip" data-insert="QC needed: reviewer !== builder, include commit SHA + checks.">QC Gate</button>' +
         "</div>" +
-        '<form id="agent-chat-form" class="composer">' +
-          '<input id="agent-chat-input" class="input" placeholder="' + (agent.id === "peer-floor" ? "Message #peer-floor…" : "Message " + esc(agent.name) + "…") + '" autocomplete="off" enterkeyhint="send" required />' +
-          '<button type="submit" class="btn btn-pri btn-sm">' + (agent.id === "peer-floor" ? "Send" : "Ping") + "</button>" +
-        "</form>" +
+        '<div class="composer-wrap">' +
+          '<div id="agent-mention-pop" class="mention-pop hidden" role="listbox" aria-label="Mention suggestions"></div>' +
+          '<form id="agent-chat-form" class="composer">' +
+            '<input id="agent-chat-input" class="input" placeholder="' + (agent.id === "peer-floor" ? "Message #peer-floor… type @ to mention" : "Message " + esc(agent.name) + "…") + '" autocomplete="off" enterkeyhint="send" required />' +
+            '<button type="submit" class="btn btn-pri btn-sm">' + (agent.id === "peer-floor" ? "Send" : "Ping") + "</button>" +
+          "</form>" +
+        "</div>" +
       "</section>"
     );
   }
@@ -775,18 +799,20 @@
 
   function renderStats() {
     const modelAgents = state.agents.filter(function (a) { return a.id !== "peer-floor"; });
+    const anyLiveUsage = modelAgents.some(function (a) { return a.hasLiveUsage; });
     const usageRows = modelAgents.map(function (a) {
       const m = agentMeta(a.status);
       const tone = a.usagePct >= 85 ? "red" : a.usagePct >= 70 ? "amber" : "";
+      const pctLabel = a.hasLiveUsage ? (a.usagePct + "%") : (state.online ? "0%" : "—");
       return (
-        '<div class="row" style="flex-direction:column;align-items:stretch;gap:7px;">' +
+        '<button type="button" class="row" data-jump-agent="' + esc(a.id) + '" style="flex-direction:column;align-items:stretch;gap:7px;">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">' +
             '<div class="row-main"><div class="row-title"><span class="dot ' + m.tone + '"></span>' + esc(a.name) + ' <span class="mono">· ' + esc(a.model) + '</span></div><div class="row-sub">' + esc(m.label) + " · " + esc(a.reset) + "</div></div>" +
-            '<strong class="mono">' + a.usagePct + "%</strong>" +
+            '<strong class="mono">' + pctLabel + "</strong>" +
           "</div>" +
           '<div class="meter" style="margin-top:0;"><div class="meter-fill ' + tone + '" style="width:' + a.usagePct + '%"></div></div>' +
           '<div><span class="git-chip">' + esc(a.evidence) + "</span></div>" +
-        "</div>"
+        "</button>"
       );
     }).join("");
 
@@ -794,6 +820,7 @@
       ? ('Health: <strong>' + esc(state.health.status || "—") + "</strong> · open approvals " + esc(String(state.health.open_approvals || 0)) + " · cap $" + esc(String(state.health.zero_spend_cap_usd ?? ZERO_SPEND)))
       : "Health not loaded";
     const shaTone = state.link === "live" ? "green" : state.link === "polling" ? "amber" : "neutral";
+    const usageStatus = anyLiveUsage ? "Live telemetry" : (state.online ? "No usage data in vault" : "Offline — tap Sync Now");
 
     return (
       '<section class="hero">' +
@@ -807,7 +834,7 @@
           '<button type="button" class="btn btn-danger btn-sm" id="btn-sign-out">Lock</button>' +
         "</div>" +
       "</section>" +
-      '<div class="section-head"><span class="section-title">All-Agent Model &amp; Usage Tracker</span></div>' +
+      '<div class="section-head"><span class="section-title">All-Agent Model &amp; Usage Tracker</span><span class="mono">' + usageStatus + "</span></div>" +
       '<div class="panel">' + usageRows + "</div>"
     );
   }
@@ -1005,9 +1032,22 @@
         const n = state.notifications.find(function (x) { return x.id === b.dataset.openNotif; });
         if (!n) return;
         n.unread = false; state.readNotifs.add(n.id); saveReadNotifs(); render(); closeSheet();
-        if (n.targetType === "agent") jumpToAgent(n.targetId);
-        else if (n.targetType === "stats") { state.view = "stats"; render(); }
-        else { state.view = "today"; render(); }
+        if (n.targetType === "agent" && n.targetId) {
+          jumpToAgent(n.targetId);
+        } else if (n.targetType === "commit") {
+          state.view = "stats"; render(); openTimeMachine();
+        } else if (n.targetType === "needs") {
+          const hit = state.items.find(function (i) {
+            return (n.targetId && i.id === n.targetId) || (n.targetRef && i.ref === n.targetRef) || (i.title && n.title && i.title.toLowerCase() === n.title.toLowerCase());
+          });
+          if (hit) { state.view = "work"; render(); openItemSheet(hit.id); }
+          else if (n.targetAgent && state.agents.some(function (a) { return a.id === n.targetAgent; })) { jumpToAgent(n.targetAgent); }
+          else { state.view = "today"; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+        } else if (n.targetType === "stats") {
+          state.view = "stats"; render();
+        } else {
+          state.view = "today"; render();
+        }
       });
     });
   }
@@ -1247,7 +1287,73 @@
     const cmBtn = document.getElementById("btn-sheet-commits");
     if (cmBtn) cmBtn.addEventListener("click", openTimeMachine);
 
+    function bindMentionPicker(inputEl, popEl) {
+      if (!inputEl || !popEl) return;
+      let opts = [];
+      let activeIdx = 0;
+
+      function mentionTargets() {
+        return [{ id: "all", name: "all", role: "Broadcast to everyone", status: "working" }].concat(
+          state.agents.filter(function (a) { return a.id !== "peer-floor"; })
+        );
+      }
+
+      function hidePop() {
+        popEl.classList.add("hidden");
+        popEl.innerHTML = "";
+        opts = [];
+      }
+
+      function applyMention(name) {
+        const val = inputEl.value;
+        const pos = typeof inputEl.selectionStart === "number" ? inputEl.selectionStart : val.length;
+        const before = val.slice(0, pos);
+        const after = val.slice(pos);
+        const replaced = before.replace(/(^|\s)@([^\s]*)$/, "$1@" + name + " ");
+        inputEl.value = replaced + after;
+        if (inputEl.setSelectionRange) inputEl.setSelectionRange(replaced.length, replaced.length);
+        hidePop();
+        inputEl.focus();
+      }
+
+      function updatePop() {
+        const val = inputEl.value;
+        const pos = typeof inputEl.selectionStart === "number" ? inputEl.selectionStart : val.length;
+        const m = /(?:^|\s)@([^\s]*)$/.exec(val.slice(0, pos));
+        if (!m) { hidePop(); return; }
+        const q = m[1].toLowerCase();
+        opts = mentionTargets().filter(function (t) {
+          return !q || t.name.toLowerCase().indexOf(q) !== -1 || t.id.toLowerCase().indexOf(q) !== -1;
+        });
+        if (!opts.length) { hidePop(); return; }
+        if (activeIdx >= opts.length) activeIdx = 0;
+        popEl.innerHTML = opts.map(function (t, idx) {
+          const st = agentMeta(t.status);
+          return '<button type="button" class="mention-opt ' + (idx === activeIdx ? "active" : "") + '" role="option" data-pick-mention="' + esc(t.name) + '">' +
+            '<span><span class="dot ' + st.tone + '" style="margin-right:7px;"></span><strong>@' + esc(t.name) + '</strong></span>' +
+            '<span class="mono">' + esc(t.role || "") + "</span>" +
+          "</button>";
+        }).join("");
+        popEl.classList.remove("hidden");
+        popEl.querySelectorAll("[data-pick-mention]").forEach(function (btn) {
+          btn.addEventListener("mousedown", function (ev) { ev.preventDefault(); applyMention(btn.dataset.pickMention); });
+          btn.addEventListener("click", function (ev) { ev.preventDefault(); applyMention(btn.dataset.pickMention); });
+        });
+      }
+
+      inputEl.addEventListener("input", function () { activeIdx = 0; updatePop(); });
+      inputEl.addEventListener("keydown", function (e) {
+        if (popEl.classList.contains("hidden") || !opts.length) return;
+        if (e.key === "ArrowDown") { e.preventDefault(); activeIdx = (activeIdx + 1) % opts.length; updatePop(); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); activeIdx = (activeIdx - 1 + opts.length) % opts.length; updatePop(); }
+        else if (e.key === "Tab" || e.key === "Enter") { e.preventDefault(); applyMention(opts[activeIdx].name); }
+        else if (e.key === "Escape") { e.preventDefault(); hidePop(); }
+      });
+      inputEl.addEventListener("blur", function () { setTimeout(hidePop, 140); });
+    }
+
     const todayFloorInput = document.getElementById("today-floor-input");
+    bindMentionPicker(todayFloorInput, document.getElementById("today-mention-pop"));
     root.querySelectorAll("[data-floor-mention]").forEach(function (c) {
       c.addEventListener("click", function () {
         if (todayFloorInput) {
@@ -1271,6 +1377,7 @@
     if (todayFloorLog) todayFloorLog.scrollTop = todayFloorLog.scrollHeight;
 
     const chatInput = document.getElementById("agent-chat-input");
+    bindMentionPicker(chatInput, document.getElementById("agent-mention-pop"));
     root.querySelectorAll("[data-insert]").forEach(function (c) {
       c.addEventListener("click", function () { if (chatInput) { chatInput.value = (chatInput.value ? chatInput.value + " " : "") + c.dataset.insert; chatInput.focus(); } });
     });

@@ -353,8 +353,21 @@
 
     .chip-strip { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: none; }
     .chip-strip::-webkit-scrollbar { display: none; }
+    .composer-wrap { position: relative; }
     .composer { display: flex; gap: 8px; align-items: center; }
     .composer .input { border-radius: 999px; padding: 9px 15px; }
+    .mention-pop {
+      position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 30;
+      border-radius: 20px; background: var(--sheet-bg); border: 1px solid var(--glass-hero-bd);
+      box-shadow: var(--glass-hero-shadow); backdrop-filter: blur(18px) saturate(200%); -webkit-backdrop-filter: blur(18px) saturate(200%);
+      max-height: 210px; overflow-y: auto; padding: 4px;
+    }
+    .mention-opt {
+      width: 100%; text-align: left; padding: 9px 12px; border-radius: 14px;
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      font-size: 13px; color: var(--ink-1);
+    }
+    .mention-opt:hover, .mention-opt.active { background: var(--hover-tint); }
 
     .input, .textarea, .select {
       width: 100%; border-radius: 16px; background: var(--input-bg); border: 1px solid var(--glass-panel-bd);

@@ -1,18 +1,18 @@
-/* The Stack v50.3.0 Tahoe — network-first shell cache for Cloudflare Pages / GitHub Pages.
+/* The Stack v50.3.2 Tahoe — network-first shell cache for Cloudflare Pages / GitHub Pages.
  * Always fetches fresh UI when online so pushes appear immediately on iPhone PWAs.
  */
-const CACHE = "the-stack-shell-v50.3.0-tahoe";
+const CACHE = "the-stack-shell-v50.3.2-tahoe";
 const SHELL = [
   "./",
   "./index.html",
-  "./bg-tahoe.svg?v=50.3.0",
-  "./app.js?v=50.3.0",
-  "./polish.js?v=50.3.0",
+  "./bg-tahoe.svg?v=50.3.2",
+  "./app.js?v=50.3.2",
+  "./polish.js?v=50.3.2",
   "./config.js",
-  "./style.css?v=50.3.0",
-  "./favicon.svg?v=50.3.0",
-  "./manifest.webmanifest?v=50.3.0",
-  "./icon-180.png?v=50.3.0",
+  "./style.css?v=50.3.2",
+  "./favicon.svg?v=50.3.2",
+  "./manifest.webmanifest?v=50.3.2",
+  "./icon-180.png?v=50.3.2",
   "./icon-192.png",
   "./icon-512.png"
 ];
