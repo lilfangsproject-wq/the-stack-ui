@@ -171,7 +171,7 @@
     document.documentElement.dataset.theme = choice;
     document.documentElement.dataset.surface = surface;
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", surface === "light" ? "#cfd6e0" : "#0d1117");
+    if (meta) meta.setAttribute("content", surface === "light" ? "#d4e3f3" : "#061529");
     const btn = document.getElementById("surface-btn");
     if (btn) {
       const label = choice === "system" ? "System" : choice === "light" ? "Light" : "Dark";
@@ -695,12 +695,15 @@
         (memBits ? '<div class="panel" style="margin-bottom:12px;"><div class="section-title" style="margin-bottom:6px;">Shared Memory</div>' + memBits + "</div>" : "") +
         '<div id="chat-log" class="chat-log">' + (msgHtml || '<div class="empty">No local messages yet — pings commit via BFF to ' + esc(slug) + ".</div>") + "</div>" +
         '<div class="chip-strip">' +
+          (agent.id === "peer-floor" ? state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
+            return '<button type="button" class="ctx-chip" data-insert="@' + esc(a.name) + '">@' + esc(a.name) + "</button>";
+          }).join("") : "") +
           '<button type="button" class="ctx-chip" data-insert="Ping: confirm active commit SHA, current blocker, and next gate.">Reliable Ping</button>' +
           '<button type="button" class="ctx-chip" data-insert="QC needed: reviewer !== builder, include commit SHA + checks.">QC Gate</button>' +
         "</div>" +
         '<form id="agent-chat-form" class="composer">' +
-          '<input id="agent-chat-input" class="input" placeholder="Type or use iPhone keyboard dictation…" autocomplete="off" enterkeyhint="send" required />' +
-          '<button type="submit" class="btn btn-pri btn-sm">Ping</button>' +
+          '<input id="agent-chat-input" class="input" placeholder="' + (agent.id === "peer-floor" ? "Message #peer-floor…" : "Message " + esc(agent.name) + "…") + '" autocomplete="off" enterkeyhint="send" required />' +
+          '<button type="submit" class="btn btn-pri btn-sm">' + (agent.id === "peer-floor" ? "Send" : "Ping") + "</button>" +
         "</form>" +
       "</section>"
     );
