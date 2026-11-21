@@ -216,10 +216,9 @@
   async function bff(path, opts) {
     if (!creds.bff) throw new Error("BFF URL not set");
     const init = Object.assign({ method: "GET" }, opts || {});
-    init.headers = Object.assign({
-      "content-type": "application/json",
-      "x-stack-pin": creds.pin
-    }, init.headers || {});
+    const baseHeaders = { "x-stack-pin": creds.pin };
+    if (init.body) baseHeaders["content-type"] = "application/json";
+    init.headers = Object.assign(baseHeaders, init.headers || {});
     const res = await fetch(creds.bff.replace(/\/$/, "") + path, init);
     const text = await res.text();
     let data = null;
@@ -1456,8 +1455,10 @@
     e.preventDefault();
     const errEl = document.getElementById("pin-error");
     errEl.classList.add("hidden");
-    creds.bff = document.getElementById("bff-url").value.trim().replace(/\/$/, "");
-    creds.pin = document.getElementById("stack-pin").value;
+    let rawUrl = document.getElementById("bff-url").value.trim().replace(/\/api\/.*$/i, "").replace(/\/+$/, "");
+    if (rawUrl && !/^https?:\/\//i.test(rawUrl)) rawUrl = "https://" + rawUrl;
+    creds.bff = rawUrl;
+    creds.pin = document.getElementById("stack-pin").value.trim();
     saveCreds();
     try {
       const health = await bff("/api/health");
@@ -1473,7 +1474,9 @@
       await syncVault(false);
     } catch (err) {
       clearCreds();
-      errEl.textContent = "Could not unlock — check Worker URL and PIN (secrets set in Cloudflare).";
+      const status = err && err.status ? "HTTP " + err.status + " · " : "";
+      const detail = (err && err.data && err.data.error) || (err && err.message) || "Network/CORS error";
+      errEl.textContent = "Could not unlock (" + status + detail + ") — URL: " + creds.bff;
       errEl.classList.remove("hidden");
     }
   });
