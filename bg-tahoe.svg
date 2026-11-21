@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1800" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="sky" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1966b8"/>
+      <stop offset="35%" stop-color="#2889d8"/>
+      <stop offset="70%" stop-color="#0a52e0"/>
+      <stop offset="100%" stop-color="#05228a"/>
+    </linearGradient>
+    <linearGradient id="pearl" x1="0%" y1="0%" x2="85%" y2="85%">
+      <stop offset="0%" stop-color="#eef3f7" stop-opacity="0.96"/>
+      <stop offset="45%" stop-color="#a8d4f2" stop-opacity="0.88"/>
+      <stop offset="100%" stop-color="#2c8ee6" stop-opacity="0.0"/>
+    </linearGradient>
+    <linearGradient id="waveMid" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0033ff"/>
+      <stop offset="42%" stop-color="#1078ff"/>
+      <stop offset="78%" stop-color="#48c4f5"/>
+      <stop offset="100%" stop-color="#d8eef8"/>
+    </linearGradient>
+    <linearGradient id="waveCrest" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="35%" stop-color="#86d8ff" stop-opacity="0.72"/>
+      <stop offset="100%" stop-color="#0055ff" stop-opacity="0.0"/>
+    </linearGradient>
+    <radialGradient id="aquaGlow" cx="72%" cy="54%" r="52%">
+      <stop offset="0%" stop-color="#6ce2ff" stop-opacity="0.82"/>
+      <stop offset="55%" stop-color="#1c86ff" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#062270" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="deepCobalt" cx="24%" cy="84%" r="58%">
+      <stop offset="0%" stop-color="#0038ff" stop-opacity="0.92"/>
+      <stop offset="55%" stop-color="#0024a8" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#001050" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="lowerSilk" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#9ee4ff" stop-opacity="0.88"/>
+      <stop offset="48%" stop-color="#1a76ff" stop-opacity="0.76"/>
+      <stop offset="100%" stop-color="#0636d4" stop-opacity="0.95"/>
+    </linearGradient>
+    <filter id="silkBlur" x="-15%" y="-15%" width="130%" height="130%">
+      <feGaussianBlur stdDeviation="24"/>
+    </filter>
+    <filter id="rimSoft" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="6"/>
+    </filter>
+  </defs>
+
+  <!-- Base vibrant ocean sky -->
+  <rect width="1200" height="1800" fill="url(#sky)"/>
+
+  <!-- Upper-left luminous pearl/warm sky mist -->
+  <path d="M-120 -80 L980 -80 C720 180 340 380 -120 760 Z" fill="url(#pearl)" filter="url(#silkBlur)"/>
+
+  <!-- Sweeping Tahoe main cobalt-to-aqua silk wave -->
+  <path d="M-160 880 C160 440 580 180 1320 40 L1320 1880 L-160 1880 Z" fill="url(#waveMid)"/>
+
+  <!-- Crisp luminous crest line arcing diagonally across screen -->
+  <path d="M-140 860 C180 420 590 165 1300 32" fill="none" stroke="url(#waveCrest)" stroke-width="18" filter="url(#rimSoft)"/>
+  <path d="M-140 852 C180 412 590 158 1300 26" fill="none" stroke="#ffffff" stroke-opacity="0.72" stroke-width="4"/>
+
+  <!-- Luminous aqua refraction core -->
+  <ellipse cx="860" cy="960" rx="640" ry="520" fill="url(#aquaGlow)"/>
+
+  <!-- Secondary lower sweeping blue ribbon -->
+  <path d="M-120 1420 C240 1020 680 940 1320 660 L1320 1900 L-120 1900 Z" fill="url(#lowerSilk)" opacity="0.86" filter="url(#silkBlur)"/>
+
+  <!-- Deep cobalt lower-left anchor for rich glass contrast -->
+  <ellipse cx="260" cy="1540" rx="720" ry="540" fill="url(#deepCobalt)"/>
+
+  <!-- Subtle bright pearl sheen bottom-right -->
+  <path d="M520 1860 C760 1560 980 1360 1300 1240 L1300 1860 Z" fill="#dff4ff" opacity="0.46" filter="url(#silkBlur)"/>
+</svg>
