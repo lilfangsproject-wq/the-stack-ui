@@ -359,13 +359,6 @@
     .composer-wrap { position: relative; }
     .composer { display: flex; gap: 8px; align-items: center; }
     .composer .input { border-radius: 999px; padding: 9px 15px; }
-    .composer .input { min-width: 0; }
-    .dictation-btn { flex: 0 0 44px; min-height: 44px; padding: 0; font-size: 17px; }
-    .dictation-btn[aria-pressed="true"] {
-      background: var(--st-green-bg);
-      border-color: var(--st-green-bd);
-      color: var(--st-green);
-    }
     .mention-pop {
       position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 30;
       border-radius: 20px; background: var(--sheet-bg); border: 1px solid var(--glass-hero-bd);
@@ -928,36 +921,15 @@ html[data-surface="light"] .chat-subbar {
   }
 }
 
-    /* Opt-in live voice call bar (Agents chat) */
-    .voice-call-bar {
-      margin: 0 0 8px;
-      padding: 10px 12px;
-      border-radius: 18px;
-      border: 1px solid var(--glass-panel-bd);
-      background: var(--glass-panel-bg, rgba(255,255,255,0.06));
-    }
-    .voice-call-row, .voice-call-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .voice-call-row { justify-content: space-between; }
-    .voice-call-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: var(--st-amber, #d4a017);
-      box-shadow: 0 0 0 0 rgba(212,160,23,0.45);
-      animation: voice-pulse 1.4s ease-out infinite;
-    }
-    .voice-call-bar[data-state="listening"] .voice-call-dot { background: var(--st-green, #2ea44f); }
-    .voice-call-bar[data-state="speaking"] .voice-call-dot { background: var(--st-green, #2ea44f); }
-    .voice-call-bar[data-state="thinking"] .voice-call-dot,
-    .voice-call-bar[data-state="sending"] .voice-call-dot { background: var(--st-amber, #d4a017); }
-    .voice-call-bar[data-state="muted"] .voice-call-dot,
-    .voice-call-bar[data-state="disconnected"] .voice-call-dot { background: var(--st-muted); animation: none; }
-    .voice-call-bar[data-state="error"] .voice-call-dot { background: var(--st-red, #d14949); animation: none; }
-    .voice-call-transcript {
-      margin-top: 8px; font-size: 14px; line-height: 1.35; color: var(--ink-1);
-      padding: 8px 10px; border-radius: 12px; background: var(--input-bg); border: 1px solid var(--hairline);
-    }
-    .voice-call-review .voice-call-actions { margin-top: 8px; justify-content: flex-end; }
-    @keyframes voice-pulse {
-      0% { box-shadow: 0 0 0 0 rgba(46,164,79,0.35); }
-      70% { box-shadow: 0 0 0 10px rgba(46,164,79,0); }
-      100% { box-shadow: 0 0 0 0 rgba(46,164,79,0); }
-    }
+.assignment-row { border-top: 1px solid var(--hairline); padding: 10px 0; overflow-wrap: anywhere; }
+.assignment-row summary { cursor: pointer; min-block-size: 44px; }
+.assignment-row summary span { display: block; color: var(--ink-2); margin-top: 3px; }
+.assignment-text { white-space: pre-wrap; }
+.assignment-group h3 { font-size: 0.9rem; margin: 18px 0 4px; color: var(--ink-2); }
+.assignment-row > summary { padding-block: 4px; }
+.assignment-row > summary span { font-size: 0.875rem; }
+.assignment-history, .assignment-discussion { margin-block: 10px; }
+.assignment-messages { padding: 0; list-style: none; }
+.assignment-messages li { border-bottom: 1px solid var(--hairline); padding-block: 8px; }
+.assignment-messages small { display: block; color: var(--ink-2); }
+.assignment-messages p { margin: 4px 0 0; }
