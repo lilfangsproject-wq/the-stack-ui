@@ -1,7 +1,7 @@
 /* The Stack v50.1 Rebirth — shell cache for Cloudflare Pages / GitHub Pages mirror.
  * Bump CACHE on every shell release. No voice assets. No browser PAT.
  */
-const CACHE = "the-stack-shell-v50.1-rebirth";
+const CACHE = "the-stack-shell-v50.1.1-rebirth";
 const SHELL = [
   "./",
   "./index.html",

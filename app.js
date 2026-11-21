@@ -22,11 +22,12 @@
   };
 
   const DEFAULT_ROSTER = [
-    { id: "gemini", name: "Gemini", role: "Orchestrator", model: "gemini-3.8-flash / 4-hydrogen", reset: "4h window" },
+    { id: "gemini", name: "Gemini", role: "Research & Workspace", model: "gemini-3.8-flash / 4-hydrogen", reset: "4h window" },
     { id: "claude", name: "Claude", role: "Architecture", model: "Claude Opus 5.5 / Sonnet 5.5", reset: "4h window" },
     { id: "cursor", name: "Cursor", role: "Engineering", model: "Cursor Composer / Auto", reset: "Daily" },
-    { id: "chatgpt", name: "ChatGPT", role: "Ideation", model: "GPT-5 Thinking", reset: "Daily" },
-    { id: "grokbot", name: "Grokbot / Nori", role: "Red-Team", model: "Grok 4", reset: "Daily" },
+    { id: "chatgpt", name: "ChatGPT", role: "Ideation & Verify", model: "GPT-5 Thinking", reset: "Daily" },
+    { id: "nori", name: "Nori", role: "Trends & Grok Bots", model: "Grok (latest)", reset: "Daily" },
+    { id: "grokbot", name: "Grokbot", role: "Challenger", model: "Grok 4", reset: "Daily" },
     { id: "peer-floor", name: "#peer-floor", role: "Shared Floor", model: "Multi-Agent Room", reset: "Git-native" }
   ];
 
@@ -250,16 +251,19 @@
       });
     });
     oppList.forEach(function (o, i) {
+      const hook = o.hook || "";
+      const inferredState = o.status || o.state || (/on\s+hold/i.test(hook) ? "On hold" : "active");
+      const ownerName = o.owner || "Team";
       combined.push({
-        id: o.id || "opp-" + i,
+        id: o.id || ("opp-" + (o.rank != null ? o.rank : i)),
         rawKind: "opportunity",
         title: o.title || o.name || "Untitled Opportunity",
-        summary: o.summary || o.thesis || o.next_step || "",
-        state: o.status || o.state || "active",
-        owner: o.owner || "Claude",
-        ownerId: String(o.owner || "claude").toLowerCase().split(/[\s/]+/)[0],
+        summary: o.summary || o.thesis || o.next_step || hook,
+        state: inferredState,
+        owner: ownerName,
+        ownerId: o.owner ? String(o.owner).toLowerCase().split(/[\s/]+/)[0] : "peer-floor",
         deadline: o.deadline || null,
-        ref: o.ref || o.doc || o.path || "",
+        ref: o.ref || o.doc || o.doc_path || o.path || "",
         blocker: o.blocker || "",
         tasks: []
       });
@@ -477,9 +481,39 @@
 
   async function loadActiveAgentMessages() {
     const slug = dmSlugForAgent(state.activeAgentId);
-    // Messages come via ping writes; soft-load by searching recent sync is enough for peer-floor.
-    // Keep any locally known messages; optional future: /api/messages.
-    state.messagesBySlug[slug] = state.messagesBySlug[slug] || [];
+    const existing = state.messagesBySlug[slug] || [];
+    if (!creds.pin || !creds.bff) {
+      state.messagesBySlug[slug] = existing;
+      return;
+    }
+    try {
+      const data = await bff("/api/messages?slug=" + encodeURIComponent(slug) + "&limit=40");
+      if (data && Array.isArray(data.messages)) {
+        const seen = new Set();
+        const merged = [];
+        data.messages.forEach(function (m) {
+          if (!m) return;
+          const key = m.id || ((m.created_at || "") + "|" + (m.author || "") + "|" + (m.body || ""));
+          if (!seen.has(key)) {
+            seen.add(key);
+            merged.push(m);
+          }
+        });
+        existing.forEach(function (m) {
+          if (!m) return;
+          const key = m.id || ((m.created_at || "") + "|" + (m.author || "") + "|" + (m.body || ""));
+          if (!seen.has(key)) {
+            seen.add(key);
+            merged.push(m);
+          }
+        });
+        state.messagesBySlug[slug] = merged.slice(-60);
+        return;
+      }
+    } catch (e) {
+      // Graceful fallback when running against an older Worker deploy or offline cache.
+    }
+    state.messagesBySlug[slug] = existing;
   }
 
   async function flushOutbox() {
