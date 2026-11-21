@@ -337,27 +337,45 @@
     return key;
   }
 
+
+  function buildVoiceReplySpeakText(message, agent) {
+    if (!message || !message.body) return "";
+    var author = message.author || (agent && (agent.name || agent.id)) || "agent";
+    var label = message.auto === true
+      ? ("Automatic Stack reply for " + author)
+      : ("Reply from " + author);
+    return clipSpoken(label + ": " + message.body, 1180);
+  }
+
+  function voiceCallStateLabel(state) {
+    var map = {
+      idle: "Idle",
+      listening: "Listening",
+      reviewing: "Review transcript",
+      sending: "Sending",
+      thinking: "Thinking",
+      speaking: "Speaking",
+      muted: "Muted",
+      disconnected: "Disconnected",
+      error: "Error"
+    };
+    return map[state] || String(state || "");
+  }
+
   function buildAgentLatestText(agent, messagesBySlug) {
     if (!agent) return "";
     var slug = dmSlug(agent.id);
     var msgs = (messagesBySlug && messagesBySlug[slug]) || [];
-    var last = msgs[msgs.length - 1];
+    var last = msgs.filter(function (message) {
+      return message && message.body && !message._typing && !/^seth$/i.test(message.author || "");
+    }).pop();
     var head = (agent.name || agent.id) + " is " + statusLabel(agent.status) + ".";
     var activity = clipSpoken(agent.activitySummary || "", 120);
-    if (last && last.body) {
-      return clipSpoken(
-        head +
-          (activity ? " " + activity + "." : "") +
-          " Latest from " + (last.auto === true ? "Stack automation" : (last.author || agent.name || agent.id)) + ": " + last.body,
-        1180
-      );
-    }
-    return clipSpoken(
-      head +
-        (activity ? " " + activity + "." : "") +
-        (agent.evidence ? " Evidence " + agent.evidence + "." : ""),
-      1180
-    );
+    var intro = head + (activity ? " " + activity + "." : "");
+    if (!last) return clipSpoken(intro + (agent.evidence ? " Evidence " + agent.evidence + "." : ""), 1180);
+    var author = last.author || agent.name || agent.id;
+    var label = last.auto ? "Automatic Stack reply for " + author : "Latest from " + author;
+    return clipSpoken(intro + " " + label + ": " + last.body, 1180);
   }
 
   var api = {
@@ -376,7 +394,9 @@
     actorsForCommit: actorsForCommit,
     clipSpoken: clipSpoken,
     buildTodayBriefText: buildTodayBriefText,
-    buildAgentLatestText: buildAgentLatestText
+    buildAgentLatestText: buildAgentLatestText,
+    buildVoiceReplySpeakText: buildVoiceReplySpeakText,
+    voiceCallStateLabel: voiceCallStateLabel
   };
 
   root.StackPolish = api;

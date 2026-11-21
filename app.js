@@ -1,11 +1,11 @@
-/* The Stack v50.5.3 Tahoe — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
+/* The Stack v50.5.4 voice — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
  * Hard rules: no always-on mic/Jarvis; opt-in TTS (/api/tts + $0 Web Speech fallback); PIN → x-stack-pin; Git is source of truth.
  * No horizontal swipe. Colour only marks the explicit agent states. Connection pill is honest.
  */
 (function () {
   "use strict";
 
-  const VERSION = window.STACK_VERSION || "v50.5.3-tahoe";
+  const VERSION = window.STACK_VERSION || "v50.5.4-voice";
   const SURFACE_KEY = "stack-surface-v1";
   const OUTBOX_KEY = "stack-rebirth-outbox-v1";
   const DRAFT_KEY = "stack-composer-drafts-v1";
@@ -14,7 +14,19 @@
   const BFF_KEY = "stack-bff-url-v1";
   const ELEVEN_KEY_STORAGE = "stack-elevenlabs-key-v1";
   const ELEVEN_VOICE_STORAGE = "stack-elevenlabs-voice-v1";
-  const DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
+  const DEFAULT_VOICE_ID = "vppqTjjplEh4CplGZuN2";
+  const VOICE_CONFIRM_KEY = "stack-voice-confirm-v1";
+  const VOICE_CALL_STATES = {
+    idle: "Idle",
+    listening: "Listening",
+    reviewing: "Review transcript",
+    sending: "Sending",
+    thinking: "Thinking",
+    speaking: "Speaking",
+    muted: "Muted",
+    disconnected: "Disconnected",
+    error: "Error"
+  };
   const ZERO_SPEND = Number(window.ZERO_SPEND_CAP_USD || 0);
 
   const AGENT_STATES = {
@@ -708,7 +720,390 @@
   let activeAudio = null;
   let activeAudioUrl = "";
   let activeSpeechBtn = null;
-  let speakingNow = false;
+  let speechRequest = null;
+  let dictation = null;
+  let voiceCall = null;
+  let voiceCallSending = false;
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  function voiceConfirmEnabled() {
+    try {
+      const raw = localStorage.getItem(VOICE_CONFIRM_KEY);
+      if (raw === null || raw === "") return true;
+      return raw !== "0" && raw !== "false";
+    } catch (e) { return true; }
+  }
+
+  function setVoiceConfirmEnabled(on) {
+    try { localStorage.setItem(VOICE_CONFIRM_KEY, on ? "1" : "0"); } catch (e) {}
+  }
+
+  function voiceCallStatusLabel() {
+    if (!voiceCall) return "";
+    return VOICE_CALL_STATES[voiceCall.state] || voiceCall.state;
+  }
+
+  function setVoiceCallState(next, detail) {
+    if (!voiceCall) return;
+    voiceCall.state = next;
+    voiceCall.detail = detail || "";
+    voiceCall.updatedAt = Date.now();
+    const bar = document.getElementById("voice-call-bar");
+    if (bar) {
+      const status = bar.querySelector("[data-voice-status]");
+      if (status) status.textContent = voiceCallStatusLabel() + (voiceCall.detail ? " · " + voiceCall.detail : "");
+      bar.dataset.state = next;
+      const muteBtn = bar.querySelector("[data-voice-mute]");
+      if (muteBtn) {
+        muteBtn.setAttribute("aria-pressed", String(next === "muted" || voiceCall.muted === true));
+        muteBtn.textContent = voiceCall.muted ? "Unmute" : "Mute";
+      }
+    }
+  }
+
+  function voiceCallBarHtml(slug) {
+    if (!voiceCall || voiceCall.slug !== slug) return "";
+    const reviewing = voiceCall.state === "reviewing" && voiceCall.pendingTranscript;
+    return (
+      '<div id="voice-call-bar" class="voice-call-bar" data-state="' + esc(voiceCall.state) + '" role="status" aria-live="polite">' +
+        '<div class="voice-call-row">' +
+          '<span class="voice-call-dot" aria-hidden="true"></span>' +
+          '<span data-voice-status>' + esc(voiceCallStatusLabel()) + (voiceCall.detail ? " · " + esc(voiceCall.detail) : "") + "</span>" +
+          '<div class="voice-call-actions">' +
+            '<button type="button" class="btn btn-sec btn-sm" data-voice-mute aria-pressed="' + (voiceCall.muted ? "true" : "false") + '">' + (voiceCall.muted ? "Unmute" : "Mute") + "</button>" +
+            '<button type="button" class="btn btn-danger btn-sm" data-voice-hangup>Hang up</button>' +
+          "</div>" +
+        "</div>" +
+        (reviewing
+          ? '<div class="voice-call-review">' +
+              '<div class="voice-call-transcript">' + esc(voiceCall.pendingTranscript) + "</div>" +
+              '<div class="voice-call-actions">' +
+                '<button type="button" class="btn btn-sec btn-sm" data-voice-discard>Discard</button>' +
+                '<button type="button" class="btn btn-pri btn-sm" data-voice-send>Send</button>' +
+              "</div>" +
+            "</div>"
+          : "") +
+      "</div>"
+    );
+  }
+
+  function stopVoiceRecognition() {
+    if (!voiceCall || !voiceCall.recognition) return;
+    const rec = voiceCall.recognition;
+    voiceCall.recognition = null;
+    try { rec.onresult = null; rec.onerror = null; rec.onend = null; } catch (e) {}
+    try { rec.abort(); } catch (e) {
+      try { rec.stop(); } catch (e2) {}
+    }
+  }
+
+  function hangUpVoiceCall(reason) {
+    const session = voiceCall;
+    if (!session) return;
+    session.alive = false;
+    stopVoiceRecognition();
+    stopSpeaking();
+    voiceCall = null;
+    voiceCallSending = false;
+    if (reason === "error") toast("Voice call ended with an error", "warning");
+    else if (reason === "room") toast("Voice call ended — room changed", "info");
+    else if (reason === "hidden") toast("Voice call ended — app backgrounded", "info");
+    render();
+  }
+
+  function speakVoiceReplyText(message, agent) {
+    if (!message || !message.body) return "";
+    if (window.StackPolish && typeof window.StackPolish.buildVoiceReplySpeakText === "function") {
+      return window.StackPolish.buildVoiceReplySpeakText(message, agent);
+    }
+    const author = message.author || (agent && agent.name) || "agent";
+    const label = message.auto ? ("Automatic Stack reply for " + author) : ("Reply from " + author);
+    return label + ": " + message.body;
+  }
+
+  async function speakAndResumeListening(text) {
+    if (!voiceCall || !voiceCall.alive) return;
+    setVoiceCallState("speaking");
+    try {
+      await speakText(text, null, {});
+    } catch (e) {}
+    if (!voiceCall || !voiceCall.alive) return;
+    if (voiceCall.muted) {
+      setVoiceCallState("muted");
+      return;
+    }
+    beginVoiceListening();
+  }
+
+  async function sendVoiceTranscript(transcript) {
+    if (!voiceCall || !voiceCall.alive || voiceCallSending) return;
+    const text = String(transcript || "").trim();
+    if (!text) return;
+    const session = voiceCall;
+    const slug = session.slug;
+    const agentId = session.agentId;
+    const turnId = session.turnId;
+    voiceCallSending = true;
+    session.pendingTranscript = text;
+    setVoiceCallState("sending", text.slice(0, 48));
+    stopVoiceRecognition();
+    try {
+      const beforeIds = new Set((state.messagesBySlug[slug] || []).map(function (m) { return m && m.id; }));
+      await sendToSlug(slug, text, agentId);
+      if (!voiceCall || voiceCall !== session || !session.alive || session.turnId !== turnId) return;
+      // Clear composer draft for this channel after voice send
+      const input = document.getElementById("agent-chat-input");
+      if (input && input.dataset.slug === slug) {
+        input.value = "";
+        saveComposerDraft(input);
+      }
+      setVoiceCallState("thinking");
+      let reply = null;
+      const msgs = state.messagesBySlug[slug] || [];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        if (!m || !m.body || beforeIds.has(m.id)) continue;
+        if (/^seth$/i.test(m.author || "")) continue;
+        reply = m;
+        break;
+      }
+      if (!reply) {
+        await loadMessagesForSlug(slug);
+        if (!voiceCall || voiceCall !== session || !session.alive) return;
+        const refreshed = state.messagesBySlug[slug] || [];
+        for (let i = refreshed.length - 1; i >= 0; i--) {
+          const m = refreshed[i];
+          if (!m || !m.body || beforeIds.has(m.id)) continue;
+          if (/^seth$/i.test(m.author || "")) continue;
+          reply = m;
+          break;
+        }
+      }
+      session.pendingTranscript = "";
+      if (!reply) {
+        setVoiceCallState("listening", "No reply yet");
+        beginVoiceListening();
+        return;
+      }
+      const agent = state.agents.find(function (a) { return a.id === agentId; }) || { name: reply.author };
+      const spoken = speakVoiceReplyText(reply, agent);
+      render();
+      await speakAndResumeListening(spoken);
+    } catch (err) {
+      if (!voiceCall || voiceCall !== session) return;
+      setVoiceCallState("error", (err && err.message) || "Send failed");
+      toast((err && err.message) || "Voice send failed", "error");
+      setTimeout(function () {
+        if (voiceCall === session && session.alive) beginVoiceListening();
+      }, 800);
+    } finally {
+      voiceCallSending = false;
+    }
+  }
+
+  function queueVoiceTranscript(transcript) {
+    if (!voiceCall || !voiceCall.alive) return;
+    const text = String(transcript || "").trim();
+    if (!text) return;
+    // Never send partials — only finals reach here.
+    voiceCall.pendingTranscript = text;
+    voiceCall.turnId = (voiceCall.turnId || 0) + 1;
+    if (voiceConfirmEnabled()) {
+      stopVoiceRecognition();
+      setVoiceCallState("reviewing");
+      render();
+      return;
+    }
+    sendVoiceTranscript(text);
+  }
+
+  function beginVoiceListening() {
+    if (!voiceCall || !voiceCall.alive) return;
+    if (voiceCall.muted) {
+      setVoiceCallState("muted");
+      return;
+    }
+    if (!SpeechRecognition) {
+      setVoiceCallState("error", "Speech recognition unavailable");
+      toast("Speech recognition unavailable on this browser. Use dictation into the draft instead.", "warning");
+      return;
+    }
+    stopVoiceRecognition();
+    stopSpeaking();
+    const session = voiceCall;
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-AU";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    session.recognition = recognition;
+    setVoiceCallState("listening");
+    recognition.onresult = function (event) {
+      if (!voiceCall || voiceCall !== session || !session.alive) return;
+      if (session.muted || session.state === "reviewing" || session.state === "sending" || session.state === "thinking" || session.state === "speaking") return;
+      const parts = [];
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) parts.push(event.results[i][0].transcript.trim());
+      }
+      const transcript = parts.filter(Boolean).join(" ");
+      if (!transcript) return;
+      // Guard against stale room
+      const active = state.agents.find(function (a) { return a.id === state.activeAgentId; });
+      const liveSlug = dmSlugForAgent(active ? active.id : "peer-floor");
+      if (liveSlug !== session.slug || state.view !== "agents") {
+        hangUpVoiceCall("room");
+        return;
+      }
+      queueVoiceTranscript(transcript);
+    };
+    recognition.onerror = function (event) {
+      if (!voiceCall || voiceCall !== session || !session.alive) return;
+      if (event.error === "aborted" || event.error === "no-speech") return;
+      setVoiceCallState("error", event.error || "mic error");
+    };
+    recognition.onend = function () {
+      if (!voiceCall || voiceCall !== session || !session.alive) return;
+      if (session.muted) {
+        setVoiceCallState("muted");
+        return;
+      }
+      if (session.state === "listening" || session.state === "error") {
+        // Continuous conversational flow: restart after Safari ends a segment.
+        try { beginVoiceListening(); } catch (e) {}
+      }
+    };
+    try {
+      recognition.start();
+    } catch (error) {
+      setVoiceCallState("error", "Could not start microphone");
+      toast("Couldn’t start voice call microphone", "warning");
+    }
+  }
+
+  function startVoiceCall() {
+    if (voiceCall && voiceCall.alive) {
+      hangUpVoiceCall("stop");
+      return;
+    }
+    if (!creds.pin || !creds.bff) {
+      toast("Sign in to the Worker BFF before starting voice", "warning");
+      return;
+    }
+    endDictation();
+    stopSpeaking();
+    const active = state.agents.find(function (a) { return a.id === state.activeAgentId; }) || state.agents[0];
+    const agentId = active ? active.id : "peer-floor";
+    const slug = dmSlugForAgent(agentId);
+    voiceCall = {
+      alive: true,
+      muted: false,
+      state: "listening",
+      slug: slug,
+      agentId: agentId,
+      pendingTranscript: "",
+      turnId: 0,
+      detail: "",
+      recognition: null,
+      startedAt: Date.now(),
+      updatedAt: Date.now()
+    };
+    render();
+    beginVoiceListening();
+  }
+
+  function toggleVoiceMute() {
+    if (!voiceCall || !voiceCall.alive) return;
+    voiceCall.muted = !voiceCall.muted;
+    if (voiceCall.muted) {
+      stopVoiceRecognition();
+      stopSpeaking();
+      setVoiceCallState("muted");
+    } else {
+      beginVoiceListening();
+    }
+    render();
+  }
+
+
+  function dictationButton(inputId) {
+    return '<button type="button" class="btn btn-sec btn-sm dictation-btn" data-dictate="' + inputId +
+      '" aria-label="Dictate message" aria-pressed="false" title="Dictate message">🎙</button>';
+  }
+
+  function showDictationState(session, active) {
+    const button = document.querySelector('[data-dictate="' + session.inputId + '"]');
+    if (button) {
+      button.textContent = active ? "■" : "🎙";
+      button.title = active ? "Stop dictation" : "Dictate message";
+      button.setAttribute("aria-label", button.title);
+      button.setAttribute("aria-pressed", String(active));
+    }
+  }
+
+  function endDictation() {
+    const session = dictation;
+    if (!session) return;
+    dictation = null;
+    clearTimeout(session.timeout);
+    showDictationState(session, false);
+    try { session.recognition.abort(); } catch (error) {}
+  }
+
+  function toggleDictation(input) {
+    if (dictation) {
+      if (!dictation.stopping) {
+        dictation.stopping = true;
+        dictation.recognition.stop();
+      }
+      return;
+    }
+    if (!SpeechRecognition) {
+      input.focus();
+      toast("Use your keyboard’s microphone to dictate into this draft", "info");
+      return;
+    }
+    stopSpeaking();
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-AU";
+    const session = { recognition, inputId: input.id, slug: input.dataset.slug };
+    dictation = session;
+    showDictationState(session, true);
+    recognition.onresult = function (event) {
+      const current = document.getElementById(session.inputId);
+      if (dictation !== session || !current || current.dataset.slug !== session.slug) return;
+      const parts = [];
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) parts.push(event.results[i][0].transcript.trim());
+      }
+      const transcript = parts.filter(Boolean).join(" ");
+      if (!transcript) return;
+      current.value = [current.value.trimEnd(), transcript].filter(Boolean).join(" ");
+      current.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    recognition.onend = function () {
+      if (dictation !== session) return;
+      dictation = null;
+      clearTimeout(session.timeout);
+      showDictationState(session, false);
+    };
+    recognition.onerror = function (event) {
+      if (dictation !== session) return;
+      endDictation();
+      if (event.error !== "aborted") {
+        toast(event.error === "no-speech" ? "No speech heard. Tap the mic to try again." :
+          "Microphone dictation unavailable. Try your keyboard mic.", "warning");
+      }
+    };
+    try {
+      recognition.start();
+      session.timeout = setTimeout(function () {
+        endDictation();
+        toast("Dictation timed out. You can tap the mic to try again.", "warning");
+      }, 30000);
+    } catch (error) {
+      endDictation();
+      toast("Couldn’t start dictation. Try your keyboard mic.", "warning");
+    }
+  }
 
   function getSavedElevenKey() {
     try { return localStorage.getItem(ELEVEN_KEY_STORAGE) || ""; } catch (e) { return ""; }
@@ -720,20 +1115,26 @@
   function setSpeakingBtn(btn, isOn) {
     if (!btn) return;
     if (isOn) {
-      if (!btn.dataset.idleLabel) btn.dataset.idleLabel = btn.textContent;
+      btn.dataset.idleContent = btn.innerHTML;
+      btn.dataset.idleAriaLabel = btn.getAttribute("aria-label") || "";
       btn.classList.add("speaking");
       btn.textContent = "⏹ Stop";
+      btn.setAttribute("aria-label", "Stop reading");
       btn.setAttribute("aria-pressed", "true");
       activeSpeechBtn = btn;
     } else {
       btn.classList.remove("speaking");
-      if (btn.dataset.idleLabel) btn.textContent = btn.dataset.idleLabel;
+      btn.innerHTML = btn.dataset.idleContent;
+      if (btn.dataset.idleAriaLabel) btn.setAttribute("aria-label", btn.dataset.idleAriaLabel);
+      else btn.removeAttribute("aria-label");
       btn.removeAttribute("aria-pressed");
     }
   }
 
-  function stopSpeaking() {
+  function clearSpeechAudio() {
     if (activeAudio) {
+      activeAudio.onended = null;
+      activeAudio.onerror = null;
       try { activeAudio.pause(); activeAudio.src = ""; } catch (e) {}
       activeAudio = null;
     }
@@ -741,6 +1142,12 @@
       try { URL.revokeObjectURL(activeAudioUrl); } catch (e) {}
       activeAudioUrl = "";
     }
+  }
+
+  function stopSpeaking() {
+    if (speechRequest) speechRequest.abort();
+    speechRequest = null;
+    clearSpeechAudio();
     if (typeof window !== "undefined" && window.speechSynthesis) {
       try { window.speechSynthesis.cancel(); } catch (e) {}
     }
@@ -748,7 +1155,6 @@
       setSpeakingBtn(activeSpeechBtn, false);
       activeSpeechBtn = null;
     }
-    speakingNow = false;
   }
 
   function pickNeuralWebVoice() {
@@ -764,22 +1170,26 @@
     return voices.find(function (v) { return v && /^en/i.test(v.lang || ""); }) || voices[0] || null;
   }
 
-  function fallbackWebSpeech(cleanText, btnEl) {
-    if (typeof window === "undefined" || !("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
-      stopSpeaking();
-      toast("Speech synthesis unavailable in this browser", "warning");
-      return;
-    }
-    const utt = new SpeechSynthesisUtterance(cleanText);
-    const voice = pickNeuralWebVoice();
-    if (voice) utt.voice = voice;
-    utt.rate = 1.02;
-    utt.pitch = 1.0;
-    speakingNow = true;
-    if (btnEl) setSpeakingBtn(btnEl, true);
-    utt.onend = function () { stopSpeaking(); };
-    utt.onerror = function () { stopSpeaking(); };
-    window.speechSynthesis.speak(utt);
+  function fallbackWebSpeech(cleanText, request) {
+    return new Promise(function (resolve) {
+      if (typeof window === "undefined" || !("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
+        stopSpeaking();
+        toast("Speech synthesis unavailable in this browser", "warning");
+        resolve();
+        return;
+      }
+      const utt = new SpeechSynthesisUtterance(cleanText);
+      const voice = pickNeuralWebVoice();
+      if (voice) utt.voice = voice;
+      utt.rate = 0.9;
+      utt.pitch = 1.0;
+      utt.onend = function () {
+        if (speechRequest === request) stopSpeaking();
+        resolve();
+      };
+      utt.onerror = utt.onend;
+      window.speechSynthesis.speak(utt);
+    });
   }
 
   async function speakText(text, btnEl, opts) {
@@ -788,26 +1198,35 @@
       toast("Nothing to read", "info");
       return;
     }
-    if (speakingNow && btnEl && activeSpeechBtn === btnEl) {
+    if (btnEl && activeSpeechBtn === btnEl) {
       stopSpeaking();
       return;
     }
     stopSpeaking();
+    endDictation();
+    const request = new AbortController();
+    speechRequest = request;
+    setSpeakingBtn(btnEl, true);
 
     const options = opts || {};
     const elKey = typeof options.apiKey === "string" ? options.apiKey.trim() : getSavedElevenKey().trim();
     const voiceId = (typeof options.voiceId === "string" && options.voiceId.trim()) ? options.voiceId.trim() : getSavedVoiceId();
 
-    if (creds.bff && creds.pin && (typeof navigator === "undefined" || navigator.onLine !== false)) {
+    if (creds.bff && creds.pin && navigator.onLine !== false) {
+      let audio = null;
+      let attemptedServer = false;
       try {
         const headers = {
           "content-type": "application/json",
           "x-stack-pin": creds.pin
         };
+        // Prefer Worker secret ELEVENLABS_API_KEY. Browser key is optional override only.
         if (elKey) headers["x-elevenlabs-key"] = elKey;
+        attemptedServer = true;
         const res = await fetch(creds.bff.replace(/\/$/, "") + "/api/tts", {
           method: "POST",
           headers: headers,
+          signal: request.signal,
           body: JSON.stringify({
             text: cleanText,
             voiceId: voiceId || DEFAULT_VOICE_ID,
@@ -817,31 +1236,42 @@
         const ct = String(res.headers.get("content-type") || "").toLowerCase();
         if (res.ok && ct.indexOf("audio/") !== -1) {
           const blob = await res.blob();
+          if (speechRequest !== request) return;
           const url = URL.createObjectURL(blob);
           activeAudioUrl = url;
-          activeAudio = new Audio(url);
-          speakingNow = true;
-          if (btnEl) setSpeakingBtn(btnEl, true);
-          activeAudio.onended = function () { stopSpeaking(); };
-          activeAudio.onerror = function () {
-            stopSpeaking();
-            fallbackWebSpeech(cleanText, btnEl);
-          };
-          await activeAudio.play().catch(function () {
-            stopSpeaking();
-            fallbackWebSpeech(cleanText, btnEl);
+          audio = new Audio(url);
+          activeAudio = audio;
+          activeAudio.playbackRate = 0.9;
+          await new Promise(function (resolve) {
+            activeAudio.onended = function () {
+              if (speechRequest === request) stopSpeaking();
+              resolve();
+            };
+            activeAudio.onerror = function () {
+              if (speechRequest !== request) return resolve();
+              clearSpeechAudio();
+              toast("Using browser voice. ElevenLabs playback was unavailable.", "warning");
+              fallbackWebSpeech(cleanText, request).then(resolve);
+            };
+            activeAudio.play().catch(function () {
+              clearSpeechAudio();
+              fallbackWebSpeech(cleanText, request).then(resolve);
+            });
           });
           return;
         }
-        if (res.status !== 501) {
-          toast("ElevenLabs unavailable — using $0 Web Speech", "warning");
-        }
       } catch (e) {
-        // Offline or network issue — fall back cleanly to $0 Web Speech.
+        if (speechRequest !== request) return;
+        if (audio && activeAudio !== audio) return;
+        clearSpeechAudio();
+      }
+      if (speechRequest !== request) return;
+      if (attemptedServer && (elKey || options.preferEleven === true)) {
+        toast("Using browser voice. ElevenLabs playback was unavailable.", "warning");
       }
     }
-
-    fallbackWebSpeech(cleanText, btnEl);
+    if (speechRequest !== request) return;
+    await fallbackWebSpeech(cleanText, request);
   }
 
   /** Opt-in Today Voice Brief — spoken executive rundown (not Jarvis / not always-on mic). */
@@ -854,11 +1284,7 @@
 
   function buildAgentLatestText(agent) {
     if (!agent) return "";
-    if (window.StackPolish && typeof window.StackPolish.buildAgentLatestText === "function") {
-      return window.StackPolish.buildAgentLatestText(agent, state.messagesBySlug);
-    }
-    const st = agentMeta(agent.status);
-    return agent.name + " is " + st.label + ".";
+    return window.StackPolish.buildAgentLatestText(agent, state.messagesBySlug);
   }
 
   /* ===================== VIEWS ===================== */
@@ -936,6 +1362,7 @@
           '<div id="today-mention-pop" class="mention-pop hidden" role="listbox" aria-label="Mention suggestions"></div>' +
           '<form id="today-floor-form" class="composer">' +
             '<input id="today-floor-input" data-draft-channel="peer-floor" class="input" placeholder="Dispatch to #peer-floor… type @ to mention" autocomplete="off" enterkeyhint="send" required />' +
+            dictationButton("today-floor-input") +
             '<button type="submit" class="btn btn-pri btn-sm">Send</button>' +
           "</form>" +
         "</div>" +
@@ -1080,7 +1507,8 @@
           '<div class="hero-top-actions">' +
             '<span class="badge ' + st.tone + '"><span class="dot ' + st.tone + '"></span>' + esc(st.label) + "</span>" +
             '<button type="button" class="btn btn-sec btn-sm" id="btn-agent-memory" aria-label="Memory (' + memEntries.length + ')" title="Memory (' + memEntries.length + ')">🧠 <span class="hide-xs">Memory </span>(' + memEntries.length + ")</button>" +
-            '<button type="button" class="btn btn-sec btn-sm voice-btn" id="btn-voice-agent" aria-label="Read Latest" title="Read Latest">🔊<span class="hide-xs"> Read Latest</span></button>' +
+            '<button type="button" class="btn btn-sec btn-sm voice-btn" id="btn-voice-agent" data-voice-slug="' + esc(slug) + '" aria-label="Read latest reply" title="Read latest reply">🔊<span class="hide-xs"> Read Reply</span></button>' +
+            '<button type="button" class="btn btn-pri btn-sm" id="btn-start-voice" aria-pressed="' + (voiceCall && voiceCall.alive && voiceCall.slug === slug ? "true" : "false") + '" title="Start opt-in live voice call">' + (voiceCall && voiceCall.alive && voiceCall.slug === slug ? "Stop Voice" : "Start Voice") + "</button>" +
             '<button type="button" class="btn btn-sec btn-sm kb-done-btn" id="btn-chat-kb-done" aria-label="Hide keyboard">Done</button>' +
           "</div>" +
         "</div>" +
@@ -1105,10 +1533,12 @@
           '<button type="button" class="ctx-chip" data-insert="Ping: confirm active commit SHA, current blocker, and next gate.">Reliable Ping</button>' +
           '<button type="button" class="ctx-chip" data-insert="QC needed: reviewer !== builder, include commit SHA + checks.">QC Gate</button>' +
         "</div>" +
+        voiceCallBarHtml(slug) +
         '<div class="composer-wrap">' +
           '<div id="agent-mention-pop" class="mention-pop hidden" role="listbox" aria-label="Mention suggestions"></div>' +
           '<form id="agent-chat-form" class="composer">' +
             '<input id="agent-chat-input" data-draft-channel="' + esc(slug) + '" data-slug="' + esc(slug) + '" class="input" placeholder="' + (agent.id === "peer-floor" ? "Message #peer-floor… type @ to mention" : "Message " + esc(agent.name) + "…") + '" autocomplete="off" enterkeyhint="send" required />' +
+            dictationButton("agent-chat-input") +
             '<button type="submit" class="btn btn-pri btn-sm">' + (agent.id === "peer-floor" ? "Send" : "Ping") + "</button>" +
           "</form>" +
         "</div>" +
@@ -1339,6 +1769,17 @@
     renderChrome();
     bindEvents();
 
+    if (dictation) {
+      const input = document.getElementById(dictation.inputId);
+      if (input && input.dataset.slug === dictation.slug) showDictationState(dictation, true);
+      else endDictation();
+    }
+    if (activeSpeechBtn && !activeSpeechBtn.isConnected) {
+      const button = document.getElementById(activeSpeechBtn.id);
+      if (button && button.dataset.voiceSlug === activeSpeechBtn.dataset.voiceSlug) setSpeakingBtn(button, true);
+      else stopSpeaking();
+    }
+
     const ov = document.getElementById("overlay");
     const sheetOpen = Boolean(ov && ov.classList.contains("open"));
     const composer = root.querySelector("[data-draft-channel]");
@@ -1391,6 +1832,7 @@
   function closeSheet() {
     const ov = document.getElementById("overlay");
     if (!ov) return;
+    if (activeSpeechBtn && activeSpeechBtn.id === "btn-voice-test") stopSpeaking();
     ov.classList.remove("open"); ov.setAttribute("aria-hidden", "true");
   }
 
@@ -1722,35 +2164,64 @@
   }
 
   function openVoiceSettingsSheet() {
-    const savedKey = getSavedElevenKey();
     const savedVoice = getSavedVoiceId();
+    const confirmOn = voiceConfirmEnabled();
     openSheet(
-      '<div class="sheet-head"><div><h2 class="sheet-title">Voice Settings</h2><p class="sheet-sub">$0 Web Speech by default · Optional ElevenLabs Turbo v2.5</p></div><button type="button" class="orb-btn" style="width:32px;height:32px;" data-close-sheet>✕</button></div>' +
+      '<div class="sheet-head"><div><h2 class="sheet-title">Voice Settings</h2><p class="sheet-sub">Opt-in live voice · Server ElevenLabs when configured · $0 Web Speech fallback</p></div><button type="button" class="orb-btn" style="width:32px;height:32px;" data-close-sheet>✕</button></div>' +
       '<form id="voice-settings-form">' +
-        '<div class="field"><label for="voice-el-key">ElevenLabs API Key (optional · browser localStorage only)</label>' +
-        '<input id="voice-el-key" class="input mono" type="password" value="' + esc(savedKey) + '" placeholder="xi-… leave blank for $0 Web Speech" autocomplete="off" /></div>' +
         '<div class="field"><label for="voice-el-id">ElevenLabs Voice ID</label>' +
         '<input id="voice-el-id" class="input mono" type="text" value="' + esc(savedVoice) + '" placeholder="' + DEFAULT_VOICE_ID + '" autocomplete="off" /></div>' +
+        '<p class="sheet-sub" id="voice-server-status">Checking Worker ElevenLabs…</p>' +
+        '<label class="field" style="display:flex;align-items:center;gap:8px;margin-top:8px;">' +
+          '<input id="voice-confirm-toggle" type="checkbox" ' + (confirmOn ? "checked" : "") + ' />' +
+          '<span>Review final transcript before sending (recommended)</span>' +
+        '</label>' +
         '<div class="chip-strip">' +
-          '<button type="button" class="ctx-chip" data-voice-preset="JBFqnCBsd6RMkjVDRZzb">George (Default)</button>' +
+          '<button type="button" class="ctx-chip" data-voice-preset="vppqTjjplEh4CplGZuN2">Shannon W</button>' +
+          '<button type="button" class="ctx-chip" data-voice-preset="JBFqnCBsd6RMkjVDRZzb">George</button>' +
           '<button type="button" class="ctx-chip" data-voice-preset="21m00Tcm4TlvDq8ikWAM">Rachel</button>' +
           '<button type="button" class="ctx-chip" data-voice-preset="pNInz6obpgDQGcFmaJgB">Adam</button>' +
         "</div>" +
+        '<details style="margin-top:10px;"><summary class="sheet-sub">Advanced browser key override</summary>' +
+          '<div class="field" style="margin-top:8px;"><label for="voice-el-key">Browser-local ElevenLabs key (optional override)</label>' +
+          '<input id="voice-el-key" class="input mono" type="password" value="" placeholder="Prefer Worker secret ELEVENLABS_API_KEY" autocomplete="off" /></div>' +
+        '</details>' +
         '<div class="hero-actions" style="margin-top:8px;">' +
           '<button type="submit" class="btn btn-pri btn-sm">Save Settings</button>' +
           '<button type="button" class="btn btn-sec btn-sm voice-btn" id="btn-voice-test">🔊 Test Voice</button>' +
-          '<button type="button" class="btn btn-danger btn-sm" id="btn-voice-clear">Clear Key ($0)</button>' +
+          '<button type="button" class="btn btn-danger btn-sm" id="btn-voice-clear">Clear Browser Override</button>' +
         "</div>" +
       "</form>"
     );
 
     const keyEl = document.getElementById("voice-el-key");
     const idEl = document.getElementById("voice-el-id");
+    const confirmEl = document.getElementById("voice-confirm-toggle");
+    const statusEl = document.getElementById("voice-server-status");
+    if (keyEl) keyEl.value = getSavedElevenKey();
+
     document.getElementById("sheet").querySelectorAll("[data-voice-preset]").forEach(function (b) {
       b.addEventListener("click", function () {
         if (idEl) idEl.value = b.dataset.voicePreset;
       });
     });
+
+    if (creds.bff && creds.pin) {
+      fetch(creds.bff.replace(/\/$/, "") + "/api/tts/status", {
+        headers: { "x-stack-pin": creds.pin }
+      }).then(function (res) { return res.json().catch(function () { return {}; }); }).then(function (data) {
+        if (!statusEl) return;
+        if (data && data.configured) {
+          statusEl.textContent = "Worker ElevenLabs configured · default voice " + (data.voiceId || DEFAULT_VOICE_ID);
+        } else {
+          statusEl.textContent = "Worker ElevenLabs not configured — using $0 Web Speech until ELEVENLABS_API_KEY is set on the Worker.";
+        }
+      }).catch(function () {
+        if (statusEl) statusEl.textContent = "Could not reach /api/tts/status — Web Speech fallback remains available.";
+      });
+    } else if (statusEl) {
+      statusEl.textContent = "Sign in to check Worker ElevenLabs status.";
+    }
 
     document.getElementById("voice-settings-form").addEventListener("submit", function (e) {
       e.preventDefault();
@@ -1761,16 +2232,18 @@
         else localStorage.removeItem(ELEVEN_KEY_STORAGE);
         localStorage.setItem(ELEVEN_VOICE_STORAGE, v);
       } catch (err) {}
-      toast(k ? "Saved ElevenLabs key + voice " + v : "Saved $0 Web Speech mode", "info");
+      setVoiceConfirmEnabled(!(confirmEl && confirmEl.checked === false));
+      toast("Saved voice settings", "info");
       closeSheet();
     });
 
     const testBtn = document.getElementById("btn-voice-test");
     if (testBtn) {
       testBtn.addEventListener("click", function () {
-        speakText("The Stack voice agent is online. Zero spend cap confirmed.", testBtn, {
+        speakText("This is how Stack messages will sound at point nine speed.", testBtn, {
           apiKey: keyEl ? keyEl.value.trim() : "",
-          voiceId: (idEl && idEl.value.trim()) || DEFAULT_VOICE_ID
+          voiceId: (idEl && idEl.value.trim()) || DEFAULT_VOICE_ID,
+          preferEleven: true
         });
       });
     }
@@ -1781,7 +2254,7 @@
         stopSpeaking();
         try { localStorage.removeItem(ELEVEN_KEY_STORAGE); } catch (err) {}
         if (keyEl) keyEl.value = "";
-        toast("Cleared ElevenLabs key — $0 Web Speech active", "info");
+        toast("Cleared browser ElevenLabs override", "info");
       });
     }
   }
@@ -1886,7 +2359,10 @@
 
   async function jumpToAgent(agentId) {
     const match = state.agents.find(function (a) { return a.id === agentId; });
-    state.activeAgentId = match ? match.id : "peer-floor";
+    const nextId = match ? match.id : "peer-floor";
+    const nextSlug = dmSlugForAgent(nextId);
+    if (voiceCall && voiceCall.alive && voiceCall.slug !== nextSlug) hangUpVoiceCall("room");
+    state.activeAgentId = nextId;
     state.view = "agents";
     state.forceChatBottom = true;
     render();
@@ -1947,7 +2423,9 @@
     root.querySelectorAll("[data-select-agent]").forEach(function (b) { b.addEventListener("click", function () { jumpToAgent(b.dataset.selectAgent); }); });
     root.querySelectorAll("[data-go]").forEach(function (b) {
       b.addEventListener("click", function () {
-        state.view = b.dataset.go;
+        const next = b.dataset.go;
+        if (voiceCall && voiceCall.alive && next !== "agents") hangUpVoiceCall("room");
+        state.view = next;
         if (state.view === "agents") state.forceChatBottom = true;
         render();
       });
@@ -1968,8 +2446,31 @@
     }
     const vsBtn = document.getElementById("btn-voice-settings");
     if (vsBtn) vsBtn.addEventListener("click", openVoiceSettingsSheet);
+    const startVoiceBtn = document.getElementById("btn-start-voice");
+    if (startVoiceBtn) startVoiceBtn.addEventListener("click", startVoiceCall);
+    const hangBtn = root.querySelector("[data-voice-hangup]");
+    if (hangBtn) hangBtn.addEventListener("click", function () { hangUpVoiceCall("stop"); });
+    const muteBtn = root.querySelector("[data-voice-mute]");
+    if (muteBtn) muteBtn.addEventListener("click", toggleVoiceMute);
+    const sendVoiceBtn = root.querySelector("[data-voice-send]");
+    if (sendVoiceBtn) sendVoiceBtn.addEventListener("click", function () {
+      if (!voiceCall || !voiceCall.pendingTranscript) return;
+      sendVoiceTranscript(voiceCall.pendingTranscript);
+    });
+    const discardVoiceBtn = root.querySelector("[data-voice-discard]");
+    if (discardVoiceBtn) discardVoiceBtn.addEventListener("click", function () {
+      if (!voiceCall) return;
+      voiceCall.pendingTranscript = "";
+      beginVoiceListening();
+      render();
+    });
     const cloudPrompt = root.querySelector("[data-cloud-prompt]");
     if (cloudPrompt) cloudPrompt.addEventListener("click", copyCloudPrompt);
+    root.querySelectorAll("[data-dictate]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        toggleDictation(document.getElementById(button.dataset.dictate));
+      });
+    });
     const memBtn = document.getElementById("btn-agent-memory");
     if (memBtn) memBtn.addEventListener("click", openAgentMemorySheet);
 
@@ -2065,6 +2566,7 @@
     if (todayFloorForm) {
       todayFloorForm.addEventListener("submit", async function (e) {
         e.preventDefault();
+        endDictation();
         const body = todayFloorInput && todayFloorInput.value.trim();
         if (!body) return;
         todayFloorInput.value = "";
@@ -2095,6 +2597,7 @@
     if (chatForm) {
       chatForm.addEventListener("submit", async function (e) {
         e.preventDefault();
+        endDictation();
         const body = chatInput && chatInput.value.trim();
         if (!body) return;
         const active = state.agents.find(function (a) { return a.id === state.activeAgentId; }) || state.agents[0];
@@ -2154,7 +2657,9 @@
 
   document.querySelectorAll("[data-view]").forEach(function (b) {
     b.addEventListener("click", async function () {
-      state.view = b.dataset.view;
+      const next = b.dataset.view;
+      if (voiceCall && voiceCall.alive && next !== "agents") hangUpVoiceCall("room");
+      state.view = next;
       if (state.view === "agents") state.forceChatBottom = true;
       render();
       if (state.view === "agents") {
@@ -2388,6 +2893,19 @@
     });
     updateChatViewport();
   }
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) {
+      endDictation();
+      stopSpeaking();
+      if (voiceCall && voiceCall.alive) hangUpVoiceCall("hidden");
+    }
+  });
+  window.addEventListener("pagehide", function () {
+    endDictation();
+    stopSpeaking();
+    if (voiceCall && voiceCall.alive) hangUpVoiceCall("hidden");
+  });
 
   loadCreds();
   if (creds.pin && creds.bff) {
