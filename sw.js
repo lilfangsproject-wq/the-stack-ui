@@ -1,17 +1,17 @@
-/* The Stack v50.2.2 Rebirth — network-first shell cache for Cloudflare Pages / GitHub Pages.
+/* The Stack v50.2.3 Rebirth — network-first shell cache for Cloudflare Pages / GitHub Pages.
  * Always fetches fresh UI when online so pushes appear immediately on iPhone PWAs.
  */
-const CACHE = "the-stack-shell-v50.2.2-rebirth";
+const CACHE = "the-stack-shell-v50.2.3-rebirth";
 const SHELL = [
   "./",
   "./index.html",
-  "./app.js?v=50.2.2",
-  "./polish.js?v=50.2.2",
+  "./app.js?v=50.2.3",
+  "./polish.js?v=50.2.3",
   "./config.js",
-  "./style.css?v=50.2.2",
-  "./favicon.svg?v=50.2.2",
-  "./manifest.webmanifest?v=50.2.2",
-  "./icon-180.png?v=50.2.2",
+  "./style.css?v=50.2.3",
+  "./favicon.svg?v=50.2.3",
+  "./manifest.webmanifest?v=50.2.3",
+  "./icon-180.png?v=50.2.3",
   "./icon-192.png",
   "./icon-512.png"
 ];

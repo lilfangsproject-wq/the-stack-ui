@@ -140,12 +140,19 @@
   }
 
   function loadCreds() {
+    const defaultBff = (window.STACK_BFF_URL || "").replace(/\/$/, "");
     try {
       creds.pin = localStorage.getItem(PIN_KEY) || "";
-      creds.bff = (localStorage.getItem(BFF_KEY) || window.STACK_BFF_URL || "").replace(/\/$/, "");
+      let savedBff = (localStorage.getItem(BFF_KEY) || "").replace(/\/$/, "");
+      // Migrate away from retired temporary Worker URL automatically.
+      if (!savedBff || /cooked-barracuda/i.test(savedBff)) {
+        savedBff = defaultBff;
+        if (defaultBff) localStorage.setItem(BFF_KEY, defaultBff);
+      }
+      creds.bff = savedBff;
     } catch (e) {
       creds.pin = "";
-      creds.bff = (window.STACK_BFF_URL || "").replace(/\/$/, "");
+      creds.bff = defaultBff;
     }
   }
   function saveCreds() {
@@ -460,6 +467,13 @@
       if (state.view === "agents" && state.activeAgentId !== "peer-floor") await loadActiveAgentMessages();
       if (!silent) toast("Vault synced · " + state.headCommit + " · $" + ZERO_SPEND + " cap", "info");
     } catch (err) {
+      const defaultBff = (window.STACK_BFF_URL || "").replace(/\/$/, "");
+      if ((!err || !err.status) && defaultBff && creds.bff !== defaultBff) {
+        creds.bff = defaultBff;
+        saveCreds();
+        state.syncing = false;
+        return syncVault(silent);
+      }
       state.online = false;
       state.link = "offline";
       if (err && err.status === 401) {
@@ -471,7 +485,7 @@
         if (/GITHUB_PAT/i.test(detail)) {
           toast("Worker needs Secret GITHUB_PAT — Cloudflare → Workers → the-stack-bff → Secrets", "error");
         } else {
-          toast("Offline — working from local cache" + (detail ? " (" + String(detail).slice(0, 80) + ")" : ""), "warning");
+          toast("Offline — " + (detail ? String(detail).slice(0, 60) : "local cache"), "warning");
         }
       }
     } finally {
