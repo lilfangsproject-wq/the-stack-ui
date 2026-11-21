@@ -122,6 +122,7 @@
       margin: 0; padding: 0; min-height: 100%;
       font-family: var(--font-sans); background: var(--bg-base); color: var(--ink-1);
       -webkit-font-smoothing: antialiased; overflow-x: hidden;
+      touch-action: manipulation;
     }
 
     body::before {
@@ -354,7 +355,7 @@
 
     .input, .textarea, .select {
       width: 100%; border-radius: 16px; background: var(--input-bg); border: 1px solid var(--glass-panel-bd);
-      padding: 10px 13px; font-size: 13.5px; color: var(--ink-1); outline: none;
+      padding: 10px 13px; font-size: 16px; color: var(--ink-1); outline: none;
     }
     .input:focus, .textarea:focus, .select:focus { border-color: var(--lens-bd); }
 

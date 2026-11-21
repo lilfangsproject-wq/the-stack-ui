@@ -1,218 +1,197 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-surface="dark">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#0b0c0e" />
-  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0c0e" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d1117" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="The Stack" />
-  <meta name="description" content="The Stack — our app · zero spend (vault + GitHub). Not affiliated with Slack." />
-  <title>The Stack</title>
+  <meta name="description" content="The Stack is a zero-spend, git-native AI workforce control centre for automated workflows. Orchestrate agents, jobs, notes, and chats from a unified PWA interface.">
+  <title>The Stack — Git-native AI Workforce Control Centre</title>
+  
+  <!-- Open Graph -->
+  <meta property="og:title" content="The Stack — Git-native AI Workforce Control Centre">
+  <meta property="og:description" content="The Stack is a zero-spend, git-native AI workforce control centre for automated workflows. Orchestrate agents, jobs, notes, and chats from a unified PWA interface.">
+  <meta property="og:image" content="https://lilfangsproject-wq.github.io/the-stack-ui/og-image.png">
+  <meta property="og:url" content="https://lilfangsproject-wq.github.io/the-stack-ui/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="The Stack">
+  
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="The Stack — Git-native AI Workforce Control Centre">
+  <meta name="twitter:description" content="Zero-spend, git-native AI workforce control centre. Orchestrate agents, jobs, notes, and chats from a unified PWA.">
+  <meta name="twitter:image" content="https://lilfangsproject-wq.github.io/the-stack-ui/og-image.png">
+  
+  <!-- JSON-LD Schema -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "The Stack",
+    "description": "Git-native AI workforce control centre for automated workflows. Zero spend, zero voice.",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Web",
+    "url": "https://lilfangsproject-wq.github.io/the-stack-ui/",
+    "author": {
+      "@type": "Person",
+      "name": "Seth",
+      "sameAs": ["https://github.com/lilfangsproject-wq"]
+    },
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "publisher": {
+      "@type": "Organization",
+      "name": "lilfangsproject-wq",
+      "url": "https://github.com/lilfangsproject-wq"
+    }
+  }
+  </script>
+  
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icon-180.png" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="style.css" />
+  <script src="config.js"></script>
+  <script>
+    (function () {
+      try {
+        var s = localStorage.getItem("stack-surface-v1");
+        var mode = s === "light" || s === "dark" || s === "system" ? s : "dark";
+        var light = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches;
+        var surface = mode === "system" ? (light ? "light" : "dark") : mode;
+        document.documentElement.dataset.theme = mode;
+        document.documentElement.dataset.surface = surface;
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", surface === "light" ? "#cfd6e0" : "#0d1117");
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
-  <div id="boot" class="boot">
+  <!-- Access gate: Worker PIN only — never a GitHub PAT in the browser -->
+  <div id="boot-gate" class="boot-gate hidden">
     <div class="boot-card">
-      <div class="brand boot-brand">
-        <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
-        <div>
-          <strong>The Stack</strong>
-          <small>our app · zero spend · <span data-stack-version>v32.1</span></small>
-        </div>
+      <div class="hero-top">
+        <span class="kicker">The Stack · v50.1 Rebirth</span>
+        <span class="badge neutral">Zero Spend · Zero Voice</span>
       </div>
-      <p id="boot-status">Opening the vault…</p>
-      <script>
-        try {
-          var raw = localStorage.getItem("stack-github-hub-v1");
-          var tok = raw && JSON.parse(raw).token;
-          if (!tok) {
-            document.getElementById("boot-status").innerHTML =
-              "<strong>Sign in</strong><span class=\"boot-sub\">Paste your GitHub token to open the vault hub.</span>";
-          }
-        } catch (e) {}
-      </script>
-      <button type="button" id="boot-retry" class="ghost hidden">Retry</button>
+      <h1 class="hero-title">Unlock The Stack</h1>
+      <p class="hero-copy">Enter your Stack access PIN. The Worker BFF holds <span class="mono">GITHUB_PAT</span> server-side — nothing privileged is stored as a browser token.</p>
+      <form id="pin-form">
+        <div class="field">
+          <label for="bff-url">Worker BFF URL</label>
+          <input id="bff-url" name="bff" class="input mono" placeholder="https://the-stack-bff….workers.dev" autocomplete="off" required />
+        </div>
+        <div class="field">
+          <label for="stack-pin">Stack Access PIN</label>
+          <input id="stack-pin" name="pin" type="password" class="input mono" placeholder="PIN" autocomplete="current-password" required />
+        </div>
+        <p id="pin-error" class="hero-copy hidden" style="color:var(--st-red);margin-bottom:10px;"></p>
+        <div class="hero-actions">
+          <button type="submit" class="btn btn-pri" style="width:100%;">Open The Stack</button>
+        </div>
+      </form>
     </div>
   </div>
 
-  <div class="shell hidden" id="shell">
-    <div id="install-banner" class="install-banner" hidden>
-      <p id="install-copy">Install The Stack as an app</p>
-      <div class="install-actions">
-        <button type="button" id="install-btn" hidden>Install</button>
-        <button type="button" id="install-dismiss" class="ghost">Not now</button>
+  <div id="app-shell" class="shell hidden">
+    <aside class="mac-sidebar" aria-label="Mac Navigation">
+      <div class="sb-brand">
+        <span class="sb-brand-name">The Stack</span>
+        <button type="button" id="sb-new-btn" class="btn btn-sec btn-sm">+ New</button>
       </div>
-    </div>
-    <div id="rail-backdrop" class="rail-backdrop" hidden></div>
-
-    <aside class="rail" id="rail">
-      <div class="brand">
-        <span class="mark" aria-hidden="true"><img src="favicon.svg" alt="" /></span>
-        <div>
-          <strong>The Stack</strong>
-          <small>agent command centre · <span data-stack-version>v32.1</span></small>
-        </div>
-      </div>
-      <div class="live-pill" id="live-pill" title="Hub connection">
-        <span class="dot"></span>
-        <span id="live-label">online</span>
-      </div>
-      <div class="section-label">Hub</div>
-      <nav class="channel-list">
-        <button type="button" id="home-nav" class="active" data-view="home">Home</button>
+      <nav class="sb-nav">
+        <button type="button" class="sb-item active" data-view="today">
+          <span class="sb-item-left"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/></svg>Today</span>
+          <span id="sb-triage-badge" class="dot amber hidden"></span>
+        </button>
+        <button type="button" class="sb-item" data-view="agents">
+          <span class="sb-item-left"><svg viewBox="0 0 24 24"><path d="M5 17 3.5 20.5V7.5A2.5 2.5 0 0 1 6 5h12a2.5 2.5 0 0 1 2.5 2.5v7A2.5 2.5 0 0 1 18 17Z"/></svg>Agents</span>
+          <span id="sb-chat-badge" class="dot amber hidden"></span>
+        </button>
+        <button type="button" class="sb-item" data-view="work">
+          <span class="sb-item-left"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M9 10h6M9 14h4"/></svg>Work</span>
+        </button>
+        <button type="button" class="sb-item" data-view="stats">
+          <span class="sb-item-left"><svg viewBox="0 0 24 24"><path d="M4 18 9 13l4 3 7-9"/></svg>Usage &amp; Git</span>
+        </button>
       </nav>
-      <div class="section-label">Channels</div>
-      <nav id="channel-list" class="channel-list"></nav>
-      <form id="new-channel" class="new-channel">
-        <input name="slug" placeholder="new-channel" required autocomplete="off" />
-        <button type="submit" aria-label="Add channel">+</button>
-      </form>
-      <div class="section-label" id="dm-label">Agents · direct messages</div>
-      <nav id="dm-list" class="channel-list"></nav>
-      <form id="new-dm" class="new-channel">
-        <input name="member" placeholder="Agent name" required autocomplete="off" />
-        <button type="submit" aria-label="Open DM">+</button>
-      </form>
-      <div class="section-label">Lists</div>
-      <nav id="list-nav" class="channel-list"></nav>
-      <details class="rail-more">
-        <summary>Look &amp; connection</summary>
-        <div id="look-picker" class="look-picker" role="radiogroup" aria-label="Accent colour"></div>
-        <p class="look-hint">Accent colour stays on this phone.</p>
-        <p id="token-hint" class="token-hint"></p>
-        <p id="phone-hint" class="token-hint phone-hint" hidden></p>
-      </details>
-    </aside>
-
-    <main class="main home-pane" id="home-pane">
-      <header class="main-head">
-        <button type="button" id="menu-toggle-home" class="icon-btn" aria-label="Open menu">☰</button>
-        <div class="main-head-text">
-          <h1>Command centre</h1>
-          <p class="purpose" id="home-headline">Loading hub…</p>
-        </div>
-        <button type="button" id="home-refresh" class="ghost">Refresh</button>
-      </header>
-      <section class="home-body" id="home-body"></section>
-    </main>
-
-    <main class="main hidden agents-pane" id="agents-pane">
-      <header class="main-head">
-        <div class="main-head-text">
-          <h1>Agents</h1>
-          <p class="purpose" id="agents-headline">Loading…</p>
-        </div>
-        <button type="button" id="agents-refresh" class="ghost">Refresh</button>
-      </header>
-      <section class="agents-body" id="agents-body"></section>
-    </main>
-
-    <main class="main hidden notes-pane" id="notes-pane">
-      <header class="main-head">
-        <div class="main-head-text">
-          <h1>Notes</h1>
-          <p class="purpose" id="notes-headline">Things you want to remember</p>
-        </div>
-      </header>
-      <section class="notes-body" id="notes-body">
-        <input id="note-search" class="note-search" type="search" placeholder="Search notes" aria-label="Search notes" enterkeyhint="search" />
-        <form id="note-form" class="note-compose">
-          <textarea id="note-text" rows="2" placeholder="Write a note…" aria-label="New note"></textarea>
-          <button type="submit" class="act act-primary note-save">Save</button>
-        </form>
-        <div id="notes-list" class="notes-list"></div>
-      </section>
-    </main>
-
-    <main class="main hidden chats-pane" id="chats-pane">
-      <header class="main-head">
-        <button type="button" id="menu-toggle-chats" class="icon-btn" aria-label="Open menu">☰</button>
-        <div class="main-head-text">
-          <h1>Chats</h1>
-          <p class="purpose" id="chats-headline">Agents and channels</p>
-        </div>
-        <button type="button" id="chats-new" class="ghost">New</button>
-      </header>
-      <section class="chats-body" id="chats-inbox" aria-label="Conversations"></section>
-    </main>
-
-    <main class="main hidden" id="chat-pane">
-      <div class="sheet-grabber" aria-hidden="true"><span></span></div>
-      <header class="main-head">
-        <button type="button" id="chat-back" class="icon-btn chat-back" aria-label="Back to chats">‹</button>
-        <button type="button" id="menu-toggle" class="icon-btn" aria-label="Open channels">☰</button>
-        <div class="main-head-text">
-          <h1 id="channel-title">#the-digest</h1>
-          <p id="channel-purpose" class="purpose"></p>
-        </div>
-        <button type="button" id="toggle-lists" class="ghost">Lists</button>
-      </header>
-      <nav id="session-strip" class="session-strip" aria-label="Chat sessions"></nav>
-      <section id="messages" class="messages" aria-live="polite"></section>
-      <div id="photo-tray" class="photo-tray" hidden></div>
-      <form id="composer" class="composer">
-        <input id="author" name="author" value="Seth" aria-label="Author" autocomplete="nickname" />
-        <label class="attach-btn" title="Add photo">
-          <input id="photo-input" type="file" accept="image/*" multiple hidden />
-          <span aria-hidden="true">＋</span><span class="sr-only">Add photo</span>
-        </label>
-        <textarea id="body" name="body" rows="1" placeholder="Message… use @Name to mention"></textarea>
-        <button type="submit">Send</button>
-      </form>
-      <p class="composer-hint">Enter sends · Shift+Enter newline · Install via Add to Home Screen</p>
-      <div id="thread" class="thread hidden">
-        <header>
-          <strong>Thread</strong>
-          <button type="button" id="close-thread" class="ghost">Close</button>
-        </header>
-        <div id="thread-messages" class="messages"></div>
-        <form id="thread-composer" class="composer">
-          <textarea id="thread-body" rows="1" placeholder="Reply in thread" required></textarea>
-          <button type="submit">Reply</button>
-        </form>
+      <div class="sb-section">Agents · Live State</div>
+      <nav class="sb-nav" id="sb-agents-nav"></nav>
+      <div class="sb-footer">
+        <button type="button" id="sb-outbox-btn" class="sb-item">
+          <span class="sb-item-left"><span id="sb-outbox-dot" class="dot muted"></span><span id="sb-outbox-lbl">Outbox · 0</span></span>
+          <span class="mono">Git</span>
+        </button>
+          <button type="button" id="sb-refresh-btn" class="sb-item">
+          <span class="sb-item-left"><span class="dot muted"></span><span>Sync Vault</span></span>
+          <span class="mono">↻</span>
+        </button>
       </div>
-    </main>
-
-    <aside class="lists-pane" id="lists-pane">
-      <header class="main-head">
-        <h2 id="list-title">Lists</h2>
-        <button type="button" id="close-lists" class="ghost">Close</button>
-      </header>
-      <div id="list-table" class="list-table"></div>
-      <form id="new-row" class="new-row">
-        <input name="c0" placeholder="Status" />
-        <input name="c1" placeholder="Item" />
-        <input name="c2" placeholder="Owner" />
-        <input name="c3" placeholder="Notes" />
-        <button type="submit">Add row</button>
-      </form>
     </aside>
 
-    <aside class="host-sheet" id="host-sheet" hidden>
-      <header class="main-head host-sheet-head">
-        <button type="button" id="host-sheet-close" class="icon-btn" aria-label="Close">‹</button>
-        <div class="main-head-text">
-          <h1 id="host-sheet-title">Computer</h1>
-          <p class="purpose" id="host-sheet-sub">Status</p>
+    <div class="stage">
+      <div id="pull-ind" class="pull-ind" aria-live="polite"></div>
+      <header class="topbar">
+        <div class="topbar-left">
+          <h1 id="page-heading" class="page-heading">Today</h1>
+          <button type="button" id="sync-pill" class="glass-pill-tag" title="Git head commit and sync status">
+            <span id="sync-dot" class="dot muted" aria-hidden="true"></span>
+            <span id="sync-text">Connecting…</span>
+          </button>
         </div>
-        <span class="aw-pill" id="host-sheet-pill"><span class="dot"></span>—</span>
+        <div class="topbar-actions">
+          <button type="button" id="notif-btn" class="orb-btn" aria-label="Notification Centre" title="Notifications">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span id="notif-count" class="orb-count hidden">0</span>
+          </button>
+          <button type="button" id="cmd-btn" class="orb-btn" aria-label="Command palette" title="Command palette (⌘K)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          </button>
+          <button type="button" id="surface-btn" class="orb-btn" aria-label="Theme Dark" title="Theme: Dark (neutral glass)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor" stroke="none"/></svg>
+          </button>
+        </div>
       </header>
-      <section class="host-sheet-body" id="host-sheet-body"></section>
-      <footer class="host-sheet-actions" id="host-sheet-actions"></footer>
-    </aside>
-    <nav class="tabbar" id="tabbar" aria-label="Sections">
-      <button type="button" data-tab="home" class="active"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z"/></svg><span>Home</span></button>
-      <button type="button" data-tab="chats"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 16.5 3.5 20V8.5A2.5 2.5 0 0 1 6 6h8a2.5 2.5 0 0 1 2.5 2.5V14A2.5 2.5 0 0 1 14 16.5z"/><path d="M8.5 11h.01M12 11h.01"/></svg><span>Chats</span></button>
-      <button type="button" data-tab="agents"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="2.6"/><circle cx="16" cy="9.2" r="2"/><path d="M4.2 18.5c.7-2.4 2.6-3.6 4.8-3.6s4.1 1.2 4.8 3.6"/><path d="M14.2 15.1c1.3-.3 2.6.2 3.4 1.4.5.8.7 1.4.8 1.9"/></svg><span>Agents</span></button>
-      <button type="button" data-tab="notes"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h7.2L19 8.8V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M14 4v5h5M8.5 13h7M8.5 16.5h4.5"/></svg><span>Notes</span></button>
-    </nav>
+      <main id="root" aria-live="polite"></main>
+    </div>
   </div>
-  <script src="github_hub.js"></script>
+
+  <div id="mobile-dock-wrap" class="mobile-dock-wrap hidden">
+    <nav class="dock" aria-label="Primary navigation">
+      <button type="button" class="dock-btn active" data-view="today">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/></svg>
+        <span>Today</span>
+        <span id="dk-triage-dot" class="dock-dot hidden"></span>
+      </button>
+      <button type="button" class="dock-btn" data-view="agents">
+        <svg viewBox="0 0 24 24"><path d="M5 17 3.5 20.5V7.5A2.5 2.5 0 0 1 6 5h12a2.5 2.5 0 0 1 2.5 2.5v7A2.5 2.5 0 0 1 18 17Z"/></svg>
+        <span>Agents</span>
+        <span id="dk-chat-dot" class="dock-dot hidden"></span>
+      </button>
+      <button type="button" class="dock-btn" data-view="work">
+        <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M9 10h6M9 14h4"/></svg>
+        <span>Work</span>
+      </button>
+      <button type="button" class="dock-btn" data-view="stats">
+        <svg viewBox="0 0 24 24"><path d="M4 18 9 13l4 3 7-9"/></svg>
+        <span>Usage</span>
+      </button>
+    </nav>
+    <button type="button" id="fab-new" class="dock-fab" aria-label="Quick-Action Inbox" title="Quick-Action Inbox">+</button>
+  </div>
+
+  <div id="overlay" class="overlay" aria-hidden="true">
+    <div id="sheet" class="sheet" role="dialog" aria-modal="true"></div>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="polish.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

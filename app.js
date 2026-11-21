@@ -22,13 +22,13 @@
   };
 
   const DEFAULT_ROSTER = [
+    { id: "peer-floor", name: "#peer-floor", role: "Shared Floor", model: "Multi-Agent Room", reset: "Git-native" },
     { id: "gemini", name: "Gemini", role: "Research & Workspace", model: "gemini-3.8-flash / 4-hydrogen", reset: "4h window" },
     { id: "claude", name: "Claude", role: "Architecture", model: "Claude Opus 5.5 / Sonnet 5.5", reset: "4h window" },
     { id: "cursor", name: "Cursor", role: "Engineering", model: "Cursor Composer / Auto", reset: "Daily" },
     { id: "chatgpt", name: "ChatGPT", role: "Ideation & Verify", model: "GPT-5 Thinking", reset: "Daily" },
     { id: "nori", name: "Nori", role: "Trends & Grok Bots", model: "Grok (latest)", reset: "Daily" },
-    { id: "grokbot", name: "Grokbot", role: "Challenger", model: "Grok 4", reset: "Daily" },
-    { id: "peer-floor", name: "#peer-floor", role: "Shared Floor", model: "Multi-Agent Room", reset: "Git-native" }
+    { id: "grokbot", name: "Grokbot", role: "Challenger", model: "Grok 4", reset: "Daily" }
   ];
 
   const creds = {
@@ -38,7 +38,7 @@
 
   const state = {
     view: "today",
-    activeAgentId: "gemini",
+    activeAgentId: "peer-floor",
     workFilter: "all",
     notifFilter: "all",
     syncing: false,
@@ -570,11 +570,11 @@
         '<div class="hero-top"><span class="kicker">5-Second Brief · ' + VERSION + '</span><span class="badge green"><span class="dot green"></span>All Clear</span></div>' +
         '<h2 class="hero-title">Zero decisions waiting</h2>' +
         '<p class="hero-copy">BFF head <span class="mono">' + esc(state.headCommit) + "</span>. Queue OFF · $" + ZERO_SPEND + " spend cap. Tap an agent or drop a Quick Action.</p>" +
-        '<div class="hero-actions"><button type="button" class="btn btn-sec" data-go="work">Open Work</button><button type="button" class="btn btn-sec" data-go="stats">Usage &amp; Git</button><button type="button" class="btn btn-pri" id="btn-quick-inbox">Quick Action</button></div>' +
+        '<div class="hero-actions"><button type="button" class="btn btn-pri" data-jump-agent="peer-floor">#peer-floor</button><button type="button" class="btn btn-sec" data-go="work">Open Work</button><button type="button" class="btn btn-sec" id="btn-quick-inbox">Quick Action</button></div>' +
       "</section>"
     );
 
-    const agentStrip = state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
+    const agentStrip = state.agents.map(function (a) {
       const m = agentMeta(a.status);
       return (
         '<button type="button" class="agent-pill" data-jump-agent="' + esc(a.id) + '">' +
@@ -783,6 +783,17 @@
     const nc = document.getElementById("notif-count");
     if (nc) { nc.textContent = String(unreadNotifs); nc.classList.toggle("hidden", unreadNotifs === 0); }
 
+    const hasTriage = state.needsSeth.length > 0 || state.items.some(function (i) { return itemStateMeta(i.state).key === "blocked"; });
+    const hasChatAlert = unreadNotifs > 0 || state.outbox.length > 0;
+    ["sb-triage-badge", "dk-triage-dot"].forEach(function (id) {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle("hidden", !hasTriage);
+    });
+    ["sb-chat-badge", "dk-chat-dot"].forEach(function (id) {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle("hidden", !hasChatAlert);
+    });
+
     const link = (typeof navigator !== "undefined" && navigator.onLine === false) ? "offline" : (state.syncing ? "polling" : state.link);
     const sDot = document.getElementById("sync-dot");
     const sTxt = document.getElementById("sync-text");
@@ -860,6 +871,9 @@
           method: "POST",
           body: JSON.stringify({ slug: "peer-floor", author: "Seth", body: "Quick Action: " + body })
         });
+        state.messagesBySlug["peer-floor"] = (state.messagesBySlug["peer-floor"] || []).concat([{
+          author: "Seth", body: "Quick Action: " + body, created_at: new Date().toISOString()
+        }]);
         toast("Captured to #peer-floor", "info");
         closeSheet();
         await syncVault(true);
@@ -1095,7 +1109,8 @@
   }
 
   async function jumpToAgent(agentId) {
-    state.activeAgentId = agentId;
+    const match = state.agents.find(function (a) { return a.id === agentId; });
+    state.activeAgentId = match ? match.id : "peer-floor";
     state.view = "agents";
     render();
     await loadActiveAgentMessages();
@@ -1159,7 +1174,9 @@
         e.preventDefault();
         const body = chatInput && chatInput.value.trim();
         if (!body) return;
-        const slug = dmSlugForAgent(state.activeAgentId);
+        const active = state.agents.find(function (a) { return a.id === state.activeAgentId; }) || state.agents[0];
+        const resolvedId = active ? active.id : "peer-floor";
+        const slug = dmSlugForAgent(resolvedId);
         chatInput.value = "";
         try {
           await bff("/api/ping", {
@@ -1170,7 +1187,7 @@
           state.messagesBySlug[slug] = (state.messagesBySlug[slug] || []).concat([{ author: "Seth", body: body, created_at: new Date().toISOString() }]);
           render();
         } catch (err) {
-          state.outbox.unshift({ id: "evt-" + Date.now(), type: "message", agentId: state.activeAgentId, slug: slug, body: body });
+          state.outbox.unshift({ id: "evt-" + Date.now(), type: "message", agentId: resolvedId, slug: slug, body: body });
           saveOutbox();
           state.messagesBySlug[slug] = (state.messagesBySlug[slug] || []).concat([{ author: "Seth", body: body, created_at: new Date().toISOString(), _queued: true }]);
           toast("Offline — ping saved to Outbox", "warning");
@@ -1178,6 +1195,9 @@
         }
       });
     }
+
+    const activePill = root.querySelector(".agent-pill.active");
+    if (activePill && activePill.scrollIntoView) activePill.scrollIntoView({ inline: "nearest", block: "nearest" });
 
     const log = document.getElementById("chat-log");
     if (log) log.scrollTop = log.scrollHeight;
