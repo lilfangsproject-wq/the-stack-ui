@@ -60,6 +60,7 @@
     handoffs: [],
     channels: [],
     messagesBySlug: {},
+    draftsBySlug: {},
     usageRaw: { version: 1, providers: [] },
     usageAutoSynced: false,
     usageSyncedAt: "",
@@ -1028,6 +1029,8 @@
       return renderMessageBubble(m, slug, true);
     }).join("");
 
+    const savedDraft = state.draftsBySlug[slug] || "";
+
     return (
       '<div class="agent-strip" style="margin-bottom:10px;">' + switcher + "</div>" +
       '<section class="hero chat-hero">' +
@@ -1035,8 +1038,9 @@
           '<div style="min-width:0;"><span class="kicker">' + esc(agent.role) + " · " + esc(agent.model) + '</span><h2 class="hero-title">' + esc(agent.name) + "</h2></div>" +
           '<div class="hero-top-actions">' +
             '<span class="badge ' + st.tone + '"><span class="dot ' + st.tone + '"></span>' + esc(st.label) + "</span>" +
-            '<button type="button" class="btn btn-sec btn-sm" id="btn-agent-memory">🧠 Memory (' + memEntries.length + ")</button>" +
-            '<button type="button" class="btn btn-sec btn-sm voice-btn" id="btn-voice-agent">🔊 Read Latest</button>' +
+            '<button type="button" class="btn btn-sec btn-sm" id="btn-agent-memory" aria-label="Memory (' + memEntries.length + ')" title="Memory (' + memEntries.length + ')">🧠 <span class="hide-xs">Memory </span>(' + memEntries.length + ")</button>" +
+            '<button type="button" class="btn btn-sec btn-sm voice-btn" id="btn-voice-agent" aria-label="Read Latest" title="Read Latest">🔊<span class="hide-xs"> Read Latest</span></button>' +
+            '<button type="button" class="btn btn-sec btn-sm kb-done-btn" id="btn-chat-kb-done" aria-label="Hide keyboard">Done</button>' +
           "</div>" +
         "</div>" +
         '<div class="chat-subbar">' +
@@ -1062,7 +1066,7 @@
         '<div class="composer-wrap">' +
           '<div id="agent-mention-pop" class="mention-pop hidden" role="listbox" aria-label="Mention suggestions"></div>' +
           '<form id="agent-chat-form" class="composer">' +
-            '<input id="agent-chat-input" class="input" placeholder="' + (agent.id === "peer-floor" ? "Message #peer-floor… type @ to mention" : "Message " + esc(agent.name) + "…") + '" autocomplete="off" enterkeyhint="send" required />' +
+            '<input id="agent-chat-input" class="input" data-slug="' + esc(slug) + '" value="' + esc(savedDraft) + '" placeholder="' + (agent.id === "peer-floor" ? "Message #peer-floor… type @ to mention" : "Message " + esc(agent.name) + "…") + '" autocomplete="off" enterkeyhint="send" required />' +
             '<button type="submit" class="btn btn-pri btn-sm">' + (agent.id === "peer-floor" ? "Send" : "Ping") + "</button>" +
           "</form>" +
         "</div>" +
@@ -1290,10 +1294,16 @@
     ["agent-chat-input", "today-floor-input"].forEach(function (id) {
       const el = document.getElementById(id);
       if (!el) return;
+      const slug = el.dataset ? el.dataset.slug : "";
+      if (id === "agent-chat-input" && slug) {
+        if (el.value) state.draftsBySlug[slug] = el.value;
+        else delete state.draftsBySlug[slug];
+      }
       const hadFocus = document.activeElement === el;
       if (el.value || hadFocus) {
         savedDrafts.push({
           id: id,
+          slug: slug,
           value: el.value,
           selectionStart: el.selectionStart,
           selectionEnd: el.selectionEnd,
@@ -1317,6 +1327,8 @@
     savedDrafts.forEach(function (d) {
       const el = document.getElementById(d.id);
       if (!el) return;
+      const nextSlug = el.dataset ? el.dataset.slug : "";
+      if (d.id === "agent-chat-input" && d.slug && nextSlug && d.slug !== nextSlug) return;
       if (d.value) el.value = d.value;
       if (d.hadFocus && !sheetOpen) {
         try {
@@ -1337,7 +1349,8 @@
         if (jumpBtn) jumpBtn.classList.add("hidden");
       } else {
         chatLog.scrollTop = chatMetrics.prevScrollTop;
-        if (jumpBtn) jumpBtn.classList.remove("hidden");
+        const farFromBottom = (chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight) > 96 && chatLog.clientHeight >= 90;
+        if (jumpBtn) jumpBtn.classList.toggle("hidden", !farFromBottom);
       }
     } else if (state.view !== "agents") {
       state.forceChatBottom = false;
@@ -2091,8 +2104,29 @@
 
     const chatInput = document.getElementById("agent-chat-input");
     bindMentionPicker(chatInput, document.getElementById("agent-mention-pop"));
+    if (chatInput) {
+      chatInput.addEventListener("input", function () {
+        const slug = chatInput.dataset ? chatInput.dataset.slug : "";
+        if (!slug) return;
+        if (chatInput.value) state.draftsBySlug[slug] = chatInput.value;
+        else delete state.draftsBySlug[slug];
+      });
+    }
+    const kbDoneBtn = document.getElementById("btn-chat-kb-done");
+    if (kbDoneBtn) {
+      kbDoneBtn.addEventListener("click", function () {
+        if (chatInput) chatInput.blur();
+        document.documentElement.classList.remove("chat-keyboard");
+      });
+    }
     root.querySelectorAll("[data-insert]").forEach(function (c) {
-      c.addEventListener("click", function () { if (chatInput) { chatInput.value = (chatInput.value ? chatInput.value + " " : "") + c.dataset.insert; chatInput.focus(); } });
+      c.addEventListener("click", function () {
+        if (!chatInput) return;
+        chatInput.value = (chatInput.value ? chatInput.value + " " : "") + c.dataset.insert;
+        const slug = chatInput.dataset ? chatInput.dataset.slug : "";
+        if (slug) state.draftsBySlug[slug] = chatInput.value;
+        chatInput.focus();
+      });
     });
 
     const chatForm = document.getElementById("agent-chat-form");
@@ -2105,6 +2139,7 @@
         const resolvedId = active ? active.id : "peer-floor";
         const slug = dmSlugForAgent(resolvedId);
         chatInput.value = "";
+        delete state.draftsBySlug[slug];
         await sendToSlug(slug, body, resolvedId);
       });
     }
@@ -2118,8 +2153,8 @@
     const jumpBottomBtn = document.getElementById("chat-jump-bottom");
     if (log && jumpBottomBtn) {
       log.addEventListener("scroll", function () {
-        const nearBottom = (log.scrollHeight - log.scrollTop - log.clientHeight) < 72;
-        jumpBottomBtn.classList.toggle("hidden", nearBottom);
+        const farFromBottom = (log.scrollHeight - log.scrollTop - log.clientHeight) > 96 && log.clientHeight >= 90;
+        jumpBottomBtn.classList.toggle("hidden", !farFromBottom);
       }, { passive: true });
       jumpBottomBtn.addEventListener("click", function () {
         state.forceChatBottom = true;
@@ -2346,15 +2381,49 @@
     });
   }
 
-  // iOS can shrink the visual viewport while leaving the layout viewport at full height.
+  // iOS Safari / PWA can shrink visualViewport and scroll offsetTop while layout viewport stays full height.
   const viewport = window.visualViewport;
   if (viewport) {
+    let wasKbOpen = false;
     const updateChatViewport = function () {
-      if (viewport.scale !== 1) return;
-      document.documentElement.style.setProperty("--chat-visible-height", viewport.height + "px");
-      document.documentElement.classList.toggle("chat-keyboard", window.innerHeight - viewport.height > 120);
+      if (viewport.scale && Math.abs(viewport.scale - 1) > 0.02) return;
+      const vh = Math.round(viewport.height);
+      const vTop = Math.max(0, Math.round(viewport.offsetTop || 0));
+      const focusedChat = Boolean(document.activeElement && document.activeElement.id === "agent-chat-input");
+      const kbOpen = (window.innerHeight - viewport.height > 120) || (focusedChat && vh < 560);
+
+      const chatLog = document.getElementById("chat-log");
+      const wasNearBottom = !chatLog || (chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight) < 96;
+
+      document.documentElement.style.setProperty("--chat-visible-height", vh + "px");
+      document.documentElement.style.setProperty("--chat-viewport-top", vTop + "px");
+      document.documentElement.classList.toggle("chat-keyboard", kbOpen);
+
+      if (kbOpen && !wasKbOpen && state.view === "agents" && window.scrollY > 0) {
+        try { window.scrollTo(0, 0); } catch (e) {}
+      }
+      if (chatLog && (wasNearBottom || (kbOpen && !wasKbOpen))) {
+        requestAnimationFrame(function () {
+          chatLog.scrollTop = chatLog.scrollHeight;
+          const jumpBtn = document.getElementById("chat-jump-bottom");
+          if (jumpBtn) jumpBtn.classList.add("hidden");
+        });
+      }
+      wasKbOpen = kbOpen;
     };
     viewport.addEventListener("resize", updateChatViewport);
+    viewport.addEventListener("scroll", updateChatViewport);
+    document.addEventListener("focusin", function (e) {
+      if (e.target && e.target.id === "agent-chat-input") {
+        setTimeout(updateChatViewport, 60);
+        setTimeout(updateChatViewport, 250);
+      }
+    });
+    document.addEventListener("focusout", function (e) {
+      if (e.target && e.target.id === "agent-chat-input") {
+        setTimeout(updateChatViewport, 60);
+      }
+    });
     updateChatViewport();
   }
 
