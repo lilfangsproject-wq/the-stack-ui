@@ -1,4 +1,5 @@
-/* The Stack v50.1 — pure helpers (no voice, no network).
+/* The Stack v50.1 — pure helpers (no mic / no network).
+ * Includes opt-in Voice Brief text builders (speech is wired in app.js).
  * Loaded as a classic script; also readable from Node tests via vm.
  */
 (function (root) {
@@ -238,6 +239,126 @@
     return matched;
   }
 
+  function clipSpoken(text, max) {
+    var limit = max || 220;
+    var clean = String(text || "").replace(/\s+/g, " ").trim();
+    if (clean.length <= limit) return clean;
+    return clean.slice(0, limit - 1).replace(/\s+\S*$/, "") + "…";
+  }
+
+  function nameList(agents, limit) {
+    return (agents || []).slice(0, limit || 3).map(function (a) {
+      return a && (a.name || a.id);
+    }).filter(Boolean);
+  }
+
+  /** Spoken Today Voice Brief from sync state (opt-in TTS; not Jarvis). */
+  function buildTodayBriefText(state) {
+    state = state || {};
+    var agents = Array.isArray(state.agents) ? state.agents : [];
+    var rosterOnly = agents.filter(function (a) { return a && a.id !== "peer-floor"; });
+    var workingAgents = rosterOnly.filter(function (a) {
+      return a.status === "working" || a.status === "completed";
+    });
+    var waitingAgents = rosterOnly.filter(function (a) { return a.status === "waiting"; });
+    var blockedAgents = rosterOnly.filter(function (a) { return a.status === "blocked"; });
+    var parts = [];
+
+    parts.push("The Stack brief.");
+
+    var needs = Array.isArray(state.needsSeth) ? state.needsSeth.slice(0, 2) : [];
+    if (needs.length) {
+      parts.push(
+        needs.length === 1
+          ? "Needs your call: " + clipSpoken(needs[0].title || needs[0].summary || "Approval", 120) + "."
+          : "Needs your call on " + needs.length + " items. First: " +
+            clipSpoken(needs[0].title || needs[0].summary || "Approval", 100) + "."
+      );
+      var detail = needs[0].body || needs[0].reason || needs[0].summary || "";
+      if (detail && detail !== needs[0].title) {
+        var clippedDetail = clipSpoken(detail, 160);
+        parts.push(/[.!?…]$/.test(clippedDetail) ? clippedDetail : clippedDetail + ".");
+      }
+      if (needs[0].owner) parts.push("Owner " + needs[0].owner + ".");
+    } else {
+      parts.push("No open Needs-Seth items.");
+    }
+
+    parts.push(
+      workingAgents.length + " active, " +
+      waitingAgents.length + " waiting, " +
+      blockedAgents.length + " blocked."
+    );
+
+    if (blockedAgents.length) {
+      parts.push("Blocked: " + nameList(blockedAgents, 4).join(", ") + ".");
+    }
+    if (waitingAgents.length) {
+      parts.push("Waiting: " + nameList(waitingAgents, 4).join(", ") + ".");
+    }
+    if (workingAgents.length) {
+      var bits = workingAgents.slice(0, 3).map(function (a) {
+        var task = clipSpoken(a.activitySummary || a.task || "", 70);
+        return task ? (a.name + " — " + task) : a.name;
+      });
+      parts.push("Active: " + bits.join("; ") + ".");
+    }
+
+    var conflicts = Array.isArray(state.conflicts) ? state.conflicts : [];
+    if (conflicts.length) {
+      parts.push(conflicts.length + " file conflict" + (conflicts.length === 1 ? "" : "s") + " on the board.");
+    }
+
+    var floorMsgs = (state.messagesBySlug && state.messagesBySlug["peer-floor"]) || [];
+    var last = floorMsgs[floorMsgs.length - 1];
+    if (last && last.body) {
+      var floorBit = clipSpoken(last.body, 180);
+      parts.push(
+        "Peer floor: " + (last.author || "Agent") + " said " +
+          (/[.!?…]$/.test(floorBit) ? floorBit : floorBit + ".")
+      );
+    }
+
+    if (state.headCommit) {
+      parts.push("Head " + String(state.headCommit).slice(0, 8) + ".");
+    }
+
+    return clipSpoken(parts.join(" "), 1180);
+  }
+
+  function statusLabel(status) {
+    var key = String(status || "offline").toLowerCase();
+    if (key === "working") return "Working";
+    if (key === "waiting") return "Waiting";
+    if (key === "blocked") return "Blocked";
+    if (key === "completed") return "Completed";
+    if (key === "offline") return "Offline";
+    return key;
+  }
+
+  function buildAgentLatestText(agent, messagesBySlug) {
+    if (!agent) return "";
+    var slug = dmSlug(agent.id);
+    var msgs = (messagesBySlug && messagesBySlug[slug]) || [];
+    var last = msgs[msgs.length - 1];
+    var head = (agent.name || agent.id) + " is " + statusLabel(agent.status) + ".";
+    var activity = clipSpoken(agent.activitySummary || "", 120);
+    if (last && last.body) {
+      return clipSpoken(
+        head +
+          (activity ? " " + activity + "." : "") +
+          " Latest from " + (last.author || agent.name || agent.id) + ": " + last.body,
+        1180
+      );
+    }
+    return clipSpoken(
+      head +
+        (activity ? " " + activity + "." : "") +
+        (agent.evidence ? " Evidence " + agent.evidence + "." : ""),
+      1180
+    );
+  }
+
   var api = {
     AGENT_IDS: AGENT_IDS,
     parsePaletteQuery: parsePaletteQuery,
@@ -251,7 +372,10 @@
     enqueueToast: enqueueToast,
     dmSlug: dmSlug,
     buildPalette: buildPalette,
-    actorsForCommit: actorsForCommit
+    actorsForCommit: actorsForCommit,
+    clipSpoken: clipSpoken,
+    buildTodayBriefText: buildTodayBriefText,
+    buildAgentLatestText: buildAgentLatestText
   };
 
   root.StackPolish = api;

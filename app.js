@@ -1,11 +1,11 @@
-/* The Stack v50.5 Tahoe — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
+/* The Stack v50.5.2 Tahoe — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
  * Hard rules: no always-on mic/Jarvis; opt-in TTS (/api/tts + $0 Web Speech fallback); PIN → x-stack-pin; Git is source of truth.
  * No horizontal swipe. Colour only marks the 5 agent states. Connection pill is honest.
  */
 (function () {
   "use strict";
 
-  const VERSION = window.STACK_VERSION || "v50.5-tahoe";
+  const VERSION = window.STACK_VERSION || "v50.5.2-tahoe";
   const SURFACE_KEY = "stack-surface-v1";
   const OUTBOX_KEY = "stack-rebirth-outbox-v1";
   const READ_NOTIF_KEY = "stack-rebirth-read-notifs-v1";
@@ -832,34 +832,21 @@
     fallbackWebSpeech(cleanText, btnEl);
   }
 
+  /** Opt-in Today Voice Brief — spoken executive rundown (not Jarvis / not always-on mic). */
   function buildTodayBriefText() {
-    const topNeed = state.needsSeth[0] || null;
-    if (topNeed) {
-      return "Decision needed: " + (topNeed.title || topNeed.summary || "Approval") + ". " + (topNeed.body || topNeed.reason || "");
+    if (window.StackPolish && typeof window.StackPolish.buildTodayBriefText === "function") {
+      return window.StackPolish.buildTodayBriefText(state);
     }
-    const rosterOnly = state.agents.filter(function (a) { return a.id !== "peer-floor"; });
-    const working = rosterOnly.filter(function (a) { return a.status === "working" || a.status === "completed"; }).length;
-    const waiting = rosterOnly.filter(function (a) { return a.status === "waiting"; }).length;
-    const blocked = rosterOnly.filter(function (a) { return a.status === "blocked"; }).length;
-    const floorMsgs = state.messagesBySlug["peer-floor"] || [];
-    const last = floorMsgs[floorMsgs.length - 1];
-    let text = "The Stack pulse. " + working + " active, " + waiting + " waiting, " + blocked + " blocked. Head commit " + state.headCommit + ".";
-    if (last && last.body) {
-      text += " Latest on peer floor from " + (last.author || "Agent") + ": " + last.body;
-    }
-    return text;
+    return "The Stack brief. Sync the vault, then try Voice Brief again.";
   }
 
   function buildAgentLatestText(agent) {
     if (!agent) return "";
-    const slug = dmSlugForAgent(agent.id);
-    const msgs = state.messagesBySlug[slug] || [];
-    const last = msgs[msgs.length - 1];
-    if (last && last.body) {
-      return (last.author || agent.name) + " wrote: " + last.body;
+    if (window.StackPolish && typeof window.StackPolish.buildAgentLatestText === "function") {
+      return window.StackPolish.buildAgentLatestText(agent, state.messagesBySlug);
     }
     const st = agentMeta(agent.status);
-    return agent.name + " is " + st.label + ". " + (agent.activitySummary || "") + ". Evidence: " + agent.evidence;
+    return agent.name + " is " + st.label + ".";
   }
 
   /* ===================== VIEWS ===================== */
