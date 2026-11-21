@@ -1480,14 +1480,32 @@
 
   if ("serviceWorker" in navigator) {
     let swReloading = false;
+    let swReg = null;
     navigator.serviceWorker.addEventListener("controllerchange", function () {
       if (swReloading) return;
       swReloading = true;
       location.reload();
     });
-    navigator.serviceWorker.register("./sw.js").then(function (reg) {
-      if (reg && reg.update) reg.update().catch(function () {});
+    function checkAppUpdate() {
+      if (swReg && swReg.update) swReg.update().catch(function () {});
+    }
+    navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" }).then(function (reg) {
+      swReg = reg;
+      checkAppUpdate();
+      setInterval(checkAppUpdate, 300000);
     }).catch(function () {});
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) {
+        checkAppUpdate();
+        if (creds.pin && creds.bff && !state.syncing) syncVault(true);
+      }
+    });
+    window.addEventListener("pageshow", function (e) {
+      if (e && e.persisted) {
+        checkAppUpdate();
+        if (creds.pin && creds.bff && !state.syncing) syncVault(true);
+      }
+    });
   }
 
   loadCreds();
