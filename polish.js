@@ -314,7 +314,7 @@
     if (last && last.body) {
       var floorBit = clipSpoken(last.body, 180);
       parts.push(
-        "Peer floor: " + (last.author || "Agent") + " said " +
+        "Peer floor: " + (last.auto === true ? "Stack automation" : (last.author || "Agent")) + " said " +
           (/[.!?…]$/.test(floorBit) ? floorBit : floorBit + ".")
       );
     }
@@ -327,12 +327,13 @@
   }
 
   function statusLabel(status) {
-    var key = String(status || "offline").toLowerCase();
+    var key = String(status || "unknown").toLowerCase();
     if (key === "working") return "Working";
     if (key === "waiting") return "Waiting";
     if (key === "blocked") return "Blocked";
     if (key === "completed") return "Completed";
     if (key === "offline") return "Offline";
+    if (key === "unknown") return "Status unconfirmed";
     return key;
   }
 
@@ -347,7 +348,7 @@
       return clipSpoken(
         head +
           (activity ? " " + activity + "." : "") +
-          " Latest from " + (last.author || agent.name || agent.id) + ": " + last.body,
+          " Latest from " + (last.auto === true ? "Stack automation" : (last.author || agent.name || agent.id)) + ": " + last.body,
         1180
       );
     }

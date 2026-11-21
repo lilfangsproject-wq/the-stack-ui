@@ -348,6 +348,8 @@
     .msg-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 11.5px; }
     .msg-author { font-weight: 600; color: var(--ink-1); }
     .msg-time { color: var(--ink-3); }
+    .msg-receipt > summary { display: list-item; cursor: pointer; width: fit-content; }
+    .msg-receipt > div { margin-top: 6px; font-size: 12px; overflow-wrap: anywhere; }
     .msg-foot { margin-top: 8px; display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap; }
     .msg-act { font-size: 11px; color: var(--ink-2); padding: 4px 10px; border-radius: 999px; background: var(--btn-sec-bg); border: 1px solid var(--hairline); }
     .msg-act:hover { color: var(--ink-1); background: var(--btn-sec-hover); }

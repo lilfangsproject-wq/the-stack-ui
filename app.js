@@ -1,13 +1,14 @@
-/* The Stack v50.5.2 Tahoe — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
+/* The Stack v50.5.3 Tahoe — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
  * Hard rules: no always-on mic/Jarvis; opt-in TTS (/api/tts + $0 Web Speech fallback); PIN → x-stack-pin; Git is source of truth.
- * No horizontal swipe. Colour only marks the 5 agent states. Connection pill is honest.
+ * No horizontal swipe. Colour only marks the explicit agent states. Connection pill is honest.
  */
 (function () {
   "use strict";
 
-  const VERSION = window.STACK_VERSION || "v50.5.2-tahoe";
+  const VERSION = window.STACK_VERSION || "v50.5.3-tahoe";
   const SURFACE_KEY = "stack-surface-v1";
   const OUTBOX_KEY = "stack-rebirth-outbox-v1";
+  const DRAFT_KEY = "stack-composer-drafts-v1";
   const READ_NOTIF_KEY = "stack-rebirth-read-notifs-v1";
   const PIN_KEY = "stack-access-pin-v1";
   const BFF_KEY = "stack-bff-url-v1";
@@ -20,6 +21,7 @@
     working: { label: "Working", tone: "green" },
     waiting: { label: "Waiting", tone: "amber" },
     blocked: { label: "Blocked", tone: "red" },
+    unknown: { label: "Status unconfirmed", tone: "muted" },
     offline: { label: "Offline", tone: "muted" },
     completed: { label: "Completed", tone: "green" }
   };
@@ -60,7 +62,6 @@
     handoffs: [],
     channels: [],
     messagesBySlug: {},
-    draftsBySlug: {},
     usageRaw: { version: 1, providers: [] },
     usageAutoSynced: false,
     usageSyncedAt: "",
@@ -78,6 +79,7 @@
   let toastShowing = false;
   let toastRankShowing = 0;
   let pollStarted = false;
+  let composerDrafts = loadComposerDrafts();
 
   function esc(s) {
     return String(s == null ? "" : s)
@@ -167,6 +169,24 @@
     try { localStorage.setItem(READ_NOTIF_KEY, JSON.stringify(Array.from(state.readNotifs))); } catch (e) {}
   }
 
+  function loadComposerDrafts() {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(DRAFT_KEY));
+      if (saved && typeof saved.bff === "string" && saved.channels &&
+          typeof saved.channels === "object" && !Array.isArray(saved.channels)) return saved;
+    } catch (e) {}
+    return { bff: "", channels: {} };
+  }
+
+  function saveComposerDraft(input) {
+    if (!input || !input.dataset || !input.dataset.draftChannel) return;
+    if (composerDrafts.bff !== creds.bff) composerDrafts = { bff: creds.bff, channels: {} };
+    const channel = input.dataset.draftChannel;
+    if (input.value) composerDrafts.channels[channel] = input.value;
+    else delete composerDrafts.channels[channel];
+    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(composerDrafts)); } catch (e) {}
+  }
+
   function loadCreds() {
     const defaultBff = (window.STACK_BFF_URL || "").replace(/\/$/, "");
     try {
@@ -191,9 +211,11 @@
   }
   function clearCreds() {
     creds.pin = "";
+    composerDrafts = { bff: "", channels: {} };
     try {
       localStorage.removeItem(PIN_KEY);
     } catch (e) {}
+    try { sessionStorage.removeItem(DRAFT_KEY); } catch (e) {}
   }
 
   function prefersLight() {
@@ -216,13 +238,11 @@
     try { localStorage.setItem(SURFACE_KEY, choice); } catch (e) {}
   }
 
-  function agentMeta(st) { return AGENT_STATES[st] || AGENT_STATES.offline; }
+  function agentMeta(st) { return AGENT_STATES[st] || AGENT_STATES.unknown; }
 
   function agentAgeText(agent) {
     const m = agentMeta(agent && agent.status);
-    const seen = (agent && agent.lastSeen) || "Offline";
-    if (m.label === "Offline" && seen === "Offline") return "Offline · No recent commit";
-    return m.label + " · " + seen;
+    return agent && agent.lastSeen ? m.label + " · " + agent.lastSeen : m.label;
   }
 
   function itemStateMeta(st) {
@@ -320,12 +340,6 @@
         return rawUsage[k] && typeof rawUsage[k] === "object" && !Array.isArray(rawUsage[k]);
       }).map(function (k) { return Object.assign({ id: k }, rawUsage[k]); });
     }
-    const qcByBuilder = {};
-    (state.qcReceipts || []).forEach(function (r) {
-      const b = String(r.builder || "").toLowerCase();
-      if (!qcByBuilder[b] || (r.verified_at || "") > (qcByBuilder[b].verified_at || "")) qcByBuilder[b] = r;
-    });
-
     const hbMap = (state.heartbeats && state.heartbeats.agents && typeof state.heartbeats.agents === "object")
       ? state.heartbeats.agents
       : (state.heartbeats || {});
@@ -367,12 +381,10 @@
         return i.ownerId === base.id && itemStateMeta(i.state).key === "blocked";
       });
       const prov = base.id === "peer-floor" ? null : findUsageProvider(providers, base);
-      const qc = qcByBuilder[base.id] || qcByBuilder[base.name.toLowerCase()];
 
-      let status = "offline";
-      let evidence = "No recent Git commit";
-      let lastSeen = "Offline";
-      const allowedHb = { working: 1, waiting: 1, blocked: 1, offline: 1, completed: 1 };
+      let status = "unknown";
+      let evidence = "No recent heartbeat";
+      let lastSeen = "";
 
       if (base.id === "peer-floor") {
         status = "working";
@@ -386,33 +398,23 @@
         status = "waiting";
         evidence = waitingItem.ref || waitingItem.key || "needs_seth.json";
         lastSeen = relTime(waitingItem.created_at || waitingItem.updated_at);
-      } else if (hb && hb.ts) {
-        const ageMs = nowMs - new Date(hb.ts).getTime();
+      } else if (hb && isRecentIso(hb.ts)) {
         const declared = String(hb.state || "").toLowerCase();
-        if (allowedHb[declared]) status = declared;
-        else status = ageMs < 3600000 ? "working" : "offline";
-        if (status === "completed" && !(qc && qc.checks_passed && qc.reviewer && String(qc.reviewer).toLowerCase() !== String(qc.builder || "").toLowerCase())) {
-          // Protocol: completed requires peer QC — fall back to working/offline from beat age.
-          status = ageMs < 3600000 ? "working" : "offline";
+        const sha = String(hb.evidence_sha || hb.commit || "").toLowerCase();
+        if (Object.hasOwn(AGENT_STATES, declared)) status = declared;
+        if (status === "completed") {
+          const qc = (state.qcReceipts || []).find(function (receipt) {
+            if (!receipt || !receipt.reviewer || receipt.checks_passed !== true || !sha) return false;
+            const builder = String(receipt.builder || "").trim().toLowerCase();
+            const reviewer = String(receipt.reviewer).trim().toLowerCase();
+            return (builder === base.id || builder === base.name.toLowerCase()) &&
+              reviewer && reviewer !== builder && String(receipt.commit_sha || "").toLowerCase() === sha;
+          });
+          if (!qc) status = "unknown";
         }
-        if (status !== "offline" && ageMs > dayMs && declared !== "blocked" && declared !== "waiting") {
-          status = "offline";
-        }
-        evidence = hb.evidence_path || hb.task || hb.commit || hb.evidence_sha || "heartbeat";
-        if (hb.evidence_sha || hb.commit) {
-          evidence = (hb.evidence_path ? hb.evidence_path + " · " : "") + "commit " + String(hb.evidence_sha || hb.commit).slice(0, 8);
-        }
-        lastSeen = relTime(hb.ts);
-      } else if (qc && qc.checks_passed && qc.reviewer && String(qc.reviewer).toLowerCase() !== String(qc.builder || "").toLowerCase()) {
-        status = "completed";
-        evidence = "QC " + String(qc.commit_sha || "").slice(0, 8) + " · reviewer " + qc.reviewer;
-        lastSeen = relTime(qc.verified_at);
-      } else if (commit) {
-        const ageMs = nowMs - new Date(commit.date || commit.created_at || 0).getTime();
-        // Commit alone = Working (in progress). Completed requires peer QC receipt.
-        status = ageMs < dayMs ? "working" : "offline";
-        evidence = "commit " + String(commit.sha || "").slice(0, 8);
-        lastSeen = relTime(commit.date || commit.created_at);
+        evidence = hb.evidence_path || hb.task || "heartbeat";
+        if (sha) evidence += " · commit " + sha.slice(0, 8);
+        lastSeen = "Heartbeat " + relTime(hb.ts);
       }
 
       const commits24h = (state.commits || []).filter(function (c) {
@@ -426,12 +428,12 @@
       const floorMsgs24h = base.id === "peer-floor"
         ? floorMsgsAll.filter(function (m) { return isRecentIso(m.created_at); }).length
         : floorMsgsAll.filter(function (m) {
-            if (!isRecentIso(m.created_at)) return false;
+            if (m.auto === true || !isRecentIso(m.created_at)) return false;
             const auth = String(m.author || "").toLowerCase();
             const body = String(m.body || "").toLowerCase();
             return auth.includes(base.id) || body.includes("@" + base.id);
           }).length + dmMsgs.filter(function (m) {
-            return isRecentIso(m.created_at) && String(m.author || "").toLowerCase().includes(base.id);
+            return m.auto !== true && isRecentIso(m.created_at) && String(m.author || "").toLowerCase().includes(base.id);
           }).length;
 
       const hbActive24h = (hb && hb.ts && isRecentIso(hb.ts)) ? 1 : 0;
@@ -439,24 +441,19 @@
       const activity24h = callsToday + commits24h + floorMsgs24h + hbActive24h;
 
       const rawPct = prov ? (prov.pct_used ?? prov.pct ?? prov.used_pct ?? prov.usage_pct ?? prov.percent ?? (typeof prov.used === "number" && typeof prov.limit === "number" && prov.limit > 0 ? Math.round((prov.used / prov.limit) * 100) : null)) : null;
-      const hasNumericPct = typeof rawPct === "number" && !isNaN(rawPct);
-      let usagePct = 0;
-      let pctEstimated = false;
-      if (hasNumericPct) {
-        usagePct = Math.max(0, Math.min(100, Math.round(rawPct)));
-      } else if (callsToday > 0) {
-        usagePct = Math.min(100, Math.max(1, Math.round((callsToday / 250) * 100)));
-        pctEstimated = true;
-      } else if (activity24h > 0) {
-        usagePct = Math.min(100, Math.max(1, activity24h * 4));
-        pctEstimated = true;
-      }
-      const hasLiveUsage = hasNumericPct || activity24h > 0;
+      const observedAt = Date.parse(prov && (prov.quota_observed_at || prov.updated_at) || "");
+      const resetMs = Date.parse(prov && prov.reset_at || "");
+      const hasLiveUsage = !!prov && (prov.quota_source || prov.source) === "manual-ui" &&
+        Number.isFinite(observedAt) && observedAt <= nowMs && nowMs - observedAt <= 2 * 3600000 &&
+        (!Number.isFinite(resetMs) || resetMs > nowMs) &&
+        typeof rawPct === "number" && Number.isFinite(rawPct);
+      const usagePct = hasLiveUsage ? Math.max(0, Math.min(100, Math.round(rawPct))) : 0;
+      const pctEstimated = false;
 
       const lastCallAt = (prov && (prov.last_call_at || prov.updated_at)) || (hb && hb.ts) || (commit && (commit.date || commit.created_at)) || "";
       const usageNote = (prov && prov.note) || (hb && hb.task) || "";
       const activityParts = [];
-      if (callsToday > 0) activityParts.push(callsToday + " call" + (callsToday === 1 ? "" : "s"));
+      if (callsToday > 0) activityParts.push(callsToday + " recorded event" + (callsToday === 1 ? "" : "s"));
       if (commits24h > 0) activityParts.push(commits24h + " commit" + (commits24h === 1 ? "" : "s"));
       if (floorMsgs24h > 0) activityParts.push(floorMsgs24h + " msg" + (floorMsgs24h === 1 ? "" : "s"));
       if (hbActive24h > 0 && !activityParts.length) activityParts.push("1 beat");
@@ -466,13 +463,14 @@
 
       const rawResetAt = (prov && prov.reset_at) || "";
       const windowLabel = (prov && (prov.window_label || prov.reset)) || base.reset;
-      const resetDisplay = formatResetLabel(rawResetAt, windowLabel);
+      const resetDisplay = hasLiveUsage ? formatResetLabel(rawResetAt, windowLabel) : "Reset unconfirmed";
 
       return Object.assign({}, base, {
         status: status,
         evidence: evidence,
         lastSeen: lastSeen,
         usagePct: usagePct,
+        usageObservedAt: hasLiveUsage ? (prov.quota_observed_at || prov.updated_at) : "",
         pctEstimated: pctEstimated,
         hasLiveUsage: hasLiveUsage,
         callsToday: callsToday,
@@ -488,8 +486,7 @@
         windowLabel: windowLabel,
         reset: resetDisplay,
         providerId: (prov && prov.id) || base.id,
-        model: (prov && prov.model) || base.model,
-        qc: qc || null
+        model: (prov && prov.model) || base.model
       });
     });
 
@@ -627,11 +624,7 @@
   }
 
   async function loadMessagesForSlug(slug) {
-    const existing = state.messagesBySlug[slug] || [];
-    if (!creds.pin || !creds.bff) {
-      state.messagesBySlug[slug] = existing;
-      return;
-    }
+    if (!creds.pin || !creds.bff) return;
     try {
       const data = await bff("/api/messages?slug=" + encodeURIComponent(slug) + "&limit=40");
       if (data && Array.isArray(data.messages)) {
@@ -645,7 +638,7 @@
             merged.push(m);
           }
         });
-        existing.forEach(function (m) {
+        (state.messagesBySlug[slug] || []).forEach(function (m) {
           if (!m) return;
           const key = m.id || ((m.created_at || "") + "|" + (m.author || "") + "|" + (m.body || ""));
           if (!seen.has(key)) {
@@ -659,7 +652,6 @@
     } catch (e) {
       // Graceful fallback when running against an older Worker deploy or offline cache.
     }
-    state.messagesBySlug[slug] = existing;
   }
 
   async function loadActiveAgentMessages() {
@@ -668,27 +660,47 @@
     await loadMessagesForSlug(slug);
   }
 
-  async function flushOutbox() {
-    if (!state.outbox.length) return;
-    const remaining = [];
-    let sent = 0;
-    for (const ev of state.outbox) {
-      try {
-        if (ev.type === "message" || ev.type === "quick") {
-          await bff("/api/ping", {
-            method: "POST",
-            body: JSON.stringify({ slug: ev.slug, body: ev.body, author: "Seth" })
-          });
-          sent += 1;
-        }
-      } catch (e) {
-        remaining.push(ev);
-      }
+  async function postMessage(slug, body, requestId) {
+    const out = await bff("/api/ping", {
+      method: "POST",
+      body: JSON.stringify({ slug: slug, author: "Seth", body: body, request_id: requestId })
+    });
+    if (!out || out.ok !== true || !out.message || !out.message.id) {
+      throw new Error("Backend acceptance could not be confirmed");
     }
-    state.outbox = remaining;
-    saveOutbox();
-    render();
-    toast(sent ? "Synced " + sent + " queued event(s) via BFF" : "Outbox still pending", sent ? "info" : "warning");
+
+    const messages = (state.messagesBySlug[slug] || []).filter(function (m) {
+      return (!requestId || m.id !== requestId) && m.id !== out.message.id && (!out.reply || m.id !== out.reply.id);
+    });
+    // Older Workers confirm the write in the response but do not persist a receipt.
+    messages.push(Object.assign({}, out.message, { _accepted: true }));
+    if (out.reply) messages.push(out.reply);
+    messages.sort(function (a, b) { return String(a.created_at || "").localeCompare(String(b.created_at || "")); });
+    state.messagesBySlug[slug] = messages.slice(-60);
+  }
+
+  let flushingOutbox = false;
+  async function flushOutbox() {
+    if (flushingOutbox || !state.outbox.length) return;
+    flushingOutbox = true;
+    let sent = 0;
+    try {
+      for (const ev of state.outbox.slice()) {
+        if (ev.type !== "message" && ev.type !== "quick") continue;
+        try {
+          await postMessage(ev.slug, ev.body, ev.requestId);
+          state.outbox = state.outbox.filter(function (entry) { return entry !== ev; });
+          saveOutbox();
+          sent += 1;
+        } catch (e) {
+          // Keep the same request ID so a retry can recover an already saved message.
+        }
+      }
+    } finally {
+      flushingOutbox = false;
+      render();
+    }
+    toast(sent ? "Backend accepted " + sent + " queued message(s)" : "Outbox still pending", sent ? "info" : "warning");
   }
 
   /* ===================== VOICE (OPT-IN) ===================== */
@@ -851,22 +863,26 @@
 
   /* ===================== VIEWS ===================== */
 
-  function renderMessageBubble(m, slug, showFoot) {
+  function renderMessageBubble(m, showFoot) {
     if (!m) return "";
-    if (m._typing) {
-      return (
-        '<div class="msg typing">' +
-          '<div class="msg-head"><span class="msg-author">' + esc(m.author || "Agent") + '</span><span class="msg-time">Now</span></div>' +
-          '<div class="typing-line"><span class="typing-dots"><span></span><span></span><span></span></span><span>' + esc(m.body || "Replying…") + "</span></div>" +
-        "</div>"
-      );
-    }
     const isMe = String(m.author || "").toLowerCase() === "seth";
+    const isAutomated = m.auto === true;
+    let receipt = "";
+    if (showFoot && isMe) {
+      if (m.backend_accepted_at || m._accepted) {
+        receipt = '<details class="msg-foot msg-receipt"><summary class="git-chip">Backend accepted</summary>' +
+          '<div>Saved to channel history' + (m.backend_accepted_at ? ' · <time datetime="' + esc(m.backend_accepted_at) + '">' + esc(m.backend_accepted_at) + '</time>' : '') +
+          '<br>Agent delivery · Unconfirmed<br>Agent acknowledgement · Unconfirmed<br>Verified completion · Unconfirmed</div></details>';
+      } else {
+        const label = m._queued ? "Outbox · Acceptance unconfirmed" : m._submitting ? "Submitted · Awaiting backend" : "Receipt unavailable";
+        receipt = '<div class="msg-foot"><span class="git-chip">' + label + '</span></div>';
+      }
+    }
     return (
       '<div class="msg ' + (isMe ? "me" : "") + '">' +
-        '<div class="msg-head"><span class="msg-author">' + esc(m.author || "Agent") + '</span><span class="msg-time">' + relTime(m.created_at) + "</span></div>" +
+        '<div class="msg-head"><span class="msg-author">' + esc(isAutomated ? "Stack automation" : m.author || "Agent") + '</span><span class="msg-time">' + relTime(m.created_at) + "</span></div>" +
         '<div style="white-space:pre-wrap;">' + esc(m.body || "") + "</div>" +
-        (showFoot ? '<div class="msg-foot"><span class="git-chip">' + esc(m._queued ? "Outbox · Pending" : "Committed · " + slug) + "</span></div>" : "") +
+        receipt +
       "</div>"
     );
   }
@@ -876,7 +892,7 @@
     const allFloorMsgs = state.messagesBySlug["peer-floor"] || [];
     const floorMsgs = allFloorMsgs.slice(-8);
     const floorHtml = floorMsgs.map(function (m) {
-      return renderMessageBubble(m, "peer-floor", false);
+      return renderMessageBubble(m, false);
     }).join("");
 
     const mentionChips = '<button type="button" class="ctx-chip" data-floor-mention="@all ">@all</button>' + state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
@@ -889,6 +905,27 @@
     const blockedCount = rosterOnly.filter(function (a) { return a.status === "blocked"; }).length;
     const wfTone = blockedCount ? "red" : waitingCount ? "amber" : workingCount ? "green" : "muted";
     const wfSub = workingCount + " active · " + waitingCount + " waiting · " + blockedCount + " blocked";
+    const workstreams = new Map((state.workstreamsRaw.workstreams || []).map(function (w) { return [w.id, w]; }));
+    const verified = (state.qcReceipts || []).filter(function (receipt) {
+      if (!receipt || !receipt.workstream_id || !Number.isFinite(Date.parse(receipt.verified_at))) return false;
+      const builder = String(receipt.builder || "").trim().toLowerCase();
+      const reviewer = String(receipt.reviewer || "").trim().toLowerCase();
+      return receipt.checks_passed === true && builder && reviewer && builder !== reviewer &&
+        /^[0-9a-f]{7,40}$/i.test(String(receipt.commit_sha || "")) &&
+        workstreams.has(receipt.workstream_id);
+    }).sort(function (a, b) {
+      return Date.parse(b.verified_at) - Date.parse(a.verified_at);
+    }).slice(0, 3);
+    const verifiedRows = verified.map(function (receipt) {
+      const workstream = workstreams.get(receipt.workstream_id);
+      const title = workstream.title || workstream.name || workstream.id;
+      const commitUrl = "https://github.com/lilfangsproject-wq/ai-workspace/commit/" + receipt.commit_sha;
+      return '<div class="row">' +
+        '<div class="row-main"><div class="row-title">' + esc(title) + '</div>' +
+        '<div class="row-sub">QC by ' + esc(receipt.reviewer) + ' · ' + relTime(receipt.verified_at) + '</div></div>' +
+        '<a class="git-chip" href="' + commitUrl + '" target="_blank" rel="noopener noreferrer" aria-label="Open verified commit for ' + esc(title) + '">' + esc(String(receipt.commit_sha).slice(0, 8)) + '</a>' +
+      '</div>';
+    }).join("");
     const conflictCount = (state.conflicts || []).length;
     const commitCount = (state.commits || []).length;
 
@@ -898,7 +935,7 @@
         '<div class="composer-wrap">' +
           '<div id="today-mention-pop" class="mention-pop hidden" role="listbox" aria-label="Mention suggestions"></div>' +
           '<form id="today-floor-form" class="composer">' +
-            '<input id="today-floor-input" class="input" placeholder="Dispatch to #peer-floor… type @ to mention" autocomplete="off" enterkeyhint="send" required />' +
+            '<input id="today-floor-input" data-draft-channel="peer-floor" class="input" placeholder="Dispatch to #peer-floor… type @ to mention" autocomplete="off" enterkeyhint="send" required />' +
             '<button type="submit" class="btn btn-pri btn-sm">Send</button>' +
           "</form>" +
         "</div>" +
@@ -982,6 +1019,7 @@
             '<div class="row-main"><div class="row-title">Git Commits</div><div class="row-sub">Head ' + esc(state.headCommit) + " · " + relTime(state.lastSyncIso) + "</div></div>" +
             '<div class="row-right"><span class="git-chip">' + commitCount + "</span><span>›</span></div>" +
           "</button>" +
+          (verifiedRows ? '<div class="section-head"><span class="section-title">QC receipts</span></div>' + verifiedRows : "") +
           '<button type="button" class="row" id="btn-quick-inbox">' +
             '<div class="row-main"><div class="row-title">Quick-Action Inbox</div><div class="row-sub">Capture an idea or dictation to #peer-floor</div></div>' +
             '<div class="row-right"><span>Capture</span><span>›</span></div>' +
@@ -992,6 +1030,24 @@
     return heroHtml + '<div class="today-grid">' + streamCol + sheetsCol + "</div>";
   }
 
+  async function copyCloudPrompt() {
+    const prompt = [
+      "Seth here. Open The Stack → Agents → #peer-floor using your existing authorized access. The shared room is Projects/The-Stack/hub/channels/peer-floor/messages.jsonl on main in https://github.com/lilfangsproject-wq/ai-workspace.",
+      "Read my latest @all ping in that room. Under your own teammate name, reply once in #peer-floor with the ping ID, your current update and any blocker. If you already replied there to that ping, reuse your existing reply. If your report is in a DM, summarize only what is appropriate for the shared room.",
+      "Read your reply back from #peer-floor on main and return its message ID in this cloud chat. If you cannot post or verify it, tell me exactly which step is blocked. Keep dispatch off and spending at $0."
+    ].join("\n\n");
+    try {
+      await navigator.clipboard.writeText(prompt);
+      toast("Copied. Paste into each teammate’s cloud chat.", "info");
+    } catch (error) {
+      openSheet('<div class="sheet-head"><h2 class="sheet-title">Peer-floor prompt</h2><button type="button" class="btn btn-sec" data-close-sheet>Close</button></div>' +
+        '<label for="cloud-prompt-text">Copy into each teammate’s cloud chat</label>' +
+        '<textarea class="input" id="cloud-prompt-text" rows="9" readonly>' + esc(prompt) + '</textarea>');
+      const promptEl = document.getElementById("cloud-prompt-text");
+      if (promptEl) promptEl.select();
+    }
+  }
+
   function renderAgents() {
     const agent = state.agents.find(function (a) { return a.id === state.activeAgentId; }) || state.agents[0];
     if (!agent) return '<div class="empty">Loading agents…</div>';
@@ -999,7 +1055,7 @@
     const slug = dmSlugForAgent(agent.id);
     const msgs = state.messagesBySlug[slug] || [];
     const usageTone = agent.usagePct >= 85 ? "red" : agent.usagePct >= 70 ? "amber" : "";
-    const pctText = (agent.pctEstimated ? "~" : "") + agent.usagePct + "% used";
+    const pctText = agent.hasLiveUsage ? agent.usagePct + "% used · Manual · " + relTime(agent.usageObservedAt) : "Quota unavailable";
     const memEntries = state.sharedMemory.entries || [];
 
     const switcher = state.agents.map(function (a) {
@@ -1013,10 +1069,8 @@
     }).join("");
 
     const msgHtml = msgs.slice(-40).map(function (m) {
-      return renderMessageBubble(m, slug, true);
+      return renderMessageBubble(m, true);
     }).join("");
-
-    const savedDraft = state.draftsBySlug[slug] || "";
 
     return (
       '<div class="agent-strip" style="margin-bottom:10px;">' + switcher + "</div>" +
@@ -1034,7 +1088,7 @@
           '<div class="chat-subbar-top">' +
             (agent.id !== "peer-floor"
               ? '<span><strong>' + esc(pctText) + "</strong> · " + esc(agent.reset) + " · " + esc(agent.activitySummary) + "</span>" +
-                '<span class="mono">' + esc(agent.lastSeen) + "</span>"
+                '<span class="mono">' + esc(agent.lastSeen || agent.evidence) + "</span>"
               : '<span>channels/peer-floor/messages.jsonl</span><span class="mono">' + esc(agent.activitySummary) + "</span>") +
           "</div>" +
           (agent.id !== "peer-floor" ? '<div class="meter" style="margin-top:5px;height:4px;"><div class="meter-fill ' + usageTone + '" style="width:' + agent.usagePct + '%"></div></div>' : "") +
@@ -1044,6 +1098,7 @@
           '<button type="button" id="chat-jump-bottom" class="chat-jump-pill hidden">↓ Latest</button>' +
         "</div>" +
         '<div class="chip-strip">' +
+          (agent.id === "peer-floor" ? '<button type="button" class="ctx-chip" data-cloud-prompt>Copy peer-floor prompt</button>' : "") +
           (agent.id === "peer-floor" ? '<button type="button" class="ctx-chip" data-insert="@all">@all</button>' + state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
             return '<button type="button" class="ctx-chip" data-insert="@' + esc(a.name) + '">@' + esc(a.name) + "</button>";
           }).join("") : "") +
@@ -1053,7 +1108,7 @@
         '<div class="composer-wrap">' +
           '<div id="agent-mention-pop" class="mention-pop hidden" role="listbox" aria-label="Mention suggestions"></div>' +
           '<form id="agent-chat-form" class="composer">' +
-            '<input id="agent-chat-input" class="input" data-slug="' + esc(slug) + '" value="' + esc(savedDraft) + '" placeholder="' + (agent.id === "peer-floor" ? "Message #peer-floor… type @ to mention" : "Message " + esc(agent.name) + "…") + '" autocomplete="off" enterkeyhint="send" required />' +
+            '<input id="agent-chat-input" data-draft-channel="' + esc(slug) + '" data-slug="' + esc(slug) + '" class="input" placeholder="' + (agent.id === "peer-floor" ? "Message #peer-floor… type @ to mention" : "Message " + esc(agent.name) + "…") + '" autocomplete="off" enterkeyhint="send" required />' +
             '<button type="submit" class="btn btn-pri btn-sm">' + (agent.id === "peer-floor" ? "Send" : "Ping") + "</button>" +
           "</form>" +
         "</div>" +
@@ -1125,19 +1180,12 @@
   function renderStats() {
     const modelAgents = state.agents.filter(function (a) { return a.id !== "peer-floor"; });
     const anyLiveUsage = modelAgents.some(function (a) { return a.hasLiveUsage; });
-    const totalPct = modelAgents.reduce(function (sum, a) { return sum + (a.usagePct || 0); }, 0);
-    const avgPct = modelAgents.length ? Math.round(totalPct / modelAgents.length) : 0;
     const totalEvents = modelAgents.reduce(function (sum, a) { return sum + (a.activity24h || 0); }, 0);
-    const activeCount = modelAgents.filter(function (a) { return a.status === "working" || a.status === "completed"; }).length;
-    const peakAgent = modelAgents.reduce(function (best, a) {
-      return !best || (a.usagePct || 0) > (best.usagePct || 0) ? a : best;
-    }, null);
-    const avgTone = avgPct >= 85 ? "red" : avgPct >= 70 ? "amber" : "";
 
     const usageRows = modelAgents.map(function (a) {
       const m = agentMeta(a.status);
       const tone = a.usagePct >= 85 ? "red" : a.usagePct >= 70 ? "amber" : "";
-      const pctLabel = a.hasLiveUsage ? ((a.pctEstimated ? "~" : "") + a.usagePct + "%") : (state.online ? "0%" : "—");
+      const pctLabel = a.hasLiveUsage ? a.usagePct + "% · Manual · " + relTime(a.usageObservedAt) : "Quota unavailable";
       const lastCallTxt = a.lastCallAt ? (" · last " + relTime(a.lastCallAt)) : "";
       return (
         '<div class="usage-row">' +
@@ -1152,7 +1200,7 @@
               '<button type="button" class="btn btn-sec btn-sm" data-jump-agent="' + esc(a.id) + '">DM ›</button>' +
             "</div>" +
           "</div>" +
-          '<div class="meter" style="margin-top:0;"><div class="meter-fill ' + tone + '" style="width:' + a.usagePct + '%"></div></div>' +
+          '<div class="meter" style="margin-top:0;"><div class="meter-fill ' + tone + '" style="width:' + (a.hasLiveUsage ? a.usagePct : 0) + '%"></div></div>' +
           '<div class="usage-row-meta">' +
             '<span class="git-chip">' + esc(a.evidence) + "</span>" +
             (a.usageNote ? '<span class="row-sub" style="margin-top:0;">' + esc(a.usageNote) + "</span>" : "") +
@@ -1168,7 +1216,7 @@
     const autoBadgeTone = state.online ? "green" : "neutral";
     const usageStatus = state.usageAutoSynced
       ? ("Auto-synced" + (state.usageSyncedAt ? " · " + relTime(state.usageSyncedAt) : ""))
-      : (anyLiveUsage ? "Live telemetry" : (state.online ? "Live Git & floor activity" : "Offline — tap Sync Now"));
+      : (anyLiveUsage ? "Manual quota readings" : (state.online ? "Live Git & floor activity" : "Offline — tap Sync Now"));
 
     return (
       '<section class="hero">' +
@@ -1180,8 +1228,7 @@
           "</div>" +
         "</div>" +
         '<h2 class="hero-title">Workforce &amp; BFF Pulse</h2>' +
-        '<p class="hero-copy">Avg quota <strong>' + avgPct + "%</strong> across " + modelAgents.length + " agents (" + activeCount + " active · " + totalEvents + " events 24h" + (peakAgent ? (" · peak " + esc(peakAgent.name) + " " + peakAgent.usagePct + "%") : "") + ')<br/><span class="mono">' + esc(creds.bff) + "</span> · Last sync " + relTime(state.lastSyncIso) + " · " + state.outbox.length + " pending · Queue OFF · $" + ZERO_SPEND + " cap<br/>" + healthLine + "</p>" +
-        '<div class="meter" style="margin-bottom:14px;"><div class="meter-fill ' + avgTone + '" style="width:' + avgPct + '%"></div></div>' +
+        '<p class="hero-copy">' + modelAgents.filter(function (a) { return a.hasLiveUsage; }).length + " of " + modelAgents.length + " manual quota readings available · " + totalEvents + " recorded activity events (24h)" + '<br/><span class="mono">' + esc(creds.bff) + "</span> · Last sync " + relTime(state.lastSyncIso) + " · " + state.outbox.length + " pending · Queue OFF · $" + ZERO_SPEND + " cap<br/>" + healthLine + "</p>" +
         '<div class="hero-actions">' +
           '<button type="button" class="btn btn-pri btn-sm" id="btn-sync-now">Sync Now</button>' +
           '<button type="button" class="btn btn-sec btn-sm" id="btn-timemachine">Time Machine</button>' +
@@ -1277,27 +1324,10 @@
       };
     }
 
-    const savedDrafts = [];
-    ["agent-chat-input", "today-floor-input"].forEach(function (id) {
-      const el = document.getElementById(id);
-      if (!el) return;
-      const slug = el.dataset ? el.dataset.slug : "";
-      if (id === "agent-chat-input" && slug) {
-        if (el.value) state.draftsBySlug[slug] = el.value;
-        else delete state.draftsBySlug[slug];
-      }
-      const hadFocus = document.activeElement === el;
-      if (el.value || hadFocus) {
-        savedDrafts.push({
-          id: id,
-          slug: slug,
-          value: el.value,
-          selectionStart: el.selectionStart,
-          selectionEnd: el.selectionEnd,
-          hadFocus: hadFocus
-        });
-      }
-    });
+    const activeEl = document.activeElement;
+    const focusedComposer = (activeEl && activeEl.matches && activeEl.matches("[data-draft-channel]"))
+      ? activeEl
+      : null;
 
     if (state.view === "today") root.innerHTML = renderToday();
     else if (state.view === "agents") root.innerHTML = renderAgents();
@@ -1311,21 +1341,22 @@
 
     const ov = document.getElementById("overlay");
     const sheetOpen = Boolean(ov && ov.classList.contains("open"));
-    savedDrafts.forEach(function (d) {
-      const el = document.getElementById(d.id);
-      if (!el) return;
-      const nextSlug = el.dataset ? el.dataset.slug : "";
-      if (d.id === "agent-chat-input" && d.slug && nextSlug && d.slug !== nextSlug) return;
-      if (d.value) el.value = d.value;
-      if (d.hadFocus && !sheetOpen) {
+    const composer = root.querySelector("[data-draft-channel]");
+    if (composer) {
+      const channel = composer.dataset.draftChannel;
+      const saved = composerDrafts.bff === creds.bff ? composerDrafts.channels[channel] : "";
+      composer.value = typeof saved === "string" ? saved : "";
+      composer.addEventListener("input", function () { saveComposerDraft(composer); });
+      if (focusedComposer && focusedComposer.id === composer.id &&
+          focusedComposer.dataset.draftChannel === channel && !sheetOpen) {
         try {
-          el.focus({ preventScroll: true });
-          if (typeof d.selectionStart === "number" && el.setSelectionRange) {
-            el.setSelectionRange(d.selectionStart, d.selectionEnd);
+          composer.focus({ preventScroll: true });
+          if (typeof focusedComposer.selectionStart === "number" && composer.setSelectionRange) {
+            composer.setSelectionRange(focusedComposer.selectionStart, focusedComposer.selectionEnd);
           }
         } catch (e) {}
       }
-    });
+    }
 
     const chatLog = document.getElementById("chat-log");
     const jumpBtn = document.getElementById("chat-jump-bottom");
@@ -1376,24 +1407,8 @@
       e.preventDefault();
       const body = document.getElementById("quick-body").value.trim();
       if (!body) return;
-      try {
-        await bff("/api/ping", {
-          method: "POST",
-          body: JSON.stringify({ slug: "peer-floor", author: "Seth", body: "Quick Action: " + body })
-        });
-        state.messagesBySlug["peer-floor"] = (state.messagesBySlug["peer-floor"] || []).concat([{
-          author: "Seth", body: "Quick Action: " + body, created_at: new Date().toISOString()
-        }]);
-        toast("Captured to #peer-floor", "info");
-        closeSheet();
-        await syncVault(true);
-      } catch (err) {
-        state.outbox.unshift({ id: "evt-" + Date.now(), type: "quick", slug: "peer-floor", body: "Quick Action: " + body });
-        saveOutbox();
-        toast("Offline — saved to Outbox", "warning");
-        closeSheet();
-        render();
-      }
+      closeSheet();
+      await sendToSlug("peer-floor", "Quick Action: " + body);
     });
   }
 
@@ -1525,7 +1540,7 @@
             '<div class="row-title"><span class="dot ' + m.tone + '"></span>' + esc(a.name) + ' <span class="mono">· ' + esc(a.role) + "</span></div>" +
             '<div class="row-sub">' + esc(agentAgeText(a)) + " · " + esc(a.evidence) + "</div>" +
           "</div>" +
-          '<div class="row-right"><span>' + a.usagePct + "%</span><span>›</span></div>" +
+          '<div class="row-right"><span>' + (a.hasLiveUsage ? a.usagePct + "% · Manual" : "Quota unavailable") + "</span><span>›</span></div>" +
         "</button>"
       );
     }).join("");
@@ -1593,7 +1608,7 @@
         '<div class="quota-top">' +
           '<span class="badge ' + st.tone + '"><span class="dot ' + st.tone + '"></span>' + esc(agent.name) + " · " + esc(st.label) + "</span>" +
           (agent.id !== "peer-floor"
-            ? '<div class="usage-row-actions"><strong class="mono">' + esc((agent.pctEstimated ? "~" : "") + agent.usagePct + "%") + '</strong><button type="button" class="btn btn-sec btn-sm" id="sheet-calibrate-btn" data-sheet-calibrate="' + esc(agent.id) + '">Calibrate</button></div>'
+            ? '<div class="usage-row-actions"><strong class="mono">' + esc(agent.hasLiveUsage ? agent.usagePct + "% · Manual" : "Quota unavailable") + '</strong><button type="button" class="btn btn-sec btn-sm" id="sheet-calibrate-btn" data-sheet-calibrate="' + esc(agent.id) + '">Calibrate</button></div>'
             : '<span class="mono">' + esc(agent.activitySummary) + "</span>") +
         "</div>" +
         (agent.id !== "peer-floor"
@@ -1626,7 +1641,7 @@
       '<div class="sheet-head"><div><h2 class="sheet-title">Calibrate Quota · ' + esc(agent.name) + '</h2><p class="sheet-sub">' + esc(agent.model) + " · commits to usage.json</p></div><button type=\"button\" class=\"orb-btn\" style=\"width:32px;height:32px;\" data-close-sheet>✕</button></div>" +
       '<form id="usage-edit-form">' +
         '<div class="field"><label for="usage-pct">% Used (0–100)</label>' +
-        '<input id="usage-pct" class="input mono" type="number" min="0" max="100" step="1" value="' + esc(String(agent.usagePct || 0)) + '" required /></div>' +
+        '<input id="usage-pct" class="input mono" type="number" min="0" max="100" step="1" value="' + esc(agent.hasLiveUsage ? String(agent.usagePct) : "") + '" required /></div>' +
         '<div class="field"><label for="usage-reset">Reset Window</label>' +
         '<input id="usage-reset" class="input" type="text" value="' + esc(initialReset) + '" placeholder="e.g. 4h window, Daily, or ISO reset time" /></div>' +
         '<div class="field"><label for="usage-note">Note</label>' +
@@ -1869,19 +1884,6 @@
     setTimeout(function () { input.focus(); }, 30);
   }
 
-  function inferResponderName(slug, body) {
-    const names = { gemini: "Gemini", cursor: "Cursor", claude: "Claude", chatgpt: "ChatGPT", nori: "Nori", grokbot: "Grokbot" };
-    if (slug && slug !== "peer-floor") {
-      const m = /^dm-([a-z0-9_-]+)-seth$/i.exec(slug);
-      const id = m ? m[1].toLowerCase() : "";
-      if (names[id]) return names[id];
-      return id ? (id.charAt(0).toUpperCase() + id.slice(1)) : "Agent";
-    }
-    const mention = /@(gemini|cursor|claude|chatgpt|nori|grokbot)\b/i.exec(String(body || ""));
-    if (mention) return names[mention[1].toLowerCase()] || "StackBot (Live)";
-    return "StackBot (Live)";
-  }
-
   async function jumpToAgent(agentId) {
     const match = state.agents.find(function (a) { return a.id === agentId; });
     state.activeAgentId = match ? match.id : "peer-floor";
@@ -1898,54 +1900,31 @@
     const channel = slug || "peer-floor";
     if (!body) return;
 
-    const responderName = inferResponderName(channel, body);
-    const tempUserId = "local-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
-    const typingId = "typing-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
-    const nowIso = new Date().toISOString();
-
-    state.messagesBySlug[channel] = (state.messagesBySlug[channel] || []).concat([
-      { id: tempUserId, channel_slug: channel, author: "Seth", body: body, created_at: nowIso },
-      { id: typingId, channel_slug: channel, author: responderName, body: "Replying…", _typing: true, created_at: nowIso }
-    ]);
+    const requestId = crypto.randomUUID();
+    const pending = { id: requestId, channel_slug: channel, author: "Seth", body: body, created_at: new Date().toISOString(), _submitting: true };
+    state.messagesBySlug[channel] = (state.messagesBySlug[channel] || []).concat(pending);
     state.forceChatBottom = true;
     state.sendingPing += 1;
     render();
 
     try {
-      const out = await bff("/api/ping", {
-        method: "POST",
-        body: JSON.stringify({ slug: channel, author: "Seth", body: body })
-      });
-      const prevList = state.messagesBySlug[channel] || [];
-      const nextList = [];
-      prevList.forEach(function (m) {
-        if (!m || m.id === typingId) return;
-        if (m.id === tempUserId) {
-          nextList.push(out && out.message ? out.message : m);
-        } else {
-          nextList.push(m);
-        }
-      });
-      if (out && out.reply && !nextList.some(function (m) { return out.reply.id && m.id === out.reply.id; })) {
-        nextList.push(out.reply);
-      }
-      state.messagesBySlug[channel] = nextList.slice(-60);
-      toast(out && out.reply ? ((out.reply.author || responderName) + " replied") : ("Sent to " + channel), "info");
+      await postMessage(channel, body, requestId);
+      toast("Backend accepted message", "info");
       state.forceChatBottom = true;
       normalizeHubData();
       render();
     } catch (e) {
-      const evt = { id: "evt-" + Date.now(), type: "message", slug: channel, body: body };
-      if (agentIdForOutbox) evt.agentId = agentIdForOutbox;
-      state.outbox.unshift(evt);
-      saveOutbox();
-      state.messagesBySlug[channel] = (state.messagesBySlug[channel] || []).filter(function (m) {
-        return m && m.id !== typingId;
-      }).map(function (m) {
-        return m.id === tempUserId ? Object.assign({}, m, { _queued: true }) : m;
-      });
+      // A sync may already have recovered a write whose response was lost.
+      if (!(state.messagesBySlug[channel] || []).some(function (m) { return m.id === requestId && m.backend_accepted_at; })) {
+        const evt = { id: requestId, requestId: requestId, type: "message", slug: channel, body: body };
+        if (agentIdForOutbox) evt.agentId = agentIdForOutbox;
+        state.outbox.unshift(evt);
+        saveOutbox();
+        pending._queued = true;
+        pending._submitting = false;
+        toast("Saved to Outbox · Acceptance unconfirmed", "warning");
+      }
       state.link = (typeof navigator !== "undefined" && navigator.onLine === false) ? "offline" : state.link;
-      toast("Offline — saved to Outbox", "warning");
       state.forceChatBottom = true;
       render();
     } finally {
@@ -1989,6 +1968,8 @@
     }
     const vsBtn = document.getElementById("btn-voice-settings");
     if (vsBtn) vsBtn.addEventListener("click", openVoiceSettingsSheet);
+    const cloudPrompt = root.querySelector("[data-cloud-prompt]");
+    if (cloudPrompt) cloudPrompt.addEventListener("click", copyCloudPrompt);
     const memBtn = document.getElementById("btn-agent-memory");
     if (memBtn) memBtn.addEventListener("click", openAgentMemorySheet);
 
@@ -2027,6 +2008,7 @@
         const after = val.slice(pos);
         const replaced = before.replace(/(^|\s)@([^\s]*)$/, "$1@" + name + " ");
         inputEl.value = replaced + after;
+        saveComposerDraft(inputEl);
         if (inputEl.setSelectionRange) inputEl.setSelectionRange(replaced.length, replaced.length);
         hidePop();
         inputEl.focus();
@@ -2074,6 +2056,7 @@
       c.addEventListener("click", function () {
         if (todayFloorInput) {
           todayFloorInput.value = (todayFloorInput.value ? todayFloorInput.value + " " : "") + c.dataset.floorMention;
+          saveComposerDraft(todayFloorInput);
           todayFloorInput.focus();
         }
       });
@@ -2085,20 +2068,13 @@
         const body = todayFloorInput && todayFloorInput.value.trim();
         if (!body) return;
         todayFloorInput.value = "";
+        saveComposerDraft(todayFloorInput);
         await sendToSlug("peer-floor", body);
       });
     }
 
     const chatInput = document.getElementById("agent-chat-input");
     bindMentionPicker(chatInput, document.getElementById("agent-mention-pop"));
-    if (chatInput) {
-      chatInput.addEventListener("input", function () {
-        const slug = chatInput.dataset ? chatInput.dataset.slug : "";
-        if (!slug) return;
-        if (chatInput.value) state.draftsBySlug[slug] = chatInput.value;
-        else delete state.draftsBySlug[slug];
-      });
-    }
     const kbDoneBtn = document.getElementById("btn-chat-kb-done");
     if (kbDoneBtn) {
       kbDoneBtn.addEventListener("click", function () {
@@ -2110,8 +2086,7 @@
       c.addEventListener("click", function () {
         if (!chatInput) return;
         chatInput.value = (chatInput.value ? chatInput.value + " " : "") + c.dataset.insert;
-        const slug = chatInput.dataset ? chatInput.dataset.slug : "";
-        if (slug) state.draftsBySlug[slug] = chatInput.value;
+        saveComposerDraft(chatInput);
         chatInput.focus();
       });
     });
@@ -2126,7 +2101,7 @@
         const resolvedId = active ? active.id : "peer-floor";
         const slug = dmSlugForAgent(resolvedId);
         chatInput.value = "";
-        delete state.draftsBySlug[slug];
+        saveComposerDraft(chatInput);
         await sendToSlug(slug, body, resolvedId);
       });
     }
