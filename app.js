@@ -674,10 +674,19 @@
     for (const ev of state.outbox) {
       try {
         if (ev.type === "message" || ev.type === "quick") {
-          await bff("/api/ping", {
+          const out = await bff("/api/ping", {
             method: "POST",
             body: JSON.stringify({ slug: ev.slug, body: ev.body, author: "Seth" })
           });
+          if (ev.localMessageId) {
+            state.messagesBySlug[ev.slug] = (state.messagesBySlug[ev.slug] || []).map(function (m) {
+              if (!m || m.id !== ev.localMessageId) return m;
+              return Object.assign({}, out && out.message ? out.message : m, {
+                _receipt: { state: "backend-accepted", commit_sha: (out && out.commitSha) || "" }
+              });
+            });
+            if (out && out.reply) state.messagesBySlug[ev.slug].push(out.reply);
+          }
           sent += 1;
         }
       } catch (e) {
@@ -687,7 +696,7 @@
     state.outbox = remaining;
     saveOutbox();
     render();
-    toast(sent ? "Synced " + sent + " queued event(s) via BFF" : "Outbox still pending", sent ? "info" : "warning");
+    toast(sent ? "BFF accepted " + sent + " queued event(s) · delivery unverified" : "Outbox still pending", sent ? "info" : "warning");
   }
 
   /* ===================== VOICE (OPT-IN) ===================== */
@@ -874,11 +883,18 @@
       );
     }
     const isMe = String(m.author || "").toLowerCase() === "seth";
+    const receipt = window.StackPolish.messageReceipt(m);
+    const receiptHtml = showFoot && receipt
+      ? '<details class="receipt receipt-' + esc(receipt.state) + '">' +
+          '<summary aria-label="Message receipt: ' + esc(receipt.label) + '"><span class="receipt-dot" aria-hidden="true"></span>' + esc(receipt.label) + '</summary>' +
+          '<p>' + esc(receipt.detail) + '</p>' +
+        '</details>'
+      : "";
     return (
       '<div class="msg ' + (isMe ? "me" : "") + '">' +
         '<div class="msg-head"><span class="msg-author">' + esc(m.author || "Agent") + '</span><span class="msg-time">' + relTime(m.created_at) + "</span></div>" +
         '<div style="white-space:pre-wrap;">' + esc(m.body || "") + "</div>" +
-        (showFoot ? '<div class="msg-foot"><span class="git-chip">' + esc(m._queued ? "Outbox · Pending" : "Committed · " + slug) + "</span></div>" : "") +
+        receiptHtml +
       "</div>"
     );
   }
@@ -1904,7 +1920,7 @@
     const nowIso = new Date().toISOString();
 
     state.messagesBySlug[channel] = (state.messagesBySlug[channel] || []).concat([
-      { id: tempUserId, channel_slug: channel, author: "Seth", body: body, created_at: nowIso },
+      { id: tempUserId, channel_slug: channel, author: "Seth", body: body, created_at: nowIso, _receipt: { state: "pending" } },
       { id: typingId, channel_slug: channel, author: responderName, body: "Replying…", _typing: true, created_at: nowIso }
     ]);
     state.forceChatBottom = true;
@@ -1921,21 +1937,23 @@
       prevList.forEach(function (m) {
         if (!m || m.id === typingId) return;
         if (m.id === tempUserId) {
-          nextList.push(out && out.message ? out.message : m);
+          nextList.push(Object.assign({}, out && out.message ? out.message : m, {
+            _receipt: { state: "backend-accepted", commit_sha: (out && out.commitSha) || "" }
+          }));
         } else {
           nextList.push(m);
         }
       });
       if (out && out.reply && !nextList.some(function (m) { return out.reply.id && m.id === out.reply.id; })) {
-        nextList.push(out.reply);
+        nextList.push(Object.assign({}, out.reply, { _receipt: { state: "automated" } }));
       }
       state.messagesBySlug[channel] = nextList.slice(-60);
-      toast(out && out.reply ? ((out.reply.author || responderName) + " replied") : ("Sent to " + channel), "info");
+      toast(out && out.reply ? "BFF accepted message · automated reply shown" : "BFF accepted message · delivery unverified", "info");
       state.forceChatBottom = true;
       normalizeHubData();
       render();
     } catch (e) {
-      const evt = { id: "evt-" + Date.now(), type: "message", slug: channel, body: body };
+      const evt = { id: "evt-" + Date.now(), type: "message", slug: channel, body: body, localMessageId: tempUserId };
       if (agentIdForOutbox) evt.agentId = agentIdForOutbox;
       state.outbox.unshift(evt);
       saveOutbox();
