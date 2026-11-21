@@ -1,17 +1,17 @@
-/* The Stack v50.1 Rebirth — shell cache for Cloudflare Pages / GitHub Pages mirror.
- * Bump CACHE on every shell release. No voice assets. No browser PAT.
+/* The Stack v50.2.2 Rebirth — network-first shell cache for Cloudflare Pages / GitHub Pages.
+ * Always fetches fresh UI when online so pushes appear immediately on iPhone PWAs.
  */
-const CACHE = "the-stack-shell-v50.2.0-rebirth";
+const CACHE = "the-stack-shell-v50.2.2-rebirth";
 const SHELL = [
   "./",
   "./index.html",
-  "./app.js",
-  "./polish.js",
+  "./app.js?v=50.2.2",
+  "./polish.js?v=50.2.2",
   "./config.js",
-  "./style.css",
-  "./favicon.svg",
-  "./manifest.webmanifest",
-  "./icon-180.png",
+  "./style.css?v=50.2.2",
+  "./favicon.svg?v=50.2.2",
+  "./manifest.webmanifest?v=50.2.2",
+  "./icon-180.png?v=50.2.2",
   "./icon-192.png",
   "./icon-512.png"
 ];
@@ -35,16 +35,18 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  // Never cache BFF API
   if (url.pathname.includes("/api/")) return;
+
+  // Network-first so UI pushes show immediately; fall back to cache offline.
   event.respondWith(
-    caches.match(req).then((hit) =>
-      hit ||
-      fetch(req).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((cache) => cache.put(req, copy));
+    fetch(req, { cache: "no-store" })
+      .then((res) => {
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((cache) => cache.put(req, copy));
+        }
         return res;
-      }).catch(() => hit)
-    )
+      })
+      .catch(() => caches.match(req))
   );
 });

@@ -1465,7 +1465,15 @@
   });
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").catch(function () {});
+    let swReloading = false;
+    navigator.serviceWorker.addEventListener("controllerchange", function () {
+      if (swReloading) return;
+      swReloading = true;
+      location.reload();
+    });
+    navigator.serviceWorker.register("./sw.js").then(function (reg) {
+      if (reg && reg.update) reg.update().catch(function () {});
+    }).catch(function () {});
   }
 
   loadCreds();

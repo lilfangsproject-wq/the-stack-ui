@@ -1,29 +1,94 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="The Stack">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <linearGradient id="bg" x1="8%" y1="0%" x2="92%" y2="100%">
-      <stop offset="0%" stop-color="#22152a"/>
-      <stop offset="55%" stop-color="#0d0e12"/>
-      <stop offset="100%" stop-color="#0a1218"/>
+    <!-- Obsidian dark tile background -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1b2230"/>
+      <stop offset="50%" stop-color="#0b0f18"/>
+      <stop offset="100%" stop-color="#05070c"/>
     </linearGradient>
-    <linearGradient id="bar" x1="0%" y1="50%" x2="100%" y2="50%">
-      <stop offset="0%" stop-color="#f3b8e6"/>
-      <stop offset="35%" stop-color="#cdbdff"/>
-      <stop offset="70%" stop-color="#a9dcff"/>
-      <stop offset="100%" stop-color="#b9f5dc"/>
+    <!-- Ambient blue glow cast beneath the top layer -->
+    <radialGradient id="blueGlow" cx="50%" cy="42%" r="44%">
+      <stop offset="0%" stop-color="#0a84ff" stop-opacity="0.55"/>
+      <stop offset="55%" stop-color="#0a84ff" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#0a84ff" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Bottom/middle smoked crystal glass top face -->
+    <linearGradient id="smokeFace" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="48%" stop-color="#7c96b8" stop-opacity="0.09"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.16"/>
     </linearGradient>
-    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="1.35" result="b"/>
+    <linearGradient id="smokeEdge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.45"/>
+      <stop offset="50%" stop-color="#8bb8e8" stop-opacity="0.24"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.52"/>
+    </linearGradient>
+    <!-- Top glowing iOS blue Liquid Glass layer -->
+    <linearGradient id="blueFace" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#64c8ff" stop-opacity="0.92"/>
+      <stop offset="45%" stop-color="#0a84ff" stop-opacity="0.82"/>
+      <stop offset="100%" stop-color="#0055d4" stop-opacity="0.90"/>
+    </linearGradient>
+    <linearGradient id="blueRim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="50%" stop-color="#8fd4ff" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#38a2ff" stop-opacity="0.95"/>
+    </linearGradient>
+    <linearGradient id="blueSideL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0a84ff" stop-opacity="0.88"/>
+      <stop offset="100%" stop-color="#003f9e" stop-opacity="0.95"/>
+    </linearGradient>
+    <linearGradient id="blueSideR" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#38a6ff" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#0055d4" stop-opacity="0.92"/>
+    </linearGradient>
+    <filter id="softGlow" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
       <feMerge>
-        <feMergeNode in="b"/>
+        <feMergeNode in="blur"/>
         <feMergeNode in="SourceGraphic"/>
       </feMerge>
     </filter>
   </defs>
-  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
-  <rect width="64" height="64" rx="14" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
-  <g filter="url(#glow)">
-    <rect x="20" y="15" width="24" height="9" rx="4.5" fill="url(#bar)" opacity="0.98"/>
-    <rect x="14" y="27.5" width="36" height="9" rx="4.5" fill="url(#bar)" opacity="0.95"/>
-    <rect x="8" y="40" width="48" height="9" rx="4.5" fill="url(#bar)" opacity="0.92"/>
+
+  <!-- Full-bleed obsidian rounded tile -->
+  <rect width="512" height="512" rx="114" fill="url(#bg)"/>
+  <rect x="3" y="3" width="506" height="506" rx="112" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="4"/>
+  <rect width="512" height="512" rx="114" fill="url(#blueGlow)"/>
+
+  <!-- Layer 3 (Bottom): Smoked crystal glass -->
+  <g transform="translate(0, 128)">
+    <!-- Thickness skirt -->
+    <path d="M114 202 L114 220 Q114 229 124 235 L242 303 Q256 311 270 303 L388 235 Q398 229 398 220 L398 202 L256 284 Z"
+          fill="#0c1320" fill-opacity="0.72" stroke="url(#smokeEdge)" stroke-width="2.5"/>
+    <!-- Top diamond -->
+    <path d="M242 126 Q256 118 270 126 L388 194 Q402 202 388 210 L270 278 Q256 286 242 278 L124 210 Q110 202 124 194 Z"
+          fill="url(#smokeFace)" stroke="url(#smokeEdge)" stroke-width="3.5"/>
+  </g>
+
+  <!-- Layer 2 (Middle): Smoked crystal glass with blue reflection -->
+  <g transform="translate(0, 62)">
+    <path d="M114 202 L114 220 Q114 229 124 235 L242 303 Q256 311 270 303 L388 235 Q398 229 398 220 L398 202 L256 284 Z"
+          fill="#0e1b30" fill-opacity="0.76" stroke="url(#smokeEdge)" stroke-width="2.5"/>
+    <path d="M242 126 Q256 118 270 126 L388 194 Q402 202 388 210 L270 278 Q256 286 242 278 L124 210 Q110 202 124 194 Z"
+          fill="url(#smokeFace)" stroke="url(#smokeEdge)" stroke-width="3.5"/>
+    <!-- Blue reflection pool from top layer -->
+    <ellipse cx="256" cy="202" rx="76" ry="40" fill="#0a84ff" fill-opacity="0.22"/>
+  </g>
+
+  <!-- Layer 1 (Top): Luminous iOS Blue Liquid Glass -->
+  <g transform="translate(0, -6)" filter="url(#softGlow)">
+    <!-- Left bevel -->
+    <path d="M114 202 L114 222 Q114 231 124 237 L242 305 Q249 309 256 309 L256 284 L124 208 Z"
+          fill="url(#blueSideL)"/>
+    <!-- Right bevel -->
+    <path d="M398 202 L398 222 Q398 231 388 237 L270 305 Q263 309 256 309 L256 284 L388 208 Z"
+          fill="url(#blueSideR)"/>
+    <!-- Top glowing crystal face -->
+    <path d="M242 126 Q256 118 270 126 L388 194 Q402 202 388 210 L270 278 Q256 286 242 278 L124 210 Q110 202 124 194 Z"
+          fill="url(#blueFace)" stroke="url(#blueRim)" stroke-width="4.5"/>
+    <!-- Inner specular highlight -->
+    <path d="M244 139 Q256 132 268 139 L364 195 Q372 200 364 205 L268 260 Q256 267 244 260 L148 205 Q140 200 148 195 Z"
+          fill="none" stroke="#ffffff" stroke-opacity="0.38" stroke-width="2.5"/>
   </g>
 </svg>
