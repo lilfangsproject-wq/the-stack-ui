@@ -456,7 +456,8 @@
       state.link = "live";
       state.lastSyncIso = sync.synced_at || new Date().toISOString();
       normalizeHubData();
-      if (state.view === "agents") await loadActiveAgentMessages();
+      await loadMessagesForSlug("peer-floor");
+      if (state.view === "agents" && state.activeAgentId !== "peer-floor") await loadActiveAgentMessages();
       if (!silent) toast("Vault synced · " + state.headCommit + " · $" + ZERO_SPEND + " cap", "info");
     } catch (err) {
       state.online = false;
@@ -479,8 +480,7 @@
     }
   }
 
-  async function loadActiveAgentMessages() {
-    const slug = dmSlugForAgent(state.activeAgentId);
+  async function loadMessagesForSlug(slug) {
     const existing = state.messagesBySlug[slug] || [];
     if (!creds.pin || !creds.bff) {
       state.messagesBySlug[slug] = existing;
@@ -516,6 +516,12 @@
     state.messagesBySlug[slug] = existing;
   }
 
+  async function loadActiveAgentMessages() {
+    const active = state.agents.find(function (a) { return a.id === state.activeAgentId; });
+    const slug = dmSlugForAgent(active ? active.id : "peer-floor");
+    await loadMessagesForSlug(slug);
+  }
+
   async function flushOutbox() {
     if (!state.outbox.length) return;
     const remaining = [];
@@ -543,6 +549,38 @@
 
   function renderToday() {
     const topNeed = state.needsSeth[0] || null;
+    const floorMsgs = (state.messagesBySlug["peer-floor"] || []).slice(-6);
+    const floorHtml = floorMsgs.map(function (m) {
+      const isMe = String(m.author || "").toLowerCase() === "seth";
+      return (
+        '<div class="msg ' + (isMe ? "me" : "") + '">' +
+          '<div class="msg-head"><span class="msg-author">' + esc(m.author || "Agent") + '</span><span class="msg-time">' + relTime(m.created_at) + "</span></div>" +
+          '<div style="white-space:pre-wrap;">' + esc(m.body || "") + "</div>" +
+        "</div>"
+      );
+    }).join("");
+
+    const mentionChips = state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
+      return '<button type="button" class="ctx-chip" data-floor-mention="@' + esc(a.name) + ' ">@' + esc(a.name) + "</button>";
+    }).join("");
+
+    const floorHeroHtml = (
+      '<section class="hero">' +
+        '<div class="hero-top">' +
+          '<div><span class="kicker">Shared Floor · ' + VERSION + '</span><h2 class="hero-title" style="margin:3px 0 0;">#peer-floor</h2></div>' +
+          '<span class="badge green"><span class="dot green"></span>Everyone</span>' +
+        "</div>" +
+        '<div id="today-floor-log" class="chat-log" style="max-height:220px;">' +
+          (floorHtml || '<div class="empty">Message everyone on #peer-floor — commits straight to Git.</div>') +
+        "</div>" +
+        '<div class="chip-strip">' + mentionChips + "</div>" +
+        '<form id="today-floor-form" class="composer">' +
+          '<input id="today-floor-input" class="input" placeholder="Message #peer-floor…" autocomplete="off" enterkeyhint="send" required />' +
+          '<button type="submit" class="btn btn-pri btn-sm">Send</button>' +
+        "</form>" +
+      "</section>"
+    );
+
     const heroHtml = topNeed ? (
       '<section class="hero">' +
         '<div class="hero-top"><span class="kicker">5-Second Brief · Needs Your Call</span><span class="badge amber"><span class="dot amber"></span>Waiting</span></div>' +
@@ -555,7 +593,7 @@
         '<div class="hero-actions">' +
           '<button type="button" class="btn btn-pri" data-ping-floor="Approved go on: ' + esc(topNeed.title || topNeed.key || "need") + '">Approve Go</button>' +
           '<button type="button" class="btn btn-sec" data-ping-floor="HOLD: ' + esc(topNeed.title || topNeed.key || "need") + '">Hold</button>' +
-          (topNeed.owner ? '<button type="button" class="btn btn-sec" data-jump-agent="' + esc(String(topNeed.owner).toLowerCase().split(/[\s/]+/)[0]) + '">Ping ' + esc(topNeed.owner) + "</button>" : "") +
+          '<button type="button" class="btn btn-sec" data-jump-agent="peer-floor">#peer-floor</button>' +
         "</div>" +
       "</section>"
     ) : secretsMissing(state.health) ? (
@@ -565,63 +603,47 @@
         '<p class="hero-copy">Add <span class="mono">GITHUB_PAT</span> and <span class="mono">STACK_ACCESS_PIN</span> as <strong>Secrets</strong> on Worker <span class="mono">the-stack-bff</span> (not Pages Variables). Then tap the sync pill.</p>' +
         '<div class="hero-actions"><button type="button" class="btn btn-pri" id="btn-resync">Retry Sync</button><button type="button" class="btn btn-sec" data-go="stats">Usage &amp; Git</button></div>' +
       "</section>"
-    ) : (
-      '<section class="hero">' +
-        '<div class="hero-top"><span class="kicker">5-Second Brief · ' + VERSION + '</span><span class="badge green"><span class="dot green"></span>All Clear</span></div>' +
-        '<h2 class="hero-title">Zero decisions waiting</h2>' +
-        '<p class="hero-copy">BFF head <span class="mono">' + esc(state.headCommit) + "</span>. Queue OFF · $" + ZERO_SPEND + " spend cap. Tap an agent or drop a Quick Action.</p>" +
-        '<div class="hero-actions"><button type="button" class="btn btn-pri" data-jump-agent="peer-floor">#peer-floor</button><button type="button" class="btn btn-sec" data-go="work">Open Work</button><button type="button" class="btn btn-sec" id="btn-quick-inbox">Quick Action</button></div>' +
-      "</section>"
-    );
+    ) : floorHeroHtml;
 
-    const agentStrip = state.agents.map(function (a) {
-      const m = agentMeta(a.status);
-      return (
-        '<button type="button" class="agent-pill" data-jump-agent="' + esc(a.id) + '">' +
-          '<span class="agent-pill-top"><span class="dot ' + m.tone + '"></span>' + esc(a.name) + "</span>" +
-          '<span class="agent-pill-age">' + esc(agentAgeText(a)) + "</span>" +
-        "</button>"
-      );
-    }).join("");
+    const rosterOnly = state.agents.filter(function (a) { return a.id !== "peer-floor"; });
+    const workingCount = rosterOnly.filter(function (a) { return a.status === "working" || a.status === "completed"; }).length;
+    const waitingCount = rosterOnly.filter(function (a) { return a.status === "waiting"; }).length;
+    const blockedCount = rosterOnly.filter(function (a) { return a.status === "blocked"; }).length;
+    const wfTone = blockedCount ? "red" : waitingCount ? "amber" : workingCount ? "green" : "muted";
+    const wfSub = workingCount + " active · " + waitingCount + " waiting · " + blockedCount + " blocked";
+    const conflictCount = (state.conflicts || []).length;
+    const commitCount = (state.commits || []).length;
 
-    const conflictHtml = (state.conflicts || []).length ? (
-      '<div class="section-head"><span class="section-title">File conflicts</span></div>' +
-      '<div class="panel" aria-label="Paths touched by more than one agent">' +
-        (state.conflicts || []).map(function (c) {
-          return (
-            '<div class="row">' +
-              '<div class="row-main">' +
-                '<div class="row-title"><span class="dot amber"></span>Conflict · ' + esc(c.path.split("/").pop()) + "</div>" +
-                '<div class="row-sub">' + esc(c.agents.join(" · ")) + " · " + esc(c.shas.slice(0, 3).join(" ")) + "</div>" +
-              "</div>" +
-              '<span class="badge amber">Conflict</span>' +
-            "</div>"
-          );
-        }).join("") +
-      "</div>"
-    ) : "";
+    const sheetsPanel =
+      '<div class="section-head"><span class="section-title">One Sheet Per Thing</span></div>' +
+      '<div class="panel">' +
+        (topNeed ? (
+          '<button type="button" class="row" data-jump-agent="peer-floor">' +
+            '<div class="row-main"><div class="row-title"><span class="dot green"></span>#peer-floor</div><div class="row-sub">Message all agents · ' + floorMsgs.length + " recent</div></div>" +
+            '<div class="row-right"><span>Open</span><span>›</span></div>' +
+          "</button>" +
+        ) : "") +
+        '<button type="button" class="row" id="btn-sheet-workforce">' +
+          '<div class="row-main"><div class="row-title"><span class="dot ' + wfTone + '"></span>Workforce</div><div class="row-sub">' + esc(wfSub) + "</div></div>" +
+          '<div class="row-right"><span>' + rosterOnly.length + " agents</span><span>›</span></div>" +
+        "</button>" +
+        (conflictCount ? (
+          '<button type="button" class="row" id="btn-sheet-conflicts">' +
+            '<div class="row-main"><div class="row-title"><span class="dot amber"></span>File Conflicts</div><div class="row-sub">Paths touched by multiple agents</div></div>' +
+            '<div class="row-right"><span class="badge amber">' + conflictCount + "</span><span>›</span></div>" +
+          "</button>" +
+        ) : "") +
+        '<button type="button" class="row" id="btn-sheet-commits">' +
+          '<div class="row-main"><div class="row-title">Git Commits</div><div class="row-sub">Head ' + esc(state.headCommit) + " · " + relTime(state.lastSyncIso) + "</div></div>" +
+          '<div class="row-right"><span class="git-chip">' + commitCount + "</span><span>›</span></div>" +
+        "</button>" +
+        '<button type="button" class="row" id="btn-quick-inbox">' +
+          '<div class="row-main"><div class="row-title">Quick-Action Inbox</div><div class="row-sub">Capture an idea or dictation to #peer-floor</div></div>' +
+          '<div class="row-right"><span>Capture</span><span>›</span></div>' +
+        "</button>" +
+      "</div>";
 
-    const commitRows = (state.commits || []).slice(0, 5).map(function (c) {
-      const sha = String(c.sha || "").slice(0, 8);
-      return (
-        '<div class="row">' +
-          '<div class="row-main">' +
-            '<div class="row-title">' + esc(String(c.message || "").split("\n")[0]) + "</div>" +
-            '<div class="row-sub">' + esc(c.author || "Git") + " · " + relTime(c.date) + "</div>" +
-          "</div>" +
-          '<span class="git-chip">' + esc(sha) + "</span>" +
-        "</div>"
-      );
-    }).join("");
-
-    return (
-      heroHtml +
-      conflictHtml +
-      '<div class="section-head"><span class="section-title">Workforce State · 5 Explicit States</span><button type="button" class="section-link" data-go="agents">All Agents ›</button></div>' +
-      '<div class="agent-strip">' + agentStrip + "</div>" +
-      '<div class="section-head"><span class="section-title">Verified Git Commits</span><button type="button" class="section-link" data-go="stats">All ›</button></div>' +
-      '<div class="panel">' + (commitRows || '<div class="empty">No commits loaded yet.</div>') + "</div>"
-    );
+    return heroHtml + sheetsPanel;
   }
 
   function renderAgents() {
@@ -993,6 +1015,46 @@
     document.getElementById("sheet-qc").addEventListener("click", function () { openQcSheet(item.id); });
   }
 
+  function openWorkforceSheet() {
+    const rows = state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
+      const m = agentMeta(a.status);
+      return (
+        '<button type="button" class="row" data-sheet-agent="' + esc(a.id) + '">' +
+          '<div class="row-main">' +
+            '<div class="row-title"><span class="dot ' + m.tone + '"></span>' + esc(a.name) + ' <span class="mono">· ' + esc(a.role) + "</span></div>" +
+            '<div class="row-sub">' + esc(agentAgeText(a)) + " · " + esc(a.evidence) + "</div>" +
+          "</div>" +
+          '<div class="row-right"><span>' + a.usagePct + "%</span><span>›</span></div>" +
+        "</button>"
+      );
+    }).join("");
+    openSheet(
+      '<div class="sheet-head"><div><h2 class="sheet-title">Workforce</h2><p class="sheet-sub">5 explicit states · tap any agent to DM</p></div><button type="button" class="orb-btn" style="width:32px;height:32px;" data-close-sheet>✕</button></div>' +
+      '<div class="panel" style="margin-bottom:0;">' + (rows || '<div class="empty">No agents loaded.</div>') + "</div>"
+    );
+    document.getElementById("sheet").querySelectorAll("[data-sheet-agent]").forEach(function (b) {
+      b.addEventListener("click", function () { closeSheet(); jumpToAgent(b.dataset.sheetAgent); });
+    });
+  }
+
+  function openConflictsSheet() {
+    const rows = (state.conflicts || []).map(function (c) {
+      return (
+        '<div class="row">' +
+          '<div class="row-main">' +
+            '<div class="row-title"><span class="dot amber"></span>' + esc(c.path.split("/").pop()) + "</div>" +
+            '<div class="row-sub">' + esc(c.path) + " · " + esc(c.agents.join(" · ")) + "</div>" +
+          "</div>" +
+          '<span class="git-chip">' + esc(c.shas.slice(0, 2).join(" ")) + "</span>" +
+        "</div>"
+      );
+    }).join("");
+    openSheet(
+      '<div class="sheet-head"><div><h2 class="sheet-title">File Conflicts</h2><p class="sheet-sub">Paths touched by multiple agents</p></div><button type="button" class="orb-btn" style="width:32px;height:32px;" data-close-sheet>✕</button></div>' +
+      '<div class="panel" style="margin-bottom:0;">' + (rows || '<div class="empty">No conflicts.</div>') + "</div>"
+    );
+  }
+
   async function openTimeMachine() {
     try {
       const data = await bff("/api/timemachine?days=7");
@@ -1162,6 +1224,35 @@
     if (qi) qi.addEventListener("click", openQuickInbox);
     const rs = document.getElementById("btn-resync");
     if (rs) rs.addEventListener("click", function () { syncVault(false); });
+    const wfBtn = document.getElementById("btn-sheet-workforce");
+    if (wfBtn) wfBtn.addEventListener("click", openWorkforceSheet);
+    const cfBtn = document.getElementById("btn-sheet-conflicts");
+    if (cfBtn) cfBtn.addEventListener("click", openConflictsSheet);
+    const cmBtn = document.getElementById("btn-sheet-commits");
+    if (cmBtn) cmBtn.addEventListener("click", openTimeMachine);
+
+    const todayFloorInput = document.getElementById("today-floor-input");
+    root.querySelectorAll("[data-floor-mention]").forEach(function (c) {
+      c.addEventListener("click", function () {
+        if (todayFloorInput) {
+          todayFloorInput.value = (todayFloorInput.value ? todayFloorInput.value + " " : "") + c.dataset.floorMention;
+          todayFloorInput.focus();
+        }
+      });
+    });
+    const todayFloorForm = document.getElementById("today-floor-form");
+    if (todayFloorForm) {
+      todayFloorForm.addEventListener("submit", async function (e) {
+        e.preventDefault();
+        const body = todayFloorInput && todayFloorInput.value.trim();
+        if (!body) return;
+        todayFloorInput.value = "";
+        await sendToSlug("peer-floor", body);
+        render();
+      });
+    }
+    const todayFloorLog = document.getElementById("today-floor-log");
+    if (todayFloorLog) todayFloorLog.scrollTop = todayFloorLog.scrollHeight;
 
     const chatInput = document.getElementById("agent-chat-input");
     root.querySelectorAll("[data-insert]").forEach(function (c) {
