@@ -1,7 +1,7 @@
-/* The Stack v50.6.0 OPS RUNTIME — network-first shell cache for Cloudflare Pages / GitHub Pages.
+/* The Stack v50.6.1 CLARITY — network-first shell cache for Cloudflare Pages / GitHub Pages.
  * Always fetches fresh UI when online so pushes appear immediately on iPhone PWAs.
  */
-const CACHE = "the-stack-shell-v50.6.0-ops-runtime";
+const CACHE = "the-stack-shell-v50.6.1-clarity";
 const SHELL = [
   "./",
   "./index.html",

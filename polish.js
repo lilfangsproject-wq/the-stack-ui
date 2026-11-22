@@ -14,6 +14,7 @@
     { id: "agents", title: "Agents", keywords: "agents chats roster" },
     { id: "work", title: "Work", keywords: "work workstreams opportunities board" },
     { id: "stats", title: "Usage & Git", keywords: "usage stats git models" },
+    { id: "ops", title: "Ops", keywords: "ops control room hermes handovers" },
     { id: "explore", title: "Explore Everything", keywords: "graph inventory dependencies impact" }
   ];
 

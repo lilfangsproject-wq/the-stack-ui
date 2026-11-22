@@ -816,7 +816,7 @@
       await loadMessagesForSlug("peer-floor");
       if (state.view === "agents" && state.activeAgentId !== "peer-floor") await loadActiveAgentMessages();
       normalizeHubData();
-      if (!silent) toast("Vault synced · " + state.headCommit + " · $" + ZERO_SPEND + " cap", "info");
+      if (!silent) toast("Updated · spend stays at $0", "info");
     } catch (err) {
       const defaultBff = (window.STACK_BFF_URL || "").replace(/\/$/, "");
       if ((!err || !err.status) && defaultBff && creds.bff !== defaultBff) {
@@ -1715,6 +1715,27 @@
     );
   }
 
+  function teammatePlainStatus(agent) {
+    const session = primarySession(agent.id);
+    if (session) {
+      const st = sessionMeta(session);
+      if (st.key === "running") return { label: "Working now", tone: "green", detail: session.task_title || "Verified work in progress" };
+      if (sessionHasAuthCheckin(session)) return { label: "Checked in", tone: "amber", detail: "Online, but work isn’t confirmed yet" };
+      if (sessionReportedState(session) === "paused_quota") return { label: "Paused", tone: "amber", detail: "Hit a usage limit" };
+      if (sessionReportedState(session) === "blocked") return { label: "Blocked", tone: "red", detail: "Needs a decision or unblock" };
+      if (sessionReportedState(session) === "offline") return { label: "Offline", tone: "muted", detail: "No recent activity" };
+    }
+    const m = agentMeta(agent.status);
+    if (m.key === "blocked" || agent.status === "blocked") return { label: "Blocked", tone: "red", detail: agent.role || "Needs attention" };
+    if (m.key === "waiting" || agent.status === "waiting" || agent.status === "waiting_prompt") {
+      return { label: "Waiting", tone: "amber", detail: agent.role || "Waiting on something" };
+    }
+    if (m.key === "working" || agent.status === "working" || agent.status === "running" || agent.status === "completed") {
+      return { label: "Active", tone: "green", detail: agent.role || "On the roster" };
+    }
+    return { label: "Quiet", tone: "muted", detail: "No confirmed activity right now" };
+  }
+
   function renderToday() {
     const topNeed = state.needsSeth[0] || null;
     const allFloorMsgs = state.messagesBySlug["peer-floor"] || [];
@@ -1723,20 +1744,19 @@
       return renderMessageBubble(m, false);
     }).join("");
 
-    const mentionChips = '<button type="button" class="ctx-chip" data-floor-mention="@all ">@all</button>' + state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
-      return '<button type="button" class="ctx-chip" data-floor-mention="@' + esc(a.name) + ' ">@' + esc(a.name) + "</button>";
+    const mentionChips = '<button type="button" class="ctx-chip" data-floor-mention="@all ">Everyone</button>' + state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
+      return '<button type="button" class="ctx-chip" data-floor-mention="@' + esc(a.name) + ' ">' + esc(a.name) + "</button>";
     }).join("");
 
     const rosterOnly = state.agents.filter(function (a) { return a.id !== "peer-floor"; });
-    const workingCount = rosterOnly.filter(function (a) {
-      return a.status === "working" || a.status === "completed" || a.status === "running";
-    }).length;
-    const waitingCount = rosterOnly.filter(function (a) {
-      return a.status === "waiting" || a.status === "waiting_prompt" || a.status === "paused_quota";
-    }).length;
-    const blockedCount = rosterOnly.filter(function (a) { return a.status === "blocked"; }).length;
+    const teammateStatuses = rosterOnly.map(function (a) {
+      return { agent: a, status: teammatePlainStatus(a) };
+    });
+    const workingCount = teammateStatuses.filter(function (r) { return r.status.tone === "green"; }).length;
+    const waitingCount = teammateStatuses.filter(function (r) { return r.status.tone === "amber"; }).length;
+    const blockedCount = teammateStatuses.filter(function (r) { return r.status.tone === "red"; }).length;
     const wfTone = blockedCount ? "red" : waitingCount ? "amber" : workingCount ? "green" : "muted";
-    const wfSub = workingCount + " active · " + waitingCount + " waiting · " + blockedCount + " blocked";
+    const wfSub = workingCount + " working · " + waitingCount + " waiting · " + blockedCount + " blocked";
     const workstreams = new Map((state.workstreamsRaw.workstreams || []).map(function (w) { return [w.id, w]; }));
     const verified = (state.qcReceipts || []).filter(function (receipt) {
       if (!receipt || !receipt.workstream_id || !Number.isFinite(Date.parse(receipt.verified_at))) return false;
@@ -1754,12 +1774,16 @@
       const commitUrl = "https://github.com/lilfangsproject-wq/ai-workspace/commit/" + receipt.commit_sha;
       return '<div class="row">' +
         '<div class="row-main"><div class="row-title">' + esc(title) + '</div>' +
-        '<div class="row-sub">QC by ' + esc(receipt.reviewer) + ' · ' + relTime(receipt.verified_at) + '</div></div>' +
-        '<a class="git-chip" href="' + commitUrl + '" target="_blank" rel="noopener noreferrer" aria-label="Open verified commit for ' + esc(title) + '">' + esc(String(receipt.commit_sha).slice(0, 8)) + '</a>' +
+        '<div class="row-sub">Checked by ' + esc(receipt.reviewer) + ' · ' + relTime(receipt.verified_at) + '</div></div>' +
+        '<a class="btn btn-sec btn-sm" href="' + commitUrl + '" target="_blank" rel="noopener noreferrer">View change</a>' +
       '</div>';
     }).join("");
     const conflictCount = (state.conflicts || []).length;
     const commitCount = (state.commits || []).length;
+    const openAssignments = (state.assignments || []).filter(function (a) {
+      const s = String(a && a.status || "").toLowerCase();
+      return s && s !== "verified" && s !== "cancelled" && s !== "done" && s !== "complete";
+    }).length;
 
     const composerHtml =
       '<div class="hero-composer">' +
@@ -1767,7 +1791,7 @@
         '<div class="composer-wrap">' +
           '<div id="today-mention-pop" class="mention-pop hidden" role="listbox" aria-label="Mention suggestions"></div>' +
           '<form id="today-floor-form" class="composer">' +
-            '<input id="today-floor-input" data-draft-channel="peer-floor" class="input" placeholder="Dispatch to #peer-floor… type @ to mention" autocomplete="off" enterkeyhint="send" required />' +
+            '<input id="today-floor-input" data-draft-channel="peer-floor" class="input" placeholder="Message the whole team…" autocomplete="off" enterkeyhint="send" required />' +
             dictationButton("today-floor-input") +
             '<button type="submit" class="btn btn-pri btn-sm">Send</button>' +
           "</form>" +
@@ -1775,126 +1799,134 @@
       "</div>";
 
     const pulseTone = state.link === "live" ? "green" : state.link === "polling" ? "amber" : "neutral";
-    const heroKicker = topNeed ? "5-Second Brief · Needs Your Call" : ("Executive Command · " + VERSION);
-    const heroBadge = topNeed
-      ? '<span class="badge amber"><span class="dot amber"></span>Waiting</span>'
-      : secretsMissing(state.health)
-        ? '<span class="badge amber"><span class="dot amber"></span>Secrets</span>'
-        : '<span class="badge ' + pulseTone + '"><span class="dot ' + (pulseTone === "neutral" ? "muted" : pulseTone) + '"></span>' + esc(state.headCommit) + "</span>";
+    const hour = new Date().getHours();
+    const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
-    const heroBodyHtml = topNeed ? (
-      '<h2 class="hero-title">' + esc(topNeed.title || topNeed.summary || "Decision Needed") + "</h2>" +
-      '<p class="hero-copy">' + esc(topNeed.body || topNeed.reason || "") + "</p>" +
-      '<div class="hero-meta">' +
-        (topNeed.owner ? '<span>Owner: <strong>' + esc(topNeed.owner) + "</strong></span>" : "") +
-        '<span class="git-chip">' + esc(topNeed.ref || topNeed.key || "needs_seth.json") + "</span>" +
-      "</div>" +
-      '<div class="hero-actions">' +
-        '<button type="button" class="btn btn-pri" data-ping-floor="Approved go on: ' + esc(topNeed.title || topNeed.key || "need") + '">Approve Go</button>' +
-        '<button type="button" class="btn btn-sec" data-ping-floor="HOLD: ' + esc(topNeed.title || topNeed.key || "need") + '">Hold</button>' +
-        '<button type="button" class="btn btn-sec" data-jump-agent="peer-floor">#peer-floor</button>' +
-      "</div>"
-    ) : secretsMissing(state.health) ? (
-      '<h2 class="hero-title">Worker secrets not armed</h2>' +
-      '<p class="hero-copy">Add <span class="mono">GITHUB_PAT</span> and <span class="mono">STACK_ACCESS_PIN</span> as <strong>Secrets</strong> on Worker <span class="mono">the-stack-bff</span> (not Pages Variables). Then tap the sync pill.</p>' +
-      '<div class="hero-actions"><button type="button" class="btn btn-pri" id="btn-resync">Retry Sync</button><button type="button" class="btn btn-sec" data-go="stats">Usage &amp; Git</button></div>'
-    ) : (
-      '<h2 class="hero-title">Workforce Pulse</h2>' +
-      '<p class="hero-copy"><strong>' + workingCount + " active</strong> · " + waitingCount + " waiting · " + blockedCount + ' blocked · Head <span class="git-chip">' + esc(state.headCommit) + "</span></p>" +
-      '<div class="hero-meta">' +
-        "<span>Synced " + relTime(state.lastSyncIso) + "</span>" +
-        "<span>$" + ZERO_SPEND + " cap</span>" +
-        "<span>Queue OFF</span>" +
-        (conflictCount ? '<span class="badge amber">' + conflictCount + " conflict" + (conflictCount === 1 ? "" : "s") + "</span>" : "") +
-      "</div>"
-    );
+    let heroBodyHtml;
+    let heroKicker;
+    let heroBadge;
+    if (topNeed) {
+      heroKicker = "Needs your call";
+      heroBadge = '<span class="badge amber"><span class="dot amber"></span>Waiting on you</span>';
+      heroBodyHtml =
+        '<h2 class="hero-title">' + esc(topNeed.title || topNeed.summary || "Decision needed") + "</h2>" +
+        '<p class="hero-copy">' + esc(topNeed.body || topNeed.reason || "Your team needs a yes, hold, or direction.") + "</p>" +
+        (topNeed.owner ? '<div class="hero-meta"><span>From <strong>' + esc(topNeed.owner) + "</strong></span></div>" : "") +
+        '<div class="hero-actions">' +
+          '<button type="button" class="btn btn-pri" data-ping-floor="Approved go on: ' + esc(topNeed.title || topNeed.key || "need") + '">Approve</button>' +
+          '<button type="button" class="btn btn-sec" data-ping-floor="HOLD: ' + esc(topNeed.title || topNeed.key || "need") + '">Hold</button>' +
+          '<button type="button" class="btn btn-sec" data-jump-agent="peer-floor">Talk to team</button>' +
+        "</div>";
+    } else if (secretsMissing(state.health)) {
+      heroKicker = "Setup";
+      heroBadge = '<span class="badge amber"><span class="dot amber"></span>Not ready</span>';
+      heroBodyHtml =
+        '<h2 class="hero-title">Can’t reach your workspace yet</h2>' +
+        '<p class="hero-copy">The server is missing its login secrets. Once those are set, tap Retry and everything unlocks.</p>' +
+        '<div class="hero-actions"><button type="button" class="btn btn-pri" id="btn-resync">Retry</button><button type="button" class="btn btn-sec" data-go="stats">System status</button></div>';
+    } else if (blockedCount) {
+      heroKicker = greeting;
+      heroBadge = '<span class="badge red"><span class="dot red"></span>' + blockedCount + " blocked</span>";
+      heroBodyHtml =
+        '<h2 class="hero-title">' + blockedCount + (blockedCount === 1 ? " teammate is blocked" : " teammates are blocked") + "</h2>" +
+        '<p class="hero-copy">' + workingCount + " working · " + waitingCount + " waiting. Open Ops or Assignments to clear the jam.</p>" +
+        '<div class="hero-actions">' +
+          '<button type="button" class="btn btn-pri" data-view="ops">Open Ops</button>' +
+          (state.assignmentMode ? '<button type="button" class="btn btn-sec" data-open-assignments>Assignments</button>' : "") +
+          '<button type="button" class="btn btn-sec" id="btn-voice-brief-inline">Hear briefing</button>' +
+        "</div>";
+    } else {
+      heroKicker = greeting;
+      heroBadge = '<span class="badge ' + pulseTone + '"><span class="dot ' + (pulseTone === "neutral" ? "muted" : pulseTone) + '"></span>' +
+        (state.link === "live" ? "Connected" : state.link === "polling" ? "Updating…" : "Offline") + "</span>";
+      heroBodyHtml =
+        '<h2 class="hero-title">' + (workingCount ? workingCount + " on work · " + waitingCount + " waiting" : "Nothing urgent right now") + "</h2>" +
+        '<p class="hero-copy">' +
+          (openAssignments ? openAssignments + " open assignment" + (openAssignments === 1 ? "" : "s") + " · " : "") +
+          "Synced " + relTime(state.lastSyncIso) + ". Spend stays at $0. Auto-dispatch is off." +
+        "</p>" +
+        '<div class="hero-actions">' +
+          '<button type="button" class="btn btn-pri" data-view="ops">Open Ops</button>' +
+          '<button type="button" class="btn btn-sec" data-jump-agent="peer-floor">Team chat</button>' +
+          '<button type="button" class="btn btn-sec btn-sm voice-btn" id="btn-voice-brief">Hear briefing</button>' +
+        "</div>";
+    }
 
     const heroHtml =
-      '<section class="hero">' +
+      '<section class="hero today-hero">' +
         '<div class="hero-top">' +
           '<span class="kicker">' + esc(heroKicker) + "</span>" +
-          '<div class="hero-top-actions">' +
-            heroBadge +
-            '<button type="button" class="btn btn-sec btn-sm voice-btn" id="btn-voice-brief">🔊 Voice Brief</button>' +
-          "</div>" +
+          '<div class="hero-top-actions">' + heroBadge + "</div>" +
         "</div>" +
         heroBodyHtml +
         composerHtml +
       "</section>";
 
-    // Live tracker: always show roster. Prefer hydrated D1 check-ins / heartbeats / registry.
-    const trackerAgents = rosterOnly.map(function (agent) {
-      const session = primarySession(agent.id) || {
-        id: "tracker-" + agent.id,
-        agent: agent.id,
-        runtime: agent.model || "Runtime unknown",
-        host: "unknown",
-        state: "unknown",
-        reported_state: "unknown",
-        verification: "roster",
-        task_title: agent.role || "Teammate",
-        last_execution_verified_at: null,
-        session_url_note: "Open Agents to message " + agent.name
-      };
-      return { agent: agent, session: session };
-    });
+    // Teammates: plain rows. Real session cards only when a registry session exists — no fake coded stubs.
+    const teammateRows = teammateStatuses.map(function (row) {
+      const session = primarySession(row.agent.id);
+      const st = row.status;
+      const taskLine = session && session.task_title && st.tone === "green"
+        ? esc(session.task_title)
+        : esc(st.detail);
+      return (
+        '<button type="button" class="teammate-row" data-select-agent="' + esc(row.agent.id) + '">' +
+          '<span class="teammate-row-main">' +
+            '<span class="teammate-name"><span class="dot ' + st.tone + '"></span>' + esc(row.agent.name) + "</span>" +
+            '<span class="teammate-detail">' + taskLine + "</span>" +
+          "</span>" +
+          '<span class="badge ' + st.tone + '">' + esc(st.label) + "</span>" +
+        "</button>" +
+        (session && (session.session_url || session.continue_prompt) ? sessionCardHtml(session) : "")
+      );
+    }).join("");
+
     const sessionsPanel =
-      '<section class="panel live-sessions-panel" aria-label="Live tracker">' +
-        '<div class="section-head"><span class="section-title">Live tracker</span>' +
-        '<button type="button" class="section-link" id="btn-sheet-workforce-top">Workforce ›</button></div>' +
-        '<p class="session-meta">See who has checked in and when. Tap a teammate for their last recorded task and evidence. A check-in does not prove they are working.</p>' +
-        trackerAgents.map(function (row) {
-          const session = row.session;
-          const meta = sessionMeta(session);
-          const last = session.last_reported_at || session.checked_in_at || session.last_authenticated_checkin_at;
-          const status = meta.key === "running" ? "Working · verified" :
-            sessionHasAuthCheckin(session) ? "Connected · work unconfirmed" :
-            sessionReportedState(session) === "paused_quota" ? "Paused · usage limit" :
-            sessionReportedState(session) === "blocked" ? "Blocked" : "Activity not confirmed";
-          const update = last ? "Last update " + relTime(last) : "No recent update";
-          return '<details class="today-agent-summary">' +
-            '<summary><span class="today-agent-name">' + esc(row.agent.name) + '</span>' +
-            '<span class="today-agent-status">' + esc(status) + '</span>' +
-            '<span class="today-agent-update">' + esc(update) + '</span></summary>' +
-            '<div class="today-agent-detail"><p class="session-meta">Latest recorded task and technical evidence:</p>' +
-            sessionCardHtml(session) + '</div></details>';
-        }).join("") +
+      '<section class="panel live-sessions-panel" aria-label="Your team">' +
+        '<div class="section-head"><span class="section-title">Your team</span>' +
+        '<button type="button" class="section-link" id="btn-sheet-workforce-top">Everyone ›</button></div>' +
+        '<p class="today-plain-hint">Green means verified work. Checked in only means they showed up — not that a job is running.</p>' +
+        '<div class="teammate-list">' + teammateRows + "</div>" +
       "</section>";
 
     const streamCol =
       '<div class="today-col">' +
-        '<div class="section-head"><span class="section-title">Live #peer-floor Stream</span><button type="button" class="section-link" data-jump-agent="peer-floor">Open Room ›</button></div>' +
+        '<div class="section-head"><span class="section-title">Team chat</span><button type="button" class="section-link" data-jump-agent="peer-floor">Open ›</button></div>' +
         '<div class="panel">' +
           '<div class="stream-head">' +
-            '<span class="row-title" style="font-size:13.5px;"><span class="dot green"></span>#peer-floor <span class="mono">· ' + allFloorMsgs.length + " msgs</span></span>" +
-            '<button type="button" class="btn btn-sec btn-sm" data-jump-agent="peer-floor">Jump ›</button>' +
+            '<span class="row-title" style="font-size:13.5px;"><span class="dot green"></span>Everyone · ' + allFloorMsgs.length + " messages</span>" +
+            '<button type="button" class="btn btn-sec btn-sm" data-jump-agent="peer-floor">Open</button>' +
           "</div>" +
           '<div id="today-floor-log" class="chat-log today-floor-log">' +
-            (floorHtml || '<div class="empty">Message everyone on #peer-floor — commits straight to Git.</div>') +
+            (floorHtml || '<div class="empty">Say something to the whole team. It saves to your shared workspace.</div>') +
           "</div>" +
         "</div>" +
       "</div>";
 
     const sheetsCol =
       '<div class="today-col">' +
-        '<div class="section-head"><span class="section-title">Command Sheets</span></div>' +
+        '<div class="section-head"><span class="section-title">Shortcuts</span></div>' +
         '<div class="panel">' +
-          (state.assignmentMode ? '<button type="button" class="row" data-open-assignments><span class="row-title">Assignments</span><span aria-hidden="true">›</span></button>' : "") +
+          '<button type="button" class="row" data-view="ops">' +
+            '<div class="row-main"><div class="row-title">Ops</div><div class="row-sub">Full control room — agents, handovers, activity</div></div>' +
+            '<div class="row-right"><span>Open</span><span>›</span></div>' +
+          "</button>" +
+          (state.assignmentMode ? '<button type="button" class="row" data-open-assignments><div class="row-main"><div class="row-title">Assignments</div><div class="row-sub">' + (openAssignments ? openAssignments + " open" : "Hand work to a teammate") + '</div></div><div class="row-right"><span>›</span></div></button>' : "") +
           '<button type="button" class="row" id="btn-sheet-workforce">' +
-            '<div class="row-main"><div class="row-title"><span class="dot ' + wfTone + '"></span>Workforce</div><div class="row-sub">' + esc(wfSub) + "</div></div>" +
-            '<div class="row-right"><span>' + rosterOnly.length + " agents</span><span>›</span></div>" +
+            '<div class="row-main"><div class="row-title"><span class="dot ' + wfTone + '"></span>Team overview</div><div class="row-sub">' + esc(wfSub) + "</div></div>" +
+            '<div class="row-right"><span>' + rosterOnly.length + "</span><span>›</span></div>" +
           "</button>" +
           '<button type="button" class="row" id="btn-sheet-conflicts">' +
-            '<div class="row-main"><div class="row-title"><span class="dot ' + (conflictCount ? "amber" : "green") + '"></span>File Conflicts</div><div class="row-sub">' + (conflictCount ? "Paths touched by multiple agents" : "No multi-agent path overlaps") + "</div></div>" +
-            '<div class="row-right">' + (conflictCount ? '<span class="badge amber">' + conflictCount + "</span>" : "<span>Clean</span>") + "<span>›</span></div>" +
+            '<div class="row-main"><div class="row-title"><span class="dot ' + (conflictCount ? "amber" : "green") + '"></span>File clashes</div><div class="row-sub">' + (conflictCount ? "Two people edited the same files" : "No overlapping edits") + "</div></div>" +
+            '<div class="row-right">' + (conflictCount ? '<span class="badge amber">' + conflictCount + "</span>" : "<span>Clear</span>") + "<span>›</span></div>" +
           "</button>" +
           '<button type="button" class="row" id="btn-sheet-commits">' +
-            '<div class="row-main"><div class="row-title">Git Commits</div><div class="row-sub">Head ' + esc(state.headCommit) + " · " + relTime(state.lastSyncIso) + "</div></div>" +
-            '<div class="row-right"><span class="git-chip">' + commitCount + "</span><span>›</span></div>" +
+            '<div class="row-main"><div class="row-title">Recent changes</div><div class="row-sub">Updated ' + relTime(state.lastSyncIso) + "</div></div>" +
+            '<div class="row-right"><span>' + commitCount + "</span><span>›</span></div>" +
           "</button>" +
-          (verifiedRows ? '<div class="section-head"><span class="section-title">QC receipts</span></div>' + verifiedRows : "") +
+          (verifiedRows ? '<div class="section-head"><span class="section-title">Recently checked</span></div>' + verifiedRows : "") +
           '<button type="button" class="row" id="btn-quick-inbox">' +
-            '<div class="row-main"><div class="row-title">Quick-Action Inbox</div><div class="row-sub">Capture an idea or dictation to #peer-floor</div></div>' +
+            '<div class="row-main"><div class="row-title">Quick capture</div><div class="row-sub">Save an idea to the team chat</div></div>' +
             '<div class="row-right"><span>Capture</span><span>›</span></div>' +
           "</button>" +
         "</div>" +
@@ -2533,13 +2565,13 @@
     if (sTxt) sTxt.textContent = window.StackPolish.connectionLabel(link, state.outbox.length);
     if (sPill) {
       const detail = link === "live"
-        ? ("Live · last sync " + (state.lastSyncIso || "—") + " · " + state.headCommit)
+        ? ("Connected · updated " + relTime(state.lastSyncIso))
         : link === "polling"
-          ? "Polling the Worker BFF"
+          ? "Updating…"
           : secretsMissing(state.health)
-            ? "Offline — Worker secrets missing"
-            : "Offline — last sync failed or the network is down";
-      sPill.title = detail + (state.outbox.length ? " · Outbox " + state.outbox.length : "");
+            ? "Not ready — server setup incomplete"
+            : "Offline — last update failed";
+      sPill.title = detail + (state.outbox.length ? " · " + state.outbox.length + " waiting to send" : "");
     }
     const refreshDot = document.querySelector("#sb-refresh-btn .dot");
     if (refreshDot) refreshDot.className = "dot " + window.StackPolish.connectionDot(link);
@@ -3280,6 +3312,16 @@
         render();
       });
     });
+    root.querySelectorAll("[data-view]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        const next = b.dataset.view;
+        endDictation();
+        if (voiceCall && voiceCall.alive && next !== "agents") hangUpVoiceCall("room");
+        state.view = next;
+        if (state.view === "agents") state.forceChatBottom = true;
+        render();
+      });
+    });
     root.querySelectorAll("[data-open-assignments]").forEach(function (button) {
       button.addEventListener("click", openAssignmentInbox);
     });
@@ -3293,8 +3335,10 @@
     root.querySelectorAll("[data-qc]").forEach(function (b) { b.addEventListener("click", function () { openQcSheet(b.dataset.qc); }); });
     root.querySelectorAll("[data-edit-usage]").forEach(function (b) { b.addEventListener("click", function () { openUsageEditSheet(b.dataset.editUsage); }); });
 
-    const vbBtn = document.getElementById("btn-voice-brief");
-    if (vbBtn) vbBtn.addEventListener("click", function () { speakText(buildTodayBriefText(), vbBtn); });
+    ["btn-voice-brief", "btn-voice-brief-inline"].forEach(function (id) {
+      const vbBtn = document.getElementById(id);
+      if (vbBtn) vbBtn.addEventListener("click", function () { speakText(buildTodayBriefText(), vbBtn); });
+    });
     const vaBtn = document.getElementById("btn-voice-agent");
     if (vaBtn) {
       vaBtn.addEventListener("click", function () {
