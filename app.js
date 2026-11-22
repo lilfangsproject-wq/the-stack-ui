@@ -372,46 +372,56 @@
     const sessionUrl = safeHttpUrl(session.session_url);
     const prUrl = safeHttpUrl(session.pr_url);
     const issueUrl = safeHttpUrl(session.issue_url);
+    const lastActivity = session.last_reported_at || session.checked_in_at || session.last_authenticated_checkin_at;
+    const activity = lastActivity ? "Last update " + relTime(lastActivity) : "No recent update";
+    const plainStatus = st.key === "running" ? "Working now · verified" :
+      st.key === "waiting_prompt" && sessionHasAuthCheckin(session) ? "Connected · work not confirmed" :
+      reported === "paused_quota" ? "Paused · usage limit" :
+      reported === "blocked" ? "Blocked" :
+      reported === "offline" ? "Offline" : "Activity not confirmed";
+    const plainExplanation = st.key === "running" ? "Recent execution has been verified." :
+      sessionHasAuthCheckin(session) ? "This agent checked in, but we cannot confirm it is doing work." :
+      "We cannot confirm this agent is working right now.";
     const openBtn = sessionUrl
-      ? '<a class="btn btn-pri btn-sm" href="' + esc(sessionUrl) + '" target="_blank" rel="noopener">Open agent session</a>'
-      : '<span class="badge muted">' + esc(session.session_url_note || "Session link unavailable") + "</span>";
+      ? '<a class="btn btn-pri btn-sm" href="' + esc(sessionUrl) + '" target="_blank" rel="noopener">Open session</a>'
+      : "";
     const continueBtn = session.continue_prompt
-      ? '<button type="button" class="btn btn-sec btn-sm" data-copy-continue="' + esc(session.id) + '">Copy continue prompt</button>'
+      ? '<button type="button" class="btn btn-sec btn-sm" data-copy-continue="' + esc(session.id) + '">Copy instructions</button>'
       : "";
     const counterpart = session.counterpart
       ? '<p class="session-meta">Handoff note · ' + esc(session.counterpart.agent || "") +
         (session.counterpart.artifact ? " · " + esc(session.counterpart.artifact) : "") +
         (session.counterpart.status ? " · " + esc(session.counterpart.status) : "") +
-        " (note, not live proof)</p>"
+        " (not live proof)</p>"
       : "";
     const facts = [];
     if (session.session_registered_at) facts.push("Registered " + relTime(session.session_registered_at));
-    if (session.last_authenticated_checkin_at) facts.push("Auth check-in " + relTime(session.last_authenticated_checkin_at));
+    if (session.last_authenticated_checkin_at) facts.push("Authenticated check-in " + relTime(session.last_authenticated_checkin_at));
     else facts.push("No authenticated check-in");
-    if (session.last_implementation_evidence_at) facts.push("Impl evidence " + relTime(session.last_implementation_evidence_at));
-    if (session.last_reported_at || session.checked_in_at) {
-      facts.push("Last reported " + relTime(session.last_reported_at || session.checked_in_at));
-    }
+    if (session.last_implementation_evidence_at) facts.push("Implementation evidence " + relTime(session.last_implementation_evidence_at));
+    if (lastActivity) facts.push(activity);
     return (
       '<div class="session-card" data-session-id="' + esc(session.id) + '" data-display-state="' + esc(st.key) + '" data-reported-state="' + esc(reported) + '">' +
         '<div class="session-card-top">' +
-          '<span class="badge ' + st.tone + '"><span class="dot ' + st.tone + '"></span>' + esc(st.label) + "</span>" +
-          '<strong>' + esc(session.task_title || session.task_id || "Session") + "</strong>" +
+          '<span class="badge ' + st.tone + '"><span class="dot ' + st.tone + '"></span>' + esc(plainStatus) + "</span>" +
+          '<strong>' + esc(session.task_title || session.task_id || "No task recorded") + "</strong>" +
         "</div>" +
-        '<p class="session-meta">' + esc(session.runtime || "Runtime unknown") +
-          " · " + esc(session.host || "host unknown") +
-          (session.session_id ? " · id " + esc(String(session.session_id).slice(0, 12)) + "…" : "") +
-        "</p>" +
-        '<p class="session-meta">Reported state: ' + esc(reportedLabel) +
-          " · source " + esc(source) +
-          (st.key === "running" ? " · execution verified" : " · not proven live/executing") +
-        "</p>" +
-        '<p class="session-meta">' + esc(facts.join(" · ")) + "</p>" +
-        counterpart +
-        '<div class="hero-actions session-actions">' + openBtn + continueBtn +
-          (prUrl ? '<a class="btn btn-sec btn-sm" href="' + esc(prUrl) + '" target="_blank" rel="noopener">Open PR</a>' : "") +
-          (issueUrl ? '<a class="btn btn-sec btn-sm" href="' + esc(issueUrl) + '" target="_blank" rel="noopener">Issue</a>' : "") +
-        "</div>" +
+        '<p class="session-meta">' + esc(activity) + " · " + esc(plainExplanation) + "</p>" +
+        '<div class="hero-actions session-actions">' + openBtn + continueBtn + "</div>" +
+        '<details class="session-details"><summary>Technical details</summary>' +
+          '<p class="session-meta">' + esc(session.runtime || "Runtime unknown") +
+            " · " + esc(session.host || "host unknown") +
+            (session.session_id ? " · session " + esc(String(session.session_id)) : "") + "</p>" +
+          '<p class="session-meta">Reported: ' + esc(reportedLabel) +
+            " · source " + esc(source) +
+            (st.key === "running" ? " · execution verified" : " · execution not verified") + "</p>" +
+          '<p class="session-meta">' + esc(facts.join(" · ")) + "</p>" +
+          counterpart +
+          (!sessionUrl && session.session_url_note ? '<p class="session-meta">' + esc(session.session_url_note) + "</p>" : "") +
+          '<div class="hero-actions session-actions">' +
+            (prUrl ? '<a class="btn btn-sec btn-sm" href="' + esc(prUrl) + '" target="_blank" rel="noopener">Code changes</a>' : "") +
+            (issueUrl ? '<a class="btn btn-sec btn-sm" href="' + esc(issueUrl) + '" target="_blank" rel="noopener">Project issue</a>' : "") +
+          "</div></details>" +
         (session.continue_prompt
           ? '<textarea class="input mono session-continue" hidden readonly rows="3">' + esc(session.continue_prompt) + "</textarea>"
           : "") +

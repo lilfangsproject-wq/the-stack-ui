@@ -1132,3 +1132,14 @@ html[data-surface="light"] .chat-subbar {
     backdrop-filter: none;
   }
 }
+
+/* Phone-first tracker: concise summary, optional diagnostic details. */
+.session-card { min-width: 0; overflow-wrap: anywhere; }
+.session-card-top strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.session-details { margin-top: 10px; border-top: 1px solid var(--hairline); padding-top: 9px; }
+.session-details summary { cursor: pointer; color: var(--ink-2); font-size: 13px; font-weight: 600; min-height: 34px; }
+.session-details[open] summary { margin-bottom: 8px; }
+@media (max-width: 600px) {
+  .session-card { padding: 14px; }
+  .session-card .session-actions { flex-wrap: wrap; }
+}
