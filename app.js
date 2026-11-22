@@ -4252,7 +4252,12 @@
   if ("serviceWorker" in navigator) {
     let swReloading = false;
     let swReg = null;
+    let swAlreadyControlled = Boolean(navigator.serviceWorker.controller);
     navigator.serviceWorker.addEventListener("controllerchange", function () {
+      if (!swAlreadyControlled) {
+        swAlreadyControlled = true;
+        return;
+      }
       if (swReloading) return;
       swReloading = true;
       location.reload();
