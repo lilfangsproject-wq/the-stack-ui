@@ -1103,3 +1103,32 @@ html[data-surface="light"] .chat-subbar {
 .chat-hero #chat-log { overflow-x: hidden; }
 .chat-hero .msg { overflow-wrap: anywhere; word-break: normal; }
 .chat-hero .msg > div { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+
+/* iOS Liquid Glass refinement: transparent, optically edged controls instead
+   of opaque frosted blocks. Preserve state colours and existing layout. */
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .panel, .dock, .sheet, .btn-sec, .explore-node {
+    background-image: linear-gradient(155deg, rgba(255,255,255,.20), rgba(255,255,255,.055) 46%, rgba(255,255,255,.11));
+    border-color: rgba(255,255,255,.48);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.72),
+                inset 0 -1px 0 rgba(255,255,255,.12),
+                0 10px 30px rgba(0,12,38,.18);
+    -webkit-backdrop-filter: blur(24px) saturate(175%);
+    backdrop-filter: blur(24px) saturate(175%);
+  }
+  .dock {
+    -webkit-backdrop-filter: blur(34px) saturate(185%);
+    backdrop-filter: blur(34px) saturate(185%);
+  }
+  .sheet {
+    -webkit-backdrop-filter: blur(42px) saturate(180%);
+    backdrop-filter: blur(42px) saturate(180%);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .panel, .dock, .sheet, .btn-sec, .explore-node {
+    background: var(--sheet-bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
