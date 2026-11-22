@@ -1,4 +1,4 @@
-/* The Stack v50.5.7 ONE STACK — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
+/* The Stack v50.5.8 LIVE TRACKER — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
  * Hard rules: no always-on mic/Jarvis; opt-in TTS (/api/tts Sarah + Workers AI Aura-2 + $0 Web Speech fallback); PIN → x-stack-pin; Git is source of truth.
  * No horizontal swipe. Colour only marks the explicit agent states. Connection pill is honest.
  * Operator sessions (#270): show real runtime/session links; never invent "working".
@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const VERSION = window.STACK_VERSION || "v50.5.7-one-stack";
+  const VERSION = window.STACK_VERSION || "v50.5.8-live-tracker";
   const SURFACE_KEY = "stack-surface-v1";
   const OUTBOX_KEY = "stack-rebirth-outbox-v1";
   const DRAFT_KEY = "stack-composer-drafts-v1";
@@ -1718,8 +1718,12 @@
     }).join("");
 
     const rosterOnly = state.agents.filter(function (a) { return a.id !== "peer-floor"; });
-    const workingCount = rosterOnly.filter(function (a) { return a.status === "working" || a.status === "completed"; }).length;
-    const waitingCount = rosterOnly.filter(function (a) { return a.status === "waiting"; }).length;
+    const workingCount = rosterOnly.filter(function (a) {
+      return a.status === "working" || a.status === "completed" || a.status === "running";
+    }).length;
+    const waitingCount = rosterOnly.filter(function (a) {
+      return a.status === "waiting" || a.status === "waiting_prompt" || a.status === "paused_quota";
+    }).length;
     const blockedCount = rosterOnly.filter(function (a) { return a.status === "blocked"; }).length;
     const wfTone = blockedCount ? "red" : waitingCount ? "amber" : workingCount ? "green" : "muted";
     const wfSub = workingCount + " active · " + waitingCount + " waiting · " + blockedCount + " blocked";
@@ -1808,25 +1812,32 @@
         composerHtml +
       "</section>";
 
-    const liveSessions = (state.agentSessions && Array.isArray(state.agentSessions.sessions))
-      ? state.agentSessions.sessions.filter(function (s) {
-          return s && s.agent && s.agent !== "peer-floor" && (s.task_id || s.task_title);
-        })
-      : [];
-    const sessionsPanel = liveSessions.length
-      ? '<section class="panel live-sessions-panel" aria-label="Agent sessions">' +
-          '<div class="section-head"><span class="section-title">Agent sessions</span>' +
-          '<button type="button" class="section-link" data-go="agents">Open Agents ›</button></div>' +
-          liveSessions.map(function (session) {
-            const agent = state.agents.find(function (a) { return a.id === session.agent; });
-            return '<div class="session-agent-label"><strong>' + esc((agent && agent.name) || session.agent) + "</strong></div>" +
-              sessionCardHtml(session);
-          }).join("") +
-        "</section>"
-      : '<section class="panel live-sessions-panel" aria-label="Agent sessions">' +
-          '<div class="section-head"><span class="section-title">Agent sessions</span></div>' +
-          '<p class="session-meta">No registered agent sessions yet. A saved message is not a live agent check-in.</p>' +
-        "</section>";
+    // Live tracker: always show roster. Prefer hydrated D1 check-ins / heartbeats / registry.
+    const trackerAgents = rosterOnly.map(function (agent) {
+      const session = primarySession(agent.id) || {
+        id: "tracker-" + agent.id,
+        agent: agent.id,
+        runtime: agent.model || "Runtime unknown",
+        host: "unknown",
+        state: "unknown",
+        reported_state: "unknown",
+        verification: "roster",
+        task_title: agent.role || "Teammate",
+        last_execution_verified_at: null,
+        session_url_note: "Open Agents to message " + agent.name
+      };
+      return { agent: agent, session: session };
+    });
+    const sessionsPanel =
+      '<section class="panel live-sessions-panel" aria-label="Live tracker">' +
+        '<div class="section-head"><span class="section-title">Live tracker</span>' +
+        '<button type="button" class="section-link" id="btn-sheet-workforce-top">Workforce ›</button></div>' +
+        '<p class="session-meta">Presence from assignment check-ins + heartbeats. Check-in is not proof a task is executing.</p>' +
+        trackerAgents.map(function (row) {
+          return '<div class="session-agent-label"><strong>' + esc(row.agent.name) + "</strong> · " +
+            esc(row.agent.role) + "</div>" + sessionCardHtml(row.session);
+        }).join("") +
+      "</section>";
 
     const streamCol =
       '<div class="today-col">' +
@@ -2761,20 +2772,25 @@
   function openWorkforceSheet() {
     const rows = state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
       const m = agentMeta(a.status);
+      const session = primarySession(a.id);
       return (
-        '<button type="button" class="row" data-sheet-agent="' + esc(a.id) + '">' +
-          '<div class="row-main">' +
-            '<div class="row-title"><span class="dot ' + m.tone + '"></span>' + esc(a.name) + ' <span class="mono">· ' + esc(a.role) + "</span></div>" +
-            '<div class="row-sub">' + esc(agentAgeText(a)) + " · " + esc(a.evidence) + "</div>" +
-          "</div>" +
-          '<div class="row-right"><span>' + (a.hasLiveUsage ? a.usagePct + "% · Manual" : "Quota unavailable") + "</span><span>›</span></div>" +
-        "</button>"
+        '<div class="workforce-row">' +
+          '<button type="button" class="row" data-sheet-agent="' + esc(a.id) + '">' +
+            '<div class="row-main">' +
+              '<div class="row-title"><span class="dot ' + m.tone + '"></span>' + esc(a.name) + ' <span class="mono">· ' + esc(a.role) + "</span></div>" +
+              '<div class="row-sub">' + esc(agentAgeText(a)) + " · " + esc(a.evidence) + "</div>" +
+            "</div>" +
+            '<div class="row-right"><span>' + (a.hasLiveUsage ? a.usagePct + "% · Manual" : "Quota unavailable") + "</span><span>›</span></div>" +
+          "</button>" +
+          (session ? sessionCardHtml(session) : '<p class="session-meta">No check-in or heartbeat yet.</p>') +
+        "</div>"
       );
     }).join("");
     openSheet(
-      '<div class="sheet-head"><div><h2 class="sheet-title">Workforce</h2><p class="sheet-sub">5 explicit states · tap any agent to DM</p></div><button type="button" class="orb-btn" style="width:32px;height:32px;" data-close-sheet>✕</button></div>' +
+      '<div class="sheet-head"><div><h2 class="sheet-title">Live tracker</h2><p class="sheet-sub">Tap a teammate to DM · check-in ≠ executing</p></div><button type="button" class="orb-btn" style="width:32px;height:32px;" data-close-sheet>✕</button></div>' +
       '<div class="panel" style="margin-bottom:0;">' + (rows || '<div class="empty">No agents loaded.</div>') + "</div>"
     );
+    bindSessionActions(document.getElementById("sheet"));
     document.getElementById("sheet").querySelectorAll("[data-sheet-agent]").forEach(function (b) {
       b.addEventListener("click", function () { closeSheet(); jumpToAgent(b.dataset.sheetAgent); });
     });
@@ -3306,6 +3322,8 @@
     if (rs) rs.addEventListener("click", function () { syncVault(false); });
     const wfBtn = document.getElementById("btn-sheet-workforce");
     if (wfBtn) wfBtn.addEventListener("click", openWorkforceSheet);
+    const wfTop = document.getElementById("btn-sheet-workforce-top");
+    if (wfTop) wfTop.addEventListener("click", openWorkforceSheet);
     const cfBtn = document.getElementById("btn-sheet-conflicts");
     if (cfBtn) cfBtn.addEventListener("click", openConflictsSheet);
     const cmBtn = document.getElementById("btn-sheet-commits");

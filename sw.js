@@ -1,19 +1,19 @@
-/* The Stack v50.5.7 ONE STACK — network-first shell cache for Cloudflare Pages / GitHub Pages.
+/* The Stack v50.5.8 LIVE TRACKER — network-first shell cache for Cloudflare Pages / GitHub Pages.
  * Always fetches fresh UI when online so pushes appear immediately on iPhone PWAs.
  */
-const CACHE = "the-stack-shell-v50.5.7-one-stack";
+const CACHE = "the-stack-shell-v50.5.8-live-tracker";
 const SHELL = [
   "./",
   "./index.html",
-  "./bg-tahoe.svg?v=50.5.7-one-stack",
-  "./app.js?v=50.5.7-one-stack",
-  "./explore.js?v=50.5.7-one-stack",
-  "./polish.js?v=50.5.7-one-stack",
-  "./config.js?v=50.5.7-one-stack",
-  "./style.css?v=50.5.7-one-stack",
-  "./favicon.svg?v=50.5.7-one-stack",
-  "./manifest.webmanifest?v=50.5.7-one-stack",
-  "./icon-180.png?v=50.5.7-one-stack",
+  "./bg-tahoe.svg?v=50.5.8-live-tracker",
+  "./app.js?v=50.5.8-live-tracker",
+  "./explore.js?v=50.5.8-live-tracker",
+  "./polish.js?v=50.5.8-live-tracker",
+  "./config.js?v=50.5.8-live-tracker",
+  "./style.css?v=50.5.8-live-tracker",
+  "./favicon.svg?v=50.5.8-live-tracker",
+  "./manifest.webmanifest?v=50.5.8-live-tracker",
+  "./icon-180.png?v=50.5.8-live-tracker",
   "./icon-192.png",
   "./icon-512.png"
 ];
