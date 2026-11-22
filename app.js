@@ -2172,7 +2172,7 @@
       case "waiting_dependency": return "This can start after the earlier task is checked.";
       case "failed":
       case "timed_out":
-      case "interrupted": return "The last attempt stopped. Open the assignment for details.";
+      case "interrupted": return "Needs attention. The last attempt stopped without a checked handoff. It stays here until you decide or follow-up automation moves it.";
       default: return assignmentLabels[task.status] || "Open the assignment for details.";
     }
   }
@@ -2627,12 +2627,28 @@
             ' · ' + esc(new Date(event.at).toLocaleString()) +
             (event.note ? ' · ' + esc(event.note) : '') + '</li>';
         }).join("");
-        return '<details class="assignment-row"><summary><strong>' + esc(item.title) +
+        const sticky = item.needs_attention || ["failed", "interrupted", "timed_out"].includes(item.status);
+        const sessionLine = live ? sessionCardHtml(live) : '<p class="session-meta">No verified live session for ' + esc(assignmentName(item.recipient)) + ' (shows unknown rather than inventing “working”).</p>';
+        return '<details class="assignment-row"' + (sticky ? ' data-needs-attention="sticky"' : '') + '><summary><strong>' + esc(item.title) +
           '</strong><span>' + esc(assignmentName(item.recipient)) + ' · ' +
-          esc(assignmentLabels[item.status] || item.status) + '</span></summary>' +
+          esc(assignmentLabels[item.status] || item.status) +
+          (sticky ? ' · Needs attention' : '') + '</span></summary>' +
+          '<dl class="assignment-plain">' +
+          '<div><dt>What needs attention right now?</dt><dd>' + esc(sticky
+            ? (item.attention_reason || "This stopped without a checked handoff. It stays in Needs Attention until you decide or follow-up automation moves it.")
+            : todayAssignmentSummary(item)) + '</dd></div>' +
+          '<div><dt>Who is doing the work?</dt><dd>' + esc(assignmentName(item.recipient)) +
+            (item.attempt > 1 ? ' · Try ' + item.attempt : '') + '</dd></div>' +
+          '<div><dt>Who checked the proof?</dt><dd>' + esc(item.status === "verified"
+            ? assignmentName(item.reviewer) + " checked the proof."
+            : assignmentName(item.reviewer) + " has not checked the proof yet.") + '</dd></div>' +
+          '<div><dt>What happened?</dt><dd>' + (history
+            ? 'See the trail below.'
+            : 'Nothing recorded yet.') + '</dd></div>' +
+          '</dl>' +
           '<p class="assignment-text">' + esc(item.instructions) + '</p>' +
           '<p>Checks the result: ' + esc(assignmentName(item.reviewer)) + (item.attempt > 1 ? ' · Try ' + item.attempt : '') + '</p>' +
-          (live ? sessionCardHtml(live) : '<p class="session-meta">No verified live session for ' + esc(assignmentName(item.recipient)) + ' (shows unknown rather than inventing “working”).</p>') +
+          sessionLine +
           (item.channel ? '<details class="assignment-history" data-assignment-source="' + esc(item.message_id) + '" data-source-channel="' +
             esc(item.channel) + '"><summary>Original message</summary><p role="status"></p></details>' : '') +
           (item.dependency_id ? '<p>Starts after: ' + esc(prerequisite?.title || "another task") + ' · ' + esc(assignmentLabels[item.dependency_status] || "Status unknown") + '</p>' : '') +

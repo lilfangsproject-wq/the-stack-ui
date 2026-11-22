@@ -925,6 +925,13 @@ html[data-surface="light"] .chat-subbar {
 .assignment-row summary { cursor: pointer; min-block-size: 44px; }
 .assignment-row summary span { display: block; color: var(--ink-2); margin-top: 3px; }
 .assignment-text { white-space: pre-wrap; }
+.assignment-plain { margin: 8px 0 0; }
+.assignment-plain div { margin: 0 0 8px; }
+.assignment-plain dt { font-size: 0.8rem; color: var(--ink-2); }
+.assignment-plain dd { margin: 2px 0 0; }
+@media (max-width: 390px) {
+  .assignment-plain dt, .assignment-history > summary { font-size: 0.95rem; line-height: 1.35; }
+}
 .assignment-group h3 { font-size: 0.9rem; margin: 18px 0 4px; color: var(--ink-2); }
 .assignment-row > summary { padding-block: 4px; }
 .assignment-row > summary span { font-size: 0.875rem; }
