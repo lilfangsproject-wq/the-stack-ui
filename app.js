@@ -587,7 +587,8 @@
       const liveSession = primarySession(base.id);
 
       if (base.id === "peer-floor") {
-        status = "working";
+        // Message traffic is not evidence that any agent is executing.
+        status = "unknown";
         evidence = "channels/peer-floor/messages.jsonl";
         lastSeen = floorMsgsAll.length ? relTime(floorMsgsAll[floorMsgsAll.length - 1].created_at) : "Git-native";
       } else if (liveSession) {

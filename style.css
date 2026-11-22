@@ -1092,3 +1092,14 @@ html[data-surface="light"] .chat-subbar {
   .dock-fab { flex: 0 0 48px; width: 48px; height: 48px; }
   .explore-node { max-width: 102px; font-size: 11px; }
 }
+
+/* iPhone Agents chat: long GitHub URLs and prewrapped messages must never
+   widen the flex column or become horizontally clipped. */
+.chat-hero, .chat-log-wrap, .chat-hero #chat-log, .chat-hero .msg {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.chat-hero #chat-log { overflow-x: hidden; }
+.chat-hero .msg { overflow-wrap: anywhere; word-break: normal; }
+.chat-hero .msg > div { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
