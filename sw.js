@@ -1,19 +1,19 @@
-/* The Stack v50.6.1 CLARITY — network-first shell cache for Cloudflare Pages / GitHub Pages.
+/* The Stack v50.6.1 CLARITY VOICE — network-first shell cache for Cloudflare Pages / GitHub Pages.
  * Always fetches fresh UI when online so pushes appear immediately on iPhone PWAs.
  */
-const CACHE = "the-stack-shell-v50.6.1-clarity";
+const CACHE = "the-stack-shell-v50.6.1-clarity-voice";
 const SHELL = [
   "./",
   "./index.html",
-  "./bg-tahoe.svg?v=50.5.8-live-tracker",
-  "./app.js?v=50.5.8-live-tracker",
-  "./explore.js?v=50.5.8-live-tracker",
-  "./polish.js?v=50.5.8-live-tracker",
-  "./config.js?v=50.5.8-live-tracker",
-  "./style.css?v=50.5.8-live-tracker",
-  "./favicon.svg?v=50.5.8-live-tracker",
-  "./manifest.webmanifest?v=50.5.8-live-tracker",
-  "./icon-180.png?v=50.5.8-live-tracker",
+  "./bg-tahoe.svg?v=50.6.1-clarity-voice",
+  "./app.js?v=50.6.1-clarity-voice",
+  "./explore.js?v=50.6.1-clarity-voice",
+  "./polish.js?v=50.6.1-clarity-voice",
+  "./config.js?v=50.6.1-clarity-voice",
+  "./style.css?v=50.6.1-clarity-voice",
+  "./favicon.svg?v=50.6.1-clarity-voice",
+  "./manifest.webmanifest?v=50.6.1-clarity-voice",
+  "./icon-180.png?v=50.6.1-clarity-voice",
   "./icon-192.png",
   "./icon-512.png"
 ];

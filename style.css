@@ -1213,3 +1213,11 @@ html[data-surface="light"] .chat-subbar {
 .today-agent-update { color: var(--ink-2); font-size: 12px; grid-column: 1; }
 .today-agent-detail { padding: 0 12px 12px; }
 .today-agent-detail .session-card { margin: 0; }
+
+/* Plain-English chat summaries over collapsible technical logs */
+.msg-plain-summary { line-height: 1.45; }
+.msg-tech-details { margin-top: 8px; border-top: 1px solid var(--hairline); padding-top: 6px; }
+.msg-tech-details summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--ink-2); min-height: 30px; display: inline-flex; align-items: center; }
+.msg-tech-details[open] summary { margin-bottom: 6px; }
+.msg-tech-raw { font-size: 12px; color: var(--ink-2); opacity: 0.9; }
+

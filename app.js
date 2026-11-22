@@ -1,12 +1,12 @@
-/* The Stack v50.5.8 LIVE TRACKER — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
- * Hard rules: no always-on mic/Jarvis; opt-in TTS (/api/tts Sarah + Workers AI Aura-2 + $0 Web Speech fallback); PIN → x-stack-pin; Git is source of truth.
+/* The Stack v50.6.1 CLARITY VOICE — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
+ * Hard rules: no always-on mic/Jarvis; opt-in TTS (/api/tts Sarah + Workers AI Aura-2 + $0 Web Speech fallback) & /api/stt Whisper fallback; PIN → x-stack-pin; Git is source of truth.
  * No horizontal swipe. Colour only marks the explicit agent states. Connection pill is honest.
  * Operator sessions (#270): show real runtime/session links; never invent "working".
  */
 (function () {
   "use strict";
 
-  const VERSION = window.STACK_VERSION || "v50.5.8-live-tracker";
+  const VERSION = window.STACK_VERSION || "v50.6.1-clarity-voice";
   const SURFACE_KEY = "stack-surface-v1";
   const OUTBOX_KEY = "stack-rebirth-outbox-v1";
   const DRAFT_KEY = "stack-composer-drafts-v1";
@@ -942,6 +942,10 @@
   let voiceAudioPrimed = false;
   let serverTtsStatus = null;
 
+  const isIOSDevice = typeof navigator !== "undefined" &&
+    (/iPad|iPhone|iPod/.test(navigator.userAgent || "") ||
+      (/Macintosh/.test(navigator.userAgent || "") && Number(navigator.maxTouchPoints || 0) > 1));
+
   function getSpeechRecognitionCtor() {
     return typeof window !== "undefined" ? (window.SpeechRecognition || window.webkitSpeechRecognition || null) : null;
   }
@@ -954,6 +958,17 @@
       try { voiceAudioCtx = new Ctx(); } catch (e) { return null; }
     }
     return voiceAudioCtx;
+  }
+
+  function unlockAudioContextOnly() {
+    // Prepare AudioContext cleanly inside mic tap WITHOUT playing silent audio (prevents iOS mic session conflict).
+    const ctx = ensureVoiceAudioCtx();
+    if (ctx && ctx.state === "suspended" && typeof ctx.resume === "function") {
+      try {
+        const resP = ctx.resume();
+        if (resP && typeof resP.catch === "function") resP.catch(function () {});
+      } catch (e) {}
+    }
   }
 
   function primeVoiceAudio() {
@@ -1028,6 +1043,7 @@
     if (!voiceCall || voiceCall.slug !== slug) return "";
     const reviewing = voiceCall.state === "reviewing" && voiceCall.pendingTranscript;
     const recoverable = voiceCall.state === "disconnected" || voiceCall.state === "error";
+    const listeningNow = voiceCall.state === "listening";
     return (
       '<div id="voice-call-bar" class="voice-call-bar" data-state="' + esc(voiceCall.state) + '" role="status" aria-live="polite">' +
         '<div class="voice-call-row">' +
@@ -1036,7 +1052,8 @@
           '<div class="voice-call-actions">' +
             (recoverable
               ? '<button type="button" class="btn btn-pri btn-sm" data-voice-retry>Retry</button>'
-              : '<button type="button" class="btn btn-sec btn-sm" data-voice-stop>Stop</button>' +
+              : (listeningNow ? '<button type="button" class="btn btn-pri btn-sm" data-voice-finish-turn>Done speaking</button>' : "") +
+                '<button type="button" class="btn btn-sec btn-sm" data-voice-stop>Stop</button>' +
                 '<button type="button" class="btn btn-sec btn-sm" data-voice-mute aria-pressed="' + (voiceCall.muted ? "true" : "false") + '">' + (voiceCall.muted ? "Unmute" : "Mute") + "</button>") +
             '<button type="button" class="btn btn-danger btn-sm" data-voice-hangup>Hang up</button>' +
           "</div>" +
@@ -1054,11 +1071,71 @@
     );
   }
 
+  function pickRecorderMimeType() {
+    if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") return "";
+    const candidates = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
+    for (let i = 0; i < candidates.length; i++) {
+      try {
+        if (MediaRecorder.isTypeSupported(candidates[i])) return candidates[i];
+      } catch (e) {}
+    }
+    return "";
+  }
+
+  function canUseMediaRecorder() {
+    return typeof navigator !== "undefined" &&
+      Boolean(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === "function") &&
+      typeof MediaRecorder !== "undefined";
+  }
+
+  async function transcribeRecordedBlob(blob) {
+    if (!blob || !blob.size || !creds.bff || !creds.pin) return "";
+    const ab = await blob.arrayBuffer();
+    if (!ab || ab.byteLength < 32) return "";
+    const res = await fetch(creds.bff.replace(/\/$/, "") + "/api/stt", {
+      method: "POST",
+      headers: {
+        "content-type": blob.type || "audio/webm",
+        "x-stack-pin": creds.pin
+      },
+      body: ab
+    });
+    const data = await res.json().catch(function () { return {}; });
+    if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
+    return String((data && data.text) || "").trim();
+  }
+
+  function stopVoiceRecorder(target) {
+    const recState = target && target.recorderState;
+    if (!recState) return;
+    target.recorderState = null;
+    if (recState.vadTimer) {
+      clearInterval(recState.vadTimer);
+      recState.vadTimer = null;
+    }
+    if (recState.maxTimer) {
+      clearTimeout(recState.maxTimer);
+      recState.maxTimer = null;
+    }
+    if (recState.sourceNode) {
+      try { recState.sourceNode.disconnect(); } catch (e) {}
+    }
+    if (recState.recorder && recState.recorder.state !== "inactive") {
+      try { recState.recorder.onstop = null; recState.recorder.stop(); } catch (e) {}
+    }
+    if (recState.stream && typeof recState.stream.getTracks === "function") {
+      recState.stream.getTracks().forEach(function (track) {
+        try { track.stop(); } catch (e) {}
+      });
+    }
+  }
+
   function stopVoiceRecognition() {
     if (voiceRestartTimer) {
       clearTimeout(voiceRestartTimer);
       voiceRestartTimer = null;
     }
+    if (voiceCall) stopVoiceRecorder(voiceCall);
     if (!voiceCall || !voiceCall.recognition) return;
     const rec = voiceCall.recognition;
     voiceCall.recognition = null;
@@ -1072,10 +1149,30 @@
     if (!voiceCall || !voiceCall.alive) return;
     voiceCall.muted = true;
     voiceCall.pendingTranscript = "";
+    voiceCall.interimTranscript = "";
     stopVoiceRecognition();
     stopSpeaking();
     setVoiceCallState("muted", "Stopped — tap Unmute to resume");
     render();
+  }
+
+  function finishVoiceTurn() {
+    if (!voiceCall || !voiceCall.alive) return;
+    if (voiceCall.recorderState && voiceCall.recorderState.recorder && voiceCall.recorderState.recorder.state !== "inactive") {
+      setVoiceCallState("thinking", "Transcribing…");
+      try { voiceCall.recorderState.recorder.stop(); } catch (e) { beginMediaRecorderVoice(voiceCall); }
+      return;
+    }
+    const interim = String(voiceCall.interimTranscript || "").trim();
+    if (interim) {
+      voiceCall.interimTranscript = "";
+      stopVoiceRecognition();
+      queueVoiceTranscript(interim);
+      return;
+    }
+    if (voiceCall.recognition) {
+      try { voiceCall.recognition.stop(); } catch (e) {}
+    }
   }
 
   function hangUpVoiceCall(reason) {
@@ -1207,6 +1304,129 @@
     sendVoiceTranscript(text);
   }
 
+  async function beginMediaRecorderVoice(session) {
+    if (!voiceCall || voiceCall !== session || !session.alive || session.muted) return;
+    if (!canUseMediaRecorder()) {
+      session.fatalError = true;
+      setVoiceCallState("error", "Microphone unavailable on this browser");
+      render();
+      return;
+    }
+    stopVoiceRecognition();
+    stopSpeaking();
+    setVoiceCallState("listening", "Starting mic…");
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      if (voiceCall !== session || !session.alive) return;
+      session.fatalError = true;
+      setVoiceCallState("error", "Microphone access denied");
+      toast("Allow microphone permission, then tap Retry.", "warning");
+      render();
+      return;
+    }
+    if (voiceCall !== session || !session.alive || session.muted) {
+      if (stream && stream.getTracks) stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
+      return;
+    }
+    const mimeType = pickRecorderMimeType();
+    let recorder;
+    try {
+      recorder = mimeType ? new MediaRecorder(stream, { mimeType: mimeType }) : new MediaRecorder(stream);
+    } catch (err) {
+      if (stream && stream.getTracks) stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
+      session.fatalError = true;
+      setVoiceCallState("error", "Audio recorder unavailable");
+      render();
+      return;
+    }
+
+    const chunks = [];
+    const recState = { recorder: recorder, stream: stream, vadTimer: null, maxTimer: null, sourceNode: null };
+    session.recorderState = recState;
+    recorder.ondataavailable = function (e) {
+      if (e && e.data && e.data.size > 0) chunks.push(e.data);
+    };
+    recorder.onstop = async function () {
+      const stillAlive = voiceCall === session && session.alive && !session.muted;
+      stopVoiceRecorder(session);
+      if (!stillAlive) return;
+      const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
+      if (!blob.size) {
+        setVoiceCallState("muted", "No speech detected — tap Unmute to speak");
+        render();
+        return;
+      }
+      setVoiceCallState("thinking", "Transcribing voice…");
+      try {
+        const text = await transcribeRecordedBlob(blob);
+        if (voiceCall !== session || !session.alive || session.muted) return;
+        if (!text) {
+          setVoiceCallState("muted", "Nothing clear heard — tap Unmute to try again");
+          render();
+          return;
+        }
+        queueVoiceTranscript(text);
+      } catch (err) {
+        if (voiceCall !== session || !session.alive) return;
+        setVoiceCallState("error", (err && err.message) || "Transcription failed");
+        render();
+      }
+    };
+
+    try {
+      const ctx = ensureVoiceAudioCtx();
+      if (ctx && typeof ctx.createMediaStreamSource === "function" && typeof ctx.createAnalyser === "function") {
+        const src = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 1024;
+        src.connect(analyser);
+        recState.sourceNode = src;
+        const bins = new Uint8Array(analyser.fftSize);
+        let heardSpeech = false;
+        let silenceMs = 0;
+        recState.vadTimer = setInterval(function () {
+          if (voiceCall !== session || !session.alive || session.recorderState !== recState || recorder.state !== "recording") return;
+          analyser.getByteTimeDomainData(bins);
+          let sumSq = 0;
+          for (let i = 0; i < bins.length; i++) {
+            const v = (bins[i] - 128) / 128;
+            sumSq += v * v;
+          }
+          const rms = Math.sqrt(sumSq / bins.length);
+          if (rms > 0.025) {
+            heardSpeech = true;
+            silenceMs = 0;
+          } else if (heardSpeech) {
+            silenceMs += 150;
+            if (silenceMs >= 1400) {
+              clearInterval(recState.vadTimer);
+              recState.vadTimer = null;
+              try { recorder.stop(); } catch (e) {}
+            }
+          }
+        }, 150);
+      }
+    } catch (e) {}
+
+    recState.maxTimer = setTimeout(function () {
+      if (voiceCall === session && session.recorderState === recState && recorder.state === "recording") {
+        try { recorder.stop(); } catch (e) {}
+      }
+    }, 25000);
+
+    try {
+      recorder.start();
+      setVoiceCallState("listening", "Speak now · tap Done speaking when finished");
+    } catch (err) {
+      stopVoiceRecorder(session);
+      session.fatalError = true;
+      setVoiceCallState("error", "Could not start recorder");
+      render();
+    }
+  }
+
   function beginVoiceListening() {
     if (!voiceCall || !voiceCall.alive) return;
     if (voiceCall.muted) {
@@ -1215,9 +1435,13 @@
     }
     const SR = getSpeechRecognitionCtor();
     if (!SR) {
+      if (canUseMediaRecorder()) {
+        beginMediaRecorderVoice(voiceCall);
+        return;
+      }
       voiceCall.fatalError = true;
       setVoiceCallState("error", "Speech recognition unavailable");
-      toast("Speech recognition unavailable on this browser. Use dictation into the draft instead.", "warning");
+      toast("Speech recognition unavailable on this browser. Type into the box instead.", "warning");
       render();
       return;
     }
@@ -1225,21 +1449,33 @@
     stopSpeaking();
     const session = voiceCall;
     session.fatalError = false;
+    session.interimTranscript = "";
     const recognition = new SR();
     recognition.lang = "en-AU";
-    recognition.continuous = true;
+    recognition.continuous = !isIOSDevice;
     recognition.interimResults = true;
     session.recognition = recognition;
-    setVoiceCallState("listening");
+    setVoiceCallState("listening", "Speak now…");
     recognition.onresult = function (event) {
       if (!voiceCall || voiceCall !== session || !session.alive) return;
       if (session.muted || session.state === "reviewing" || session.state === "sending" || session.state === "thinking" || session.state === "speaking" || session.state === "disconnected") return;
-      const parts = [];
+      const finals = [];
+      const interims = [];
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) parts.push(event.results[i][0].transcript.trim());
+        const piece = event.results[i][0].transcript.trim();
+        if (!piece) continue;
+        if (event.results[i].isFinal) finals.push(piece);
+        else interims.push(piece);
       }
-      const transcript = parts.filter(Boolean).join(" ");
+      const interimText = interims.join(" ").trim();
+      if (interimText) {
+        session.interimTranscript = interimText;
+        setVoiceCallState("listening", 'Hearing: "' + interimText.slice(0, 44) + '"');
+      }
+      const transcript = finals.filter(Boolean).join(" ");
       if (!transcript) return;
+      session.interimTranscript = "";
+      session.iosRestartCount = 0;
       const active = state.agents.find(function (a) { return a.id === state.activeAgentId; });
       const liveSlug = dmSlugForAgent(active ? active.id : "peer-floor");
       if (liveSlug !== session.slug || state.view !== "agents") {
@@ -1252,6 +1488,13 @@
       if (!voiceCall || voiceCall !== session || !session.alive) return;
       const code = event && event.error;
       if (code === "aborted" || code === "no-speech") return;
+      if (code === "service-not-allowed" || code === "audio-capture") {
+        if (canUseMediaRecorder()) {
+          stopVoiceRecognition();
+          beginMediaRecorderVoice(session);
+          return;
+        }
+      }
       if (code === "not-allowed" || code === "service-not-allowed" || code === "audio-capture") {
         session.fatalError = true;
         stopVoiceRecognition();
@@ -1269,7 +1512,24 @@
         setVoiceCallState("muted");
         return;
       }
+      if (session.interimTranscript && session.state === "listening") {
+        const flushed = session.interimTranscript.trim();
+        session.interimTranscript = "";
+        if (flushed) {
+          queueVoiceTranscript(flushed);
+          return;
+        }
+      }
       if (session.state === "listening") {
+        if (isIOSDevice) {
+          session.iosRestartCount = (session.iosRestartCount || 0) + 1;
+          if (session.iosRestartCount > 2) {
+            session.muted = true;
+            setVoiceCallState("muted", "Paused — tap Unmute to speak again");
+            render();
+            return;
+          }
+        }
         voiceRestartTimer = setTimeout(function () {
           voiceRestartTimer = null;
           if (voiceCall === session && session.alive && !session.muted && !session.fatalError && session.state === "listening") {
@@ -1281,6 +1541,10 @@
     try {
       recognition.start();
     } catch (error) {
+      if (canUseMediaRecorder()) {
+        beginMediaRecorderVoice(session);
+        return;
+      }
       session.fatalError = true;
       setVoiceCallState("error", "Could not start microphone");
       toast("Couldn’t start voice call microphone", "warning");
@@ -1294,10 +1558,10 @@
       return;
     }
     if (!creds.pin || !creds.bff) {
-      toast("Sign in to the Worker BFF before starting voice", "warning");
+      toast("Unlock The Stack before starting voice", "warning");
       return;
     }
-    primeVoiceAudio();
+    unlockAudioContextOnly();
     endDictation();
     stopSpeaking();
     const active = state.agents.find(function (a) { return a.id === state.activeAgentId; }) || state.agents[0];
@@ -1311,10 +1575,13 @@
       slug: slug,
       agentId: agentId,
       pendingTranscript: "",
+      interimTranscript: "",
+      iosRestartCount: 0,
       turnId: 0,
       lastSentTurnId: 0,
       detail: "",
       recognition: null,
+      recorderState: null,
       startedAt: Date.now(),
       updatedAt: Date.now()
     };
@@ -1324,9 +1591,10 @@
 
   function toggleVoiceMute() {
     if (!voiceCall || !voiceCall.alive) return;
-    primeVoiceAudio();
+    unlockAudioContextOnly();
     voiceCall.muted = !voiceCall.muted;
     voiceCall.fatalError = false;
+    voiceCall.iosRestartCount = 0;
     if (voiceCall.muted) {
       stopVoiceRecognition();
       stopSpeaking();
@@ -1358,31 +1626,110 @@
     if (!session) return;
     dictation = null;
     clearTimeout(session.timeout);
+    stopVoiceRecorder(session);
     showDictationState(session, false);
-    try { session.recognition.abort(); } catch (error) {}
+    if (session.recognition) {
+      try { session.recognition.abort(); } catch (error) {}
+    }
+  }
+
+  async function startRecorderDictation(input, slug) {
+    const session = { inputId: input.id, slug: slug, mode: "recorder", recorderState: null };
+    dictation = session;
+    showDictationState(session, true);
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      if (dictation === session) endDictation();
+      toast("Allow microphone permission to dictate.", "warning");
+      return;
+    }
+    if (dictation !== session) {
+      if (stream && stream.getTracks) stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
+      return;
+    }
+    const mimeType = pickRecorderMimeType();
+    let recorder;
+    try {
+      recorder = mimeType ? new MediaRecorder(stream, { mimeType: mimeType }) : new MediaRecorder(stream);
+    } catch (err) {
+      if (stream && stream.getTracks) stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
+      if (dictation === session) endDictation();
+      toast("Couldn’t start audio dictation. Try your keyboard mic.", "warning");
+      return;
+    }
+    const chunks = [];
+    session.recorderState = { recorder: recorder, stream: stream };
+    recorder.ondataavailable = function (e) {
+      if (e && e.data && e.data.size > 0) chunks.push(e.data);
+    };
+    recorder.onstop = async function () {
+      const targetInputId = session.inputId;
+      const targetSlug = session.slug;
+      stopVoiceRecorder(session);
+      if (dictation === session) {
+        dictation = null;
+        clearTimeout(session.timeout);
+        showDictationState(session, false);
+      }
+      const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || "audio/webm" });
+      if (!blob.size) return;
+      try {
+        const text = await transcribeRecordedBlob(blob);
+        const current = document.getElementById(targetInputId);
+        const currentSlug = (current && current.dataset && (current.dataset.draftChannel || current.dataset.slug)) || "";
+        if (!text || !current || currentSlug !== targetSlug) return;
+        current.value = [current.value.trimEnd(), text].filter(Boolean).join(" ");
+        current.dispatchEvent(new Event("input", { bubbles: true }));
+      } catch (err) {
+        toast("Couldn’t transcribe audio (" + ((err && err.message) || "error") + ")", "warning");
+      }
+    };
+    recorder.start();
+    toast("Listening… tap ■ to finish dictation", "info");
+    session.timeout = setTimeout(function () {
+      if (dictation === session && recorder.state === "recording") {
+        try { recorder.stop(); } catch (e) { endDictation(); }
+      }
+    }, 30000);
   }
 
   function toggleDictation(input) {
     if (!input) return;
     if (dictation) {
+      if (dictation.mode === "recorder" && dictation.recorderState && dictation.recorderState.recorder) {
+        if (dictation.recorderState.recorder.state === "recording") {
+          try { dictation.recorderState.recorder.stop(); } catch (e) { endDictation(); }
+          return;
+        }
+        endDictation();
+        return;
+      }
       if (!dictation.stopping) {
         dictation.stopping = true;
         try { dictation.recognition.stop(); } catch (e) { endDictation(); }
       }
       return;
     }
+    const slug = (input.dataset && (input.dataset.draftChannel || input.dataset.slug)) || "";
     const SR = getSpeechRecognitionCtor();
     if (!SR) {
+      if (canUseMediaRecorder()) {
+        unlockAudioContextOnly();
+        stopSpeaking();
+        startRecorderDictation(input, slug);
+        return;
+      }
       input.focus();
       toast("Use your keyboard’s microphone to dictate into this draft", "info");
       return;
     }
-    primeVoiceAudio();
+    unlockAudioContextOnly();
     stopSpeaking();
     const recognition = new SR();
     recognition.lang = "en-AU";
-    const slug = (input.dataset && (input.dataset.draftChannel || input.dataset.slug)) || "";
-    const session = { recognition: recognition, inputId: input.id, slug: slug };
+    const session = { recognition: recognition, inputId: input.id, slug: slug, interimText: "" };
     dictation = session;
     showDictationState(session, true);
     recognition.onresult = function (event) {
@@ -1390,22 +1737,39 @@
       const currentSlug = (current && current.dataset && (current.dataset.draftChannel || current.dataset.slug)) || "";
       if (dictation !== session || !current || currentSlug !== session.slug) return;
       const parts = [];
+      const interims = [];
       for (let i = event.resultIndex; i < event.results.length; i++) {
         if (event.results[i].isFinal) parts.push(event.results[i][0].transcript.trim());
+        else interims.push(event.results[i][0].transcript.trim());
       }
+      if (interims.length) session.interimText = interims.filter(Boolean).join(" ");
       const transcript = parts.filter(Boolean).join(" ");
       if (!transcript) return;
+      session.interimText = "";
       current.value = [current.value.trimEnd(), transcript].filter(Boolean).join(" ");
       current.dispatchEvent(new Event("input", { bubbles: true }));
     };
     recognition.onend = function () {
       if (dictation !== session) return;
+      if (session.interimText) {
+        const current = document.getElementById(session.inputId);
+        const currentSlug = (current && current.dataset && (current.dataset.draftChannel || current.dataset.slug)) || "";
+        if (current && currentSlug === session.slug) {
+          current.value = [current.value.trimEnd(), session.interimText].filter(Boolean).join(" ");
+          current.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      }
       dictation = null;
       clearTimeout(session.timeout);
       showDictationState(session, false);
     };
     recognition.onerror = function (event) {
       if (dictation !== session) return;
+      if (event && (event.error === "service-not-allowed" || event.error === "audio-capture") && canUseMediaRecorder()) {
+        endDictation();
+        startRecorderDictation(input, slug);
+        return;
+      }
       endDictation();
       if (event && event.error !== "aborted") {
         toast(event.error === "no-speech" ? "No speech heard. Tap the mic to try again." :
@@ -1420,6 +1784,10 @@
       }, 30000);
     } catch (error) {
       endDictation();
+      if (canUseMediaRecorder()) {
+        startRecorderDictation(input, slug);
+        return;
+      }
       toast("Couldn’t start dictation. Try your keyboard mic.", "warning");
     }
   }
@@ -1687,6 +2055,36 @@
 
   /* ===================== VIEWS ===================== */
 
+  function humanizeTechnicalMessage(body, isMe) {
+    const raw = String(body || "");
+    if (!raw || isMe) return null;
+    const hasJargon = /\b(BFF|PAQC|D1|JSONL|CORS|HMAC)\b|reviewer\s*!==\s*builder|\b[0-9a-f]{7,40}\b|\.(js|mjs|json|jsonl|css|html)\b|issuecomment-|#peer-floor|\bPR #\d+/i.test(raw);
+    if (!hasJargon && raw.length <= 220) return null;
+
+    let clean = raw
+      .replace(/https?:\/\/github\.com\/[^\s]+/gi, "GitHub link")
+      .replace(/#peer-floor/gi, "Team Room")
+      .replace(/\bProjects\/The-Stack\/[^\s]+/gi, "Stack files")
+      .replace(/\b[0-9a-f]{8,40}\b/gi, "")
+      .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "")
+      .replace(/\bBFF\b/g, "server")
+      .replace(/\bD1\b/g, "database")
+      .replace(/\bPAQC\b/g, "peer check")
+      .replace(/reviewer\s*!==\s*builder/gi, "independent teammate review")
+      .replace(/\bJSONL\b/gi, "chat log")
+      .replace(/Queue OFF/gi, "auto-dispatch off")
+      .replace(/\s+/g, " ")
+      .replace(/\s+([,.;:!?])/g, "$1")
+      .trim();
+
+    if (clean.length > 210) {
+      const cut = clean.slice(0, 210);
+      const lastStop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("; "), cut.lastIndexOf(" "));
+      clean = (lastStop > 90 ? cut.slice(0, lastStop) : cut).trim() + "…";
+    }
+    return clean && clean !== raw.trim() ? clean : null;
+  }
+
   function renderMessageBubble(m, showFoot, slug) {
     if (!m) return "";
     const isMe = String(m.author || "").toLowerCase() === "seth";
@@ -1704,10 +2102,16 @@
         receipt = '<div class="msg-foot"><span class="git-chip">' + label + '</span></div>';
       }
     }
+    const rawBody = String(m.body || "");
+    const plainSummary = humanizeTechnicalMessage(rawBody, isMe);
+    const bodyHtml = plainSummary
+      ? '<div class="msg-plain-summary">' + esc(plainSummary) + "</div>" +
+        '<details class="msg-tech-details"><summary>Show technical log</summary><div class="msg-tech-raw" style="white-space:pre-wrap;">' + esc(rawBody) + "</div></details>"
+      : '<div style="white-space:pre-wrap;">' + esc(rawBody) + "</div>";
     return (
       '<div class="msg ' + (isMe ? "me" : "") + '">' +
         '<div class="msg-head"><span class="msg-author">' + esc(isAutomated ? "Stack automation" : m.author || "Agent") + '</span><span class="msg-time">' + relTime(m.created_at) + "</span></div>" +
-        '<div style="white-space:pre-wrap;">' + esc(m.body || "") + "</div>" +
+        bodyHtml +
         receipt +
         (canAssign ? '<div class="msg-foot"><button type="button" class="btn btn-sec btn-sm" data-assign-message="' +
           esc(m.id) + '" data-assign-channel="' + esc(slug) + '">Assign</button></div>' : "") +
@@ -1847,6 +2251,7 @@
         "</p>" +
         '<div class="hero-actions">' +
           '<button type="button" class="btn btn-pri" data-view="ops">Open Ops</button>' +
+          '<button type="button" class="btn btn-sec" id="btn-today-start-voice">🎙 Live voice</button>' +
           '<button type="button" class="btn btn-sec" data-jump-agent="peer-floor">Team chat</button>' +
           '<button type="button" class="btn btn-sec btn-sm voice-btn" id="btn-voice-brief">Hear briefing</button>' +
         "</div>";
@@ -1995,22 +2400,22 @@
             (agent.id !== "peer-floor"
               ? '<span><strong>' + esc(pctText) + "</strong> · " + esc(agent.reset) + " · " + esc(agent.activitySummary) + "</span>" +
                 '<span class="mono">' + esc(agent.lastSeen || agent.evidence) + "</span>"
-              : '<span>channels/peer-floor/messages.jsonl</span><span class="mono">' + esc(agent.activitySummary) + "</span>") +
+              : '<span>Shared room for all teammates</span><span class="mono">' + esc(agent.activitySummary) + "</span>") +
           "</div>" +
           (agent.id !== "peer-floor" ? '<div class="meter" style="margin-top:5px;height:4px;"><div class="meter-fill ' + usageTone + '" style="width:' + agent.usagePct + '%"></div></div>' : "") +
         "</div>" +
         (agent.id !== "peer-floor" && agent.session ? sessionCardHtml(agent.session) : "") +
         '<div class="chat-log-wrap">' +
-          '<div id="chat-log" class="chat-log">' + (msgHtml || '<div class="empty">No local messages yet — pings commit via BFF to ' + esc(slug) + ".</div>") + "</div>" +
+          '<div id="chat-log" class="chat-log">' + (msgHtml || '<div class="empty">No messages yet — type or tap 🎙 below to talk to your team.</div>') + "</div>" +
           '<button type="button" id="chat-jump-bottom" class="chat-jump-pill hidden">↓ Latest</button>' +
         "</div>" +
         '<div class="chip-strip">' +
-          (agent.id === "peer-floor" ? '<button type="button" class="ctx-chip" data-cloud-prompt>Copy peer-floor prompt</button>' : "") +
+          (agent.id === "peer-floor" ? '<button type="button" class="ctx-chip" data-cloud-prompt>Copy team prompt</button>' : "") +
           (agent.id === "peer-floor" ? '<button type="button" class="ctx-chip" data-insert="@all">@all</button>' + state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
             return '<button type="button" class="ctx-chip" data-insert="@' + esc(a.name) + '">@' + esc(a.name) + "</button>";
           }).join("") : "") +
-          '<button type="button" class="ctx-chip" data-insert="Ping: confirm active commit SHA, current blocker, and next gate.">Reliable Ping</button>' +
-          '<button type="button" class="ctx-chip" data-insert="QC needed: reviewer !== builder, include commit SHA + checks.">QC Gate</button>' +
+          '<button type="button" class="ctx-chip" data-insert="Give me a plain-English update: what works right now, what is broken, and what you need from me.">Plain status update</button>' +
+          '<button type="button" class="ctx-chip" data-insert="Please test the latest fix end-to-end on phone and confirm everything actually works.">Test on phone</button>' +
         "</div>" +
         voiceCallBarHtml(slug) +
         '<div class="composer-wrap">' +
@@ -3350,6 +3755,16 @@
     if (vsBtn) vsBtn.addEventListener("click", openVoiceSettingsSheet);
     const startVoiceBtn = document.getElementById("btn-start-voice");
     if (startVoiceBtn) startVoiceBtn.addEventListener("click", startVoiceCall);
+    const todayStartVoiceBtn = document.getElementById("btn-today-start-voice");
+    if (todayStartVoiceBtn) todayStartVoiceBtn.addEventListener("click", function () {
+      unlockAudioContextOnly();
+      state.view = "agents";
+      state.forceChatBottom = true;
+      render();
+      startVoiceCall();
+    });
+    const finishVoiceBtn = root.querySelector("[data-voice-finish-turn]");
+    if (finishVoiceBtn) finishVoiceBtn.addEventListener("click", finishVoiceTurn);
     const hangBtn = root.querySelector("[data-voice-hangup]");
     if (hangBtn) hangBtn.addEventListener("click", function () { hangUpVoiceCall("stop"); });
     const stopVoiceBtn = root.querySelector("[data-voice-stop]");
