@@ -1143,3 +1143,19 @@ html[data-surface="light"] .chat-subbar {
   .session-card { padding: 14px; }
   .session-card .session-actions { flex-wrap: wrap; }
 }
+
+/* Today is the single hero on its page; the team tracker is a readable list. */
+.today-agent-summary { border-top: 1px solid var(--hairline); min-width: 0; }
+.today-agent-summary > summary {
+  list-style: none; cursor: pointer; display: grid;
+  grid-template-columns: minmax(0,1fr) auto; gap: 4px 10px;
+  align-items: center; padding: 13px 16px; min-height: 62px;
+}
+.today-agent-summary > summary::-webkit-details-marker { display: none; }
+.today-agent-summary > summary::after { content: "⌄"; color: var(--ink-2); grid-column: 2; grid-row: 2; text-align: right; }
+.today-agent-summary[open] > summary::after { content: "⌃"; }
+.today-agent-name { font-weight: 700; font-size: 15px; min-width: 0; }
+.today-agent-status { color: var(--ink-1); font-size: 12px; text-align: right; }
+.today-agent-update { color: var(--ink-2); font-size: 12px; grid-column: 1; }
+.today-agent-detail { padding: 0 12px 12px; }
+.today-agent-detail .session-card { margin: 0; }

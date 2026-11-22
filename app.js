@@ -1842,10 +1842,22 @@
       '<section class="panel live-sessions-panel" aria-label="Live tracker">' +
         '<div class="section-head"><span class="section-title">Live tracker</span>' +
         '<button type="button" class="section-link" id="btn-sheet-workforce-top">Workforce ›</button></div>' +
-        '<p class="session-meta">Presence from assignment check-ins + heartbeats. Check-in is not proof a task is executing.</p>' +
+        '<p class="session-meta">See who has checked in and when. Tap a teammate for their last recorded task and evidence. A check-in does not prove they are working.</p>' +
         trackerAgents.map(function (row) {
-          return '<div class="session-agent-label"><strong>' + esc(row.agent.name) + "</strong> · " +
-            esc(row.agent.role) + "</div>" + sessionCardHtml(row.session);
+          const session = row.session;
+          const meta = sessionMeta(session);
+          const last = session.last_reported_at || session.checked_in_at || session.last_authenticated_checkin_at;
+          const status = meta.key === "running" ? "Working · verified" :
+            sessionHasAuthCheckin(session) ? "Connected · work unconfirmed" :
+            sessionReportedState(session) === "paused_quota" ? "Paused · usage limit" :
+            sessionReportedState(session) === "blocked" ? "Blocked" : "Activity not confirmed";
+          const update = last ? "Last update " + relTime(last) : "No recent update";
+          return '<details class="today-agent-summary">' +
+            '<summary><span class="today-agent-name">' + esc(row.agent.name) + '</span>' +
+            '<span class="today-agent-status">' + esc(status) + '</span>' +
+            '<span class="today-agent-update">' + esc(update) + '</span></summary>' +
+            '<div class="today-agent-detail"><p class="session-meta">Latest recorded task and technical evidence:</p>' +
+            sessionCardHtml(session) + '</div></details>';
         }).join("") +
       "</section>";
 
