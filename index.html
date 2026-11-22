@@ -52,11 +52,11 @@
   }
   </script>
   
-  <link rel="icon" href="favicon.svg?v=50.5.6" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="icon-180.png?v=50.5.6" />
-  <link rel="manifest" href="manifest.webmanifest?v=50.5.6" />
-  <link rel="stylesheet" href="style.css?v=50.5.6" />
-  <script src="config.js?v=50.5.6"></script>
+  <link rel="icon" href="favicon.svg?v=50.5.7-one-stack" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icon-180.png?v=50.5.7-one-stack" />
+  <link rel="manifest" href="manifest.webmanifest?v=50.5.7-one-stack" />
+  <link rel="stylesheet" href="style.css?v=50.5.7-one-stack" />
+  <script src="config.js?v=50.5.7-one-stack"></script>
   <script>
     (function () {
       try {
@@ -77,24 +77,27 @@
   <div id="boot-gate" class="boot-gate hidden">
     <div class="boot-card">
       <div class="hero-top">
-        <span class="kicker">The Stack · v50.5.6</span>
+        <span class="kicker">The Stack · v50.5.7</span>
         <span class="badge neutral">Zero Spend · Opt-In Voice</span>
       </div>
       <h1 class="hero-title">Unlock The Stack</h1>
-      <p class="hero-copy">Enter your Stack access PIN. The Worker BFF holds <span class="mono">GITHUB_PAT</span> server-side — nothing privileged is stored as a browser token.</p>
+      <p class="hero-copy">Enter your PIN to open your private workspace.</p>
       <form id="pin-form">
         <div class="field">
-          <label for="bff-url">Worker BFF URL</label>
-          <input id="bff-url" name="bff" class="input mono" placeholder="https://the-stack-bff….workers.dev" autocomplete="off" required />
-        </div>
-        <div class="field">
-          <label for="stack-pin">Stack Access PIN</label>
+          <label for="stack-pin">Your PIN</label>
           <input id="stack-pin" name="pin" type="password" class="input mono" placeholder="PIN" autocomplete="current-password" required />
         </div>
-        <p id="pin-error" class="hero-copy hidden" style="color:var(--st-red);margin-bottom:10px;"></p>
+        <p id="pin-error" class="hero-copy hidden" role="alert" style="color:var(--st-red);margin-bottom:10px;"></p>
         <div class="hero-actions">
           <button type="submit" class="btn btn-pri" style="width:100%;">Open The Stack</button>
         </div>
+        <details class="boot-connection">
+          <summary>Connection settings</summary>
+          <div class="field">
+            <label for="bff-url">Server address</label>
+            <input id="bff-url" name="bff" class="input mono" autocomplete="off" />
+          </div>
+        </details>
       </form>
     </div>
   </div>
@@ -198,8 +201,8 @@
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="polish.js?v=50.5.6"></script>
-  <script src="explore.js?v=50.5.6"></script>
-  <script src="app.js?v=50.5.6"></script>
+  <script src="polish.js?v=50.5.7-one-stack"></script>
+  <script src="explore.js?v=50.5.7-one-stack"></script>
+  <script src="app.js?v=50.5.7-one-stack"></script>
 </body>
 </html>

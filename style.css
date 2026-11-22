@@ -929,6 +929,33 @@ html[data-surface="light"] .chat-subbar {
 .assignment-row > summary { padding-block: 4px; }
 .assignment-row > summary span { font-size: 0.875rem; }
 .assignment-history, .assignment-discussion { margin-block: 10px; }
+.boot-connection { margin-top: 16px; color: var(--ink-2); }
+.boot-connection summary { cursor: pointer; min-block-size: 44px; padding-block: 12px; }
+.assignment-teammates { list-style: none; padding: 0; }
+.assignment-teammates li { padding-block: 10px; border-top: 1px solid var(--hairline); }
+.assignment-teammate-name, .assignment-teammate-status { display: block; }
+.assignment-teammate-status { color: var(--ink-2); margin: 3px 0; }
+.assignment-teammates .btn { min-block-size: 44px; margin-top: 4px; }
+.assignment-teammates [role=status] { display: block; margin-top: 4px; }
+.session-card {
+  margin: 10px 0;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--hairline);
+  background: var(--glass-panel-bg, rgba(255,255,255,0.04));
+}
+.session-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.session-meta { color: var(--ink-2); font-size: 0.875rem; margin: 0 0 8px; }
+.session-actions { margin-top: 4px; }
+.session-continue { margin-top: 8px; }
+.live-sessions-panel { margin: 12px 0 0; }
+.live-sessions-panel .session-card { margin-top: 8px; }
 .assignment-messages { padding: 0; list-style: none; }
 .assignment-messages li { border-bottom: 1px solid var(--hairline); padding-block: 8px; }
 .assignment-messages small { display: block; color: var(--ink-2); }

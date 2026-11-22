@@ -1,11 +1,12 @@
-/* The Stack v50.5.6 Voice — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
+/* The Stack v50.5.7 ONE STACK — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
  * Hard rules: no always-on mic/Jarvis; opt-in TTS (/api/tts Sarah + Workers AI Aura-2 + $0 Web Speech fallback); PIN → x-stack-pin; Git is source of truth.
  * No horizontal swipe. Colour only marks the explicit agent states. Connection pill is honest.
+ * Operator sessions (#270): show real runtime/session links; never invent "working".
  */
 (function () {
   "use strict";
 
-  const VERSION = window.STACK_VERSION || "v50.5.6-voice";
+  const VERSION = window.STACK_VERSION || "v50.5.7-one-stack";
   const SURFACE_KEY = "stack-surface-v1";
   const OUTBOX_KEY = "stack-rebirth-outbox-v1";
   const DRAFT_KEY = "stack-composer-drafts-v1";
@@ -31,11 +32,23 @@
 
   const AGENT_STATES = {
     working: { label: "Working", tone: "green" },
+    running: { label: "Running", tone: "green" },
     waiting: { label: "Waiting", tone: "amber" },
+    waiting_prompt: { label: "Waiting for a prompt", tone: "amber" },
+    paused_quota: { label: "Paused by quota", tone: "amber" },
     blocked: { label: "Blocked", tone: "red" },
     unknown: { label: "Status unconfirmed", tone: "muted" },
     offline: { label: "Offline", tone: "muted" },
     completed: { label: "Completed", tone: "green" }
+  };
+
+  const SESSION_STATES = {
+    running: { label: "Running", tone: "green" },
+    paused_quota: { label: "Paused by quota", tone: "amber" },
+    waiting_prompt: { label: "Waiting for a prompt", tone: "amber" },
+    blocked: { label: "Blocked", tone: "red" },
+    offline: { label: "Offline", tone: "muted" },
+    unknown: { label: "Unknown", tone: "muted" }
   };
 
   const DEFAULT_ROSTER = [
@@ -69,6 +82,7 @@
     headCommit: "—",
     commits: [],
     heartbeats: {},
+    agentSessions: { version: 1, sessions: [] },
     needsSeth: [],
     workstreamsRaw: { workstreams: [], opportunities: [], links: {}, vision: {} },
     items: [],
@@ -254,6 +268,177 @@
 
   function agentMeta(st) { return AGENT_STATES[st] || AGENT_STATES.unknown; }
 
+  // Session registry honesty (#270 ChatGPT QC):
+  // A GitHub-edited record is a *reported* state, never proof of live execution.
+  // Auth check-in != live task execution. Green Running only with last_execution_verified_at.
+  const SESSION_LIVE_MS = 10 * 60 * 1000;
+  const SESSION_STALE_MS = 60 * 60 * 1000;
+
+  function sessionReportedState(session) {
+    return String(session?.reported_state || session?.state || "unknown").toLowerCase();
+  }
+
+  function sessionTimestamp(session) {
+    return session?.last_execution_verified_at
+      || session?.last_authenticated_checkin_at
+      || session?.last_implementation_evidence_at
+      || session?.last_reported_at
+      || session?.checked_in_at
+      || session?.session_registered_at
+      || "";
+  }
+
+  function sessionAgeMs(session) {
+    const iso = sessionTimestamp(session);
+    if (!iso) return NaN;
+    const t = new Date(iso).getTime();
+    return Number.isFinite(t) ? Date.now() - t : NaN;
+  }
+
+  function isoFresh(iso, windowMs) {
+    if (!iso) return false;
+    const age = Date.now() - new Date(iso).getTime();
+    return Number.isFinite(age) && age >= -300000 && age <= windowMs;
+  }
+
+  function sessionHasAuthCheckin(session) {
+    return isoFresh(session?.last_authenticated_checkin_at, SESSION_LIVE_MS);
+  }
+
+  function sessionHasVerifiedExecution(session) {
+    // Distinct from auth check-in: requires explicit execution verification timestamp.
+    return isoFresh(session?.last_execution_verified_at, SESSION_LIVE_MS);
+  }
+
+  function sessionMeta(session) {
+    if (!session) return Object.assign({}, SESSION_STATES.unknown, { key: "unknown" });
+    const reported = sessionReportedState(session);
+    const age = sessionAgeMs(session);
+    if (sessionHasVerifiedExecution(session) && reported === "running") {
+      return { label: "Running · verified execution", tone: "green", key: "running" };
+    }
+    if (sessionHasAuthCheckin(session)) {
+      // Authentication proves presence, not that a task is executing.
+      return { label: "Checked in · execution unverified", tone: "amber", key: "waiting_prompt" };
+    }
+    if (reported === "offline") {
+      return { label: "Reported: Offline", tone: "muted", key: "offline" };
+    }
+    if (!Number.isFinite(age) || age > SESSION_STALE_MS || age < -300000) {
+      return { label: "Status unknown · stale report", tone: "muted", key: "unknown" };
+    }
+    if (reported === "running") {
+      return { label: "Active reported · unverified", tone: "muted", key: "unknown" };
+    }
+    if (reported === "paused_quota") {
+      return { label: "Reported: Paused by quota", tone: "amber", key: "paused_quota" };
+    }
+    if (reported === "waiting_prompt") {
+      return { label: "Reported: Waiting for a prompt", tone: "amber", key: "waiting_prompt" };
+    }
+    if (reported === "blocked") {
+      return { label: "Reported: Blocked", tone: "red", key: "blocked" };
+    }
+    return { label: "Status unconfirmed", tone: "muted", key: "unknown" };
+  }
+
+  function sessionsForAgent(agentId) {
+    const list = (state.agentSessions && Array.isArray(state.agentSessions.sessions))
+      ? state.agentSessions.sessions : [];
+    return list.filter(function (s) { return s && s.agent === agentId; });
+  }
+
+  function primarySession(agentId) {
+    const list = sessionsForAgent(agentId);
+    const rank = { running: 0, waiting_prompt: 1, paused_quota: 2, blocked: 3, offline: 4, unknown: 5 };
+    return list.slice().sort(function (a, b) {
+      const ka = sessionMeta(a).key;
+      const kb = sessionMeta(b).key;
+      return (rank[ka] ?? 9) - (rank[kb] ?? 9);
+    })[0] || null;
+  }
+
+  function safeHttpUrl(value) {
+    const raw = String(value || "").trim();
+    return /^https?:\/\//i.test(raw) ? raw : "";
+  }
+
+  function sessionCardHtml(session) {
+    if (!session) return "";
+    const st = sessionMeta(session);
+    const reported = sessionReportedState(session);
+    const reportedLabel = (SESSION_STATES[reported] || SESSION_STATES.unknown).label;
+    const source = session.verification || session.source || "operator_registry";
+    const sessionUrl = safeHttpUrl(session.session_url);
+    const prUrl = safeHttpUrl(session.pr_url);
+    const issueUrl = safeHttpUrl(session.issue_url);
+    const openBtn = sessionUrl
+      ? '<a class="btn btn-pri btn-sm" href="' + esc(sessionUrl) + '" target="_blank" rel="noopener">Open agent session</a>'
+      : '<span class="badge muted">' + esc(session.session_url_note || "Session link unavailable") + "</span>";
+    const continueBtn = session.continue_prompt
+      ? '<button type="button" class="btn btn-sec btn-sm" data-copy-continue="' + esc(session.id) + '">Copy continue prompt</button>'
+      : "";
+    const counterpart = session.counterpart
+      ? '<p class="session-meta">Handoff note · ' + esc(session.counterpart.agent || "") +
+        (session.counterpart.artifact ? " · " + esc(session.counterpart.artifact) : "") +
+        (session.counterpart.status ? " · " + esc(session.counterpart.status) : "") +
+        " (note, not live proof)</p>"
+      : "";
+    const facts = [];
+    if (session.session_registered_at) facts.push("Registered " + relTime(session.session_registered_at));
+    if (session.last_authenticated_checkin_at) facts.push("Auth check-in " + relTime(session.last_authenticated_checkin_at));
+    else facts.push("No authenticated check-in");
+    if (session.last_implementation_evidence_at) facts.push("Impl evidence " + relTime(session.last_implementation_evidence_at));
+    if (session.last_reported_at || session.checked_in_at) {
+      facts.push("Last reported " + relTime(session.last_reported_at || session.checked_in_at));
+    }
+    return (
+      '<div class="session-card" data-session-id="' + esc(session.id) + '" data-display-state="' + esc(st.key) + '" data-reported-state="' + esc(reported) + '">' +
+        '<div class="session-card-top">' +
+          '<span class="badge ' + st.tone + '"><span class="dot ' + st.tone + '"></span>' + esc(st.label) + "</span>" +
+          '<strong>' + esc(session.task_title || session.task_id || "Session") + "</strong>" +
+        "</div>" +
+        '<p class="session-meta">' + esc(session.runtime || "Runtime unknown") +
+          " · " + esc(session.host || "host unknown") +
+          (session.session_id ? " · id " + esc(String(session.session_id).slice(0, 12)) + "…" : "") +
+        "</p>" +
+        '<p class="session-meta">Reported state: ' + esc(reportedLabel) +
+          " · source " + esc(source) +
+          (st.key === "running" ? " · execution verified" : " · not proven live/executing") +
+        "</p>" +
+        '<p class="session-meta">' + esc(facts.join(" · ")) + "</p>" +
+        counterpart +
+        '<div class="hero-actions session-actions">' + openBtn + continueBtn +
+          (prUrl ? '<a class="btn btn-sec btn-sm" href="' + esc(prUrl) + '" target="_blank" rel="noopener">Open PR</a>' : "") +
+          (issueUrl ? '<a class="btn btn-sec btn-sm" href="' + esc(issueUrl) + '" target="_blank" rel="noopener">Issue</a>' : "") +
+        "</div>" +
+        (session.continue_prompt
+          ? '<textarea class="input mono session-continue" hidden readonly rows="3">' + esc(session.continue_prompt) + "</textarea>"
+          : "") +
+      "</div>"
+    );
+  }
+
+  function bindSessionActions(root) {
+    (root || document).querySelectorAll("[data-copy-continue]").forEach(function (button) {
+      if (button.dataset.bound === "1") return;
+      button.dataset.bound = "1";
+      button.addEventListener("click", async function () {
+        const card = button.closest("[data-session-id]");
+        const area = card && card.querySelector(".session-continue");
+        const text = area ? area.value : "";
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+          toast("Continue prompt copied.");
+        } catch {
+          if (area) { area.hidden = false; area.focus(); area.select(); }
+          toast("Select and copy the continue prompt.", "warning");
+        }
+      });
+    });
+  }
+
   function agentAgeText(agent) {
     const m = agentMeta(agent && agent.status);
     return agent && agent.lastSeen ? m.label + " · " + agent.lastSeen : m.label;
@@ -399,11 +584,20 @@
       let status = "unknown";
       let evidence = "No recent heartbeat";
       let lastSeen = "";
+      const liveSession = primarySession(base.id);
 
       if (base.id === "peer-floor") {
         status = "working";
         evidence = "channels/peer-floor/messages.jsonl";
         lastSeen = floorMsgsAll.length ? relTime(floorMsgsAll[floorMsgsAll.length - 1].created_at) : "Git-native";
+      } else if (liveSession) {
+        // Session registration or GitHub edits do not establish live execution.
+        status = sessionMeta(liveSession).key;
+        evidence = liveSession.task_title || liveSession.task_id || liveSession.runtime || "agent session";
+        if (liveSession.session_id) evidence += " · session " + String(liveSession.session_id).slice(0, 8);
+        lastSeen = (liveSession.last_reported_at || liveSession.checked_in_at)
+          ? "Reported " + relTime(liveSession.last_reported_at || liveSession.checked_in_at)
+          : "No verified activity";
       } else if (blockedItem) {
         status = "blocked";
         evidence = blockedItem.ref || blockedItem.blocker || blockedItem.id;
@@ -483,6 +677,7 @@
         status: status,
         evidence: evidence,
         lastSeen: lastSeen,
+        session: liveSession,
         usagePct: usagePct,
         usageObservedAt: hasLiveUsage ? (prov.quota_observed_at || prov.updated_at) : "",
         pctEstimated: pctEstimated,
@@ -600,6 +795,7 @@
       state.commits = sync.commits || [];
       state.headCommit = sync.head_commit || state.headCommit;
       state.heartbeats = sync.heartbeats || state.heartbeats || {};
+      state.agentSessions = sync.agent_sessions || state.agentSessions || { version: 1, sessions: [] };
       state.qcReceipts = Array.isArray(sync.qc_receipts) ? sync.qc_receipts : (state.qcReceipts || []);
       state.sharedMemory = memory || { entries: [] };
       state.online = true;
@@ -1611,6 +1807,26 @@
         composerHtml +
       "</section>";
 
+    const liveSessions = (state.agentSessions && Array.isArray(state.agentSessions.sessions))
+      ? state.agentSessions.sessions.filter(function (s) {
+          return s && s.agent && s.agent !== "peer-floor" && (s.task_id || s.task_title);
+        })
+      : [];
+    const sessionsPanel = liveSessions.length
+      ? '<section class="panel live-sessions-panel" aria-label="Agent sessions">' +
+          '<div class="section-head"><span class="section-title">Agent sessions</span>' +
+          '<button type="button" class="section-link" data-go="agents">Open Agents ›</button></div>' +
+          liveSessions.map(function (session) {
+            const agent = state.agents.find(function (a) { return a.id === session.agent; });
+            return '<div class="session-agent-label"><strong>' + esc((agent && agent.name) || session.agent) + "</strong></div>" +
+              sessionCardHtml(session);
+          }).join("") +
+        "</section>"
+      : '<section class="panel live-sessions-panel" aria-label="Agent sessions">' +
+          '<div class="section-head"><span class="section-title">Agent sessions</span></div>' +
+          '<p class="session-meta">No registered agent sessions yet. A saved message is not a live agent check-in.</p>' +
+        "</section>";
+
     const streamCol =
       '<div class="today-col">' +
         '<div class="section-head"><span class="section-title">Live #peer-floor Stream</span><button type="button" class="section-link" data-jump-agent="peer-floor">Open Room ›</button></div>' +
@@ -1650,7 +1866,7 @@
         "</div>" +
       "</div>";
 
-    return heroHtml + '<div class="today-grid">' + streamCol + sheetsCol + "</div>";
+    return heroHtml + sessionsPanel + '<div class="today-grid">' + streamCol + sheetsCol + "</div>";
   }
 
   async function copyCloudPrompt() {
@@ -1717,6 +1933,7 @@
           "</div>" +
           (agent.id !== "peer-floor" ? '<div class="meter" style="margin-top:5px;height:4px;"><div class="meter-fill ' + usageTone + '" style="width:' + agent.usagePct + '%"></div></div>' : "") +
         "</div>" +
+        (agent.id !== "peer-floor" && agent.session ? sessionCardHtml(agent.session) : "") +
         '<div class="chat-log-wrap">' +
           '<div id="chat-log" class="chat-log">' + (msgHtml || '<div class="empty">No local messages yet — pings commit via BFF to ' + esc(slug) + ".</div>") + "</div>" +
           '<button type="button" id="chat-jump-bottom" class="chat-jump-pill hidden">↓ Latest</button>' +
@@ -1743,14 +1960,14 @@
   }
 
   const assignmentLabels = {
-    assigned: "Awaiting pickup", received: "Claimed · awaiting acknowledgement",
-    scheduled: "Scheduled", waiting_dependency: "Waiting for dependency",
-    running: "Acknowledged", interrupted: "Lease expired · ready to retry",
-    retry_wait: "Retry scheduled", review_pending: "Needs review", verified: "Verified",
+    assigned: "Waiting for pickup", received: "Picked up · waiting to be accepted",
+    scheduled: "Scheduled", waiting_dependency: "Waiting for another task",
+    running: "Accepted", interrupted: "Interrupted · can try again",
+    retry_wait: "Waiting to try again", review_pending: "Needs review", verified: "Verified",
     failed: "Failed", cancelled: "Cancelled", timed_out: "Timed out"
   };
   const assignmentEvents = {
-    assign: "Assigned", claim: "Claim recorded", acknowledge: "Acknowledged", progress: "Progress", submit: "Evidence submitted",
+    assign: "Assigned", claim: "Picked up", acknowledge: "Accepted", progress: "Progress update", submit: "Sent for review",
     review: "Review recorded", fail: "Attempt failed", cancel: "Cancelled"
   };
   const assignmentRequestPrefix = "stack-assignment-request-v1:";
@@ -1872,6 +2089,8 @@
       if (!loading.isConnected || !document.getElementById("overlay").classList.contains("open")) return;
       function renderAssignment(item) {
         const canCancel = !["verified", "failed", "cancelled", "timed_out"].includes(item.status);
+        const prerequisite = item.dependency_id && data.assignments.find(function (other) { return other.id === item.dependency_id; });
+        const live = primarySession(item.recipient);
         const history = item.history.map(function (event) {
           return '<li>' + esc(assignmentEvents[event.action]) + ' · ' + esc(assignmentName(event.actor)) +
             (event.session_id ? ' · ' + esc(event.session_id) : '') +
@@ -1882,14 +2101,17 @@
           '</strong><span>' + esc(assignmentName(item.recipient)) + ' · ' +
           esc(assignmentLabels[item.status] || item.status) + '</span></summary>' +
           '<p class="assignment-text">' + esc(item.instructions) + '</p>' +
-          '<p>Reviewer ' + esc(assignmentName(item.reviewer)) + ' · Attempt ' + item.attempt + '</p>' +
+          '<p>Checks the result: ' + esc(assignmentName(item.reviewer)) + (item.attempt > 1 ? ' · Try ' + item.attempt : '') + '</p>' +
+          (live ? sessionCardHtml(live) : '<p class="session-meta">No verified live session for ' + esc(assignmentName(item.recipient)) + ' (shows unknown rather than inventing “working”).</p>') +
           (item.channel ? '<details class="assignment-history" data-assignment-source="' + esc(item.message_id) + '" data-source-channel="' +
-            esc(item.channel) + '"><summary>Source #' + esc(item.channel) + '</summary><p role="status"></p></details>' : '') +
-          (item.dependency_id ? '<p>Dependency ' + esc(item.dependency_id) + ' · ' + esc(assignmentLabels[item.dependency_status] || item.dependency_status || "Unknown") + '</p>' : '') +
+            esc(item.channel) + '"><summary>Original message in #' + esc(item.channel) + '</summary><p role="status"></p></details>' : '') +
+          (item.dependency_id ? '<p>Starts after: ' + esc(prerequisite?.title || "another task") + ' · ' + esc(assignmentLabels[item.dependency_status] || "Status unknown") + '</p>' : '') +
           (item.status === "scheduled" || item.status === "retry_wait" ? '<p>Available ' + esc(new Date(item.available_at).toLocaleString()) + '</p>' : '') +
-          (item.lease_until ? '<p>Last lease ends ' + esc(new Date(item.lease_until).toLocaleString()) + '</p>' : '') +
-          (item.evidence ? '<p class="assignment-text"><strong>Evidence</strong><br>' + esc(item.evidence) + '</p>' : '') +
-          '<details class="assignment-history"><summary>Execution history</summary><ol>' + history + '</ol></details>' +
+          (item.evidence ? '<p class="assignment-text"><strong>Result and proof</strong><br>' + esc(item.evidence) + '</p>' : '') +
+          '<details class="assignment-history"><summary>What happened</summary><ol>' + history + '</ol>' +
+          (item.lease_until ? '<p>Current work window ends at ' + esc(new Date(item.lease_until).toLocaleString()) + '</p>' : '') +
+          '<button type="button" class="btn btn-sec btn-sm" data-copy-assignment="' + esc(item.id) + '">Copy task ID</button>' +
+          '<input class="input mono" aria-label="Task ID" readonly hidden value="' + esc(item.id) + '"></details>' +
           '<details class="assignment-discussion" data-assignment-discussion="' + esc(item.id) + '"><summary>Discussion</summary>' +
           '<div class="hero-actions"><button type="button" class="btn btn-sec btn-sm" data-discussion-refresh>Refresh discussion</button>' +
           '<button type="button" class="btn btn-sec btn-sm" data-discussion-earlier hidden>Load earlier</button></div>' +
@@ -1909,24 +2131,39 @@
       const directory = (data.peers || []).map(function (peer) {
         const canEnroll = ["chatgpt", "cursor", "claude", "gemini", "nori"].includes(peer.id);
         const sessionControl = data.actor === "seth" && canEnroll && peer.d1_session_registered
-          ? '<button type="button" class="btn btn-sec btn-sm" data-session-revoke="' + esc(peer.id) + '">Revoke D1 session</button>'
+          ? '<button type="button" class="btn btn-sec btn-sm" data-session-revoke="' + esc(peer.id) + '">Remove setup key</button>'
           : data.actor === "seth" && data.enabled && canEnroll && !peer.configured
-            ? '<button type="button" class="btn btn-sec btn-sm" data-session-issue="' + esc(peer.id) + '">Issue session token</button>'
+            ? '<button type="button" class="btn btn-sec btn-sm" data-session-issue="' + esc(peer.id) + '">Get setup key</button>'
             : '';
-        const managedNote = data.actor === "seth" && peer.credential_source === "worker_secret"
-          ? '<small>' + (peer.d1_session_registered ? 'Worker secret active' : 'Managed by Worker secret') + '</small>' : '';
-        return '<li>' + esc(assignmentName(peer.id)) + ' · ' +
-          (peer.checked_in_at ? 'Checked in ' + esc(new Date(peer.checked_in_at).toLocaleString())
-            : peer.configured ? 'Configured · no check-in' : 'No session configured') +
+        const managedNote = data.actor === "seth" && peer.credential_source === "worker_secret" && peer.d1_session_registered
+          ? '<small>This teammate has a separate active key.</small>' : '';
+        const lastCheckIn = peer.checked_in_at && new Date(peer.checked_in_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+        return '<li><strong class="assignment-teammate-name">' + esc(assignmentName(peer.id)) + '</strong>' +
+          '<span class="assignment-teammate-status">' +
+          (lastCheckIn ? 'Last checked in ' + esc(lastCheckIn)
+            : peer.configured ? 'Set up · waiting for first check-in' : canEnroll ? 'Needs setup' : 'Inactive') + '</span>' +
           sessionControl + managedNote + '<div data-session-result></div></li>';
       }).join("");
       assignmentSheet("Assignments",
-        '<p class="sheet-sub">' + (data.enabled ? 'Agents pick up assigned work from their sessions.' : 'Assignment pickup is paused.') + '</p>' +
+        (data.enabled ? '' : '<p class="sheet-sub">Teammates can’t pick up new assignments while paused.</p>') +
         '<div class="hero-actions"><button type="button" class="btn btn-sec btn-sm" id="refresh-assignments">Refresh</button>' +
         (data.enabled ? '<button type="button" class="btn btn-pri btn-sm" id="new-assignment">New assignment</button>' : '') +
-        '</div><p id="assignment-status" role="status"></p>' + (rows || '<p>No assignments yet.</p>') +
-        (directory ? '<details class="assignment-row"><summary>Teammate sessions</summary>' +
-          '<p>Check-ins show when a session last reached The Stack.</p><ul>' + directory + '</ul></details>' : ''));
+        '</div><p id="assignment-status" role="status"></p>' +
+        (directory ? '<details class="assignment-row"><summary>Connect teammates</summary>' +
+          '<p>See who has checked in and set up a teammate who needs access.</p><ul class="assignment-teammates">' + directory + '</ul></details>' : '') +
+        (rows || '<p>No assignments yet.</p>'));
+      document.querySelectorAll("[data-copy-assignment]").forEach(function (button) {
+        button.addEventListener("click", async function () {
+          try {
+            await navigator.clipboard.writeText(button.dataset.copyAssignment);
+            toast("Task ID copied.");
+          } catch {
+            const input = button.nextElementSibling;
+            if (input) { input.hidden = false; input.focus(); input.select(); }
+          }
+        });
+      });
+      bindSessionActions(document.getElementById("sheet"));
       document.querySelectorAll("[data-assignment-source]").forEach(function (section) {
         section.addEventListener("toggle", async function () {
           const status = section.querySelector("[role=status]");
@@ -1966,17 +2203,17 @@
             });
             result.replaceChildren();
             const note = document.createElement("p");
-            note.textContent = "Shown once. Copy this token into " + assignmentName(peer) + "’s runtime secret store now. If it is lost, revoke and issue a replacement. Do not paste it into a chat or commit it.";
+            note.textContent = "Shown once. Copy this setup key into " + assignmentName(peer) + "’s secret store now. If it is lost, remove it and get a new one. Do not paste it into a chat or commit it.";
             const token = document.createElement("textarea");
             token.className = "input mono";
-            token.setAttribute("aria-label", assignmentName(peer) + " assignment access token");
+            token.setAttribute("aria-label", assignmentName(peer) + " setup key");
             token.readOnly = true;
             token.rows = 2;
             token.value = issued.token;
             const copy = document.createElement("button");
             copy.type = "button";
             copy.className = "btn btn-sec btn-sm";
-            copy.textContent = "Copy token";
+            copy.textContent = "Copy setup key";
             const status = document.createElement("span");
             status.setAttribute("role", "status");
             copy.addEventListener("click", async function () {
@@ -1986,12 +2223,12 @@
               } catch {
                 token.focus();
                 token.select();
-                status.textContent = "Clipboard unavailable. Copy the selected token into the agent runtime.";
+                status.textContent = "Clipboard unavailable. Copy the selected setup key into the agent runtime.";
               }
             });
             result.append(note, token, copy, status);
             button.disabled = true;
-            button.textContent = "Session issued · Refresh list";
+            button.textContent = "Setup key ready · Refresh list";
           } catch (error) {
             result.textContent = error.message;
             button.disabled = false;
@@ -2053,13 +2290,13 @@
     assignmentSheet("New assignment",
       '<form id="assignment-form">' +
       '<div class="field"><label for="assignment-title">Task</label><input class="input" id="assignment-title" name="title" required maxlength="160"></div>' +
-      '<div class="field"><label for="assignment-instructions">Instructions and expected result</label>' +
+      '<div class="field"><label for="assignment-instructions">What should they do, and what does done look like?</label>' +
       '<textarea class="input" id="assignment-instructions" name="instructions" rows="4" required maxlength="4000"></textarea></div>' +
-      '<div class="field"><label for="assignment-recipient">Assignee</label><select class="input" id="assignment-recipient" name="recipient" required>' + options + '</select></div>' +
-      '<div class="field"><label for="assignment-reviewer">Independent reviewer</label><select class="input" id="assignment-reviewer" name="reviewer" required>' + options + '</select></div>' +
-      '<details><summary>Schedule and dependency</summary>' +
-      '<div class="field"><label for="assignment-schedule">Available after (local time)</label><input class="input" type="datetime-local" id="assignment-schedule"></div>' +
-      (dependencyOptions ? '<div class="field"><label for="assignment-dependency">Wait for verified assignment</label><select class="input" id="assignment-dependency"><option value="">No dependency</option>' + dependencyOptions + '</select></div>' : '') +
+      '<div class="field"><label for="assignment-recipient">Who does the work?</label><select class="input" id="assignment-recipient" name="recipient" required>' + options + '</select></div>' +
+      '<div class="field"><label for="assignment-reviewer">Who checks the result?</label><select class="input" id="assignment-reviewer" name="reviewer" required>' + options + '</select></div>' +
+      '<details><summary>More options</summary>' +
+      '<div class="field"><label for="assignment-schedule">Start after this time</label><input class="input" type="datetime-local" id="assignment-schedule"></div>' +
+      (dependencyOptions ? '<div class="field"><label for="assignment-dependency">Wait for another task to be checked</label><select class="input" id="assignment-dependency"><option value="">No need to wait</option>' + dependencyOptions + '</select></div>' : '') +
       '</details>' +
       (source ? '<p class="sheet-sub">Linked to a message in #' + esc(source.channel) + '</p>' : '') +
       '<div class="hero-actions"><button type="submit" class="btn btn-pri">Save assignment</button></div><p id="assignment-error" role="status"></p></form>');
@@ -2070,7 +2307,7 @@
       status.textContent = "";
       const fields = Object.assign(Object.fromEntries(new FormData(form)), source);
       if (fields.recipient === fields.reviewer) {
-        status.textContent = "Choose a different reviewer from the assignee.";
+        status.textContent = "Choose someone else to check the result.";
         return;
       }
       const schedule = form.querySelector("#assignment-schedule").value;
@@ -2316,6 +2553,7 @@
     root.classList.toggle("view-agents", state.view === "agents");
     renderChrome();
     bindEvents();
+    bindSessionActions(root);
 
     const ov = document.getElementById("overlay");
     const sheetOpen = Boolean(ov && ov.classList.contains("open"));
@@ -3382,7 +3620,7 @@
     errEl.classList.add("hidden");
     let rawUrl = document.getElementById("bff-url").value.trim().replace(/\/api\/.*$/i, "").replace(/\/+$/, "");
     if (rawUrl && !/^https?:\/\//i.test(rawUrl)) rawUrl = "https://" + rawUrl;
-    creds.bff = rawUrl;
+    creds.bff = rawUrl || (window.STACK_BFF_URL || "").replace(/\/$/, "");
     creds.pin = document.getElementById("stack-pin").value.trim();
     saveCreds();
     try {
@@ -3394,14 +3632,14 @@
       render();
       startPoller();
       if (secretsMissing(health)) {
-        toast("Unlocked, but Worker has no GITHUB_PAT yet — vault stays offline until Secrets are set", "warning");
+        toast("You’re in. Messages and tasks are unavailable until The Stack is connected.", "warning");
       }
       await syncVault(false);
     } catch (err) {
       clearCreds();
-      const status = err && err.status ? "HTTP " + err.status + " · " : "";
-      const detail = (err && err.data && err.data.error) || (err && err.message) || "Network/CORS error";
-      errEl.textContent = "Could not unlock (" + status + detail + ") — URL: " + creds.bff;
+      errEl.textContent = err?.status === 401 ? "That PIN didn’t work. Check it and try again."
+        : err?.status === 503 ? "The Stack is temporarily unavailable. Try again in a moment."
+          : "The Stack couldn’t open. Check your connection and try again.";
       errEl.classList.remove("hidden");
     }
   });

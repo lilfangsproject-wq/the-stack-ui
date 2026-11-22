@@ -1,19 +1,19 @@
-/* The Stack v50.5.6 Voice — network-first shell cache for Cloudflare Pages / GitHub Pages.
+/* The Stack v50.5.7 ONE STACK — network-first shell cache for Cloudflare Pages / GitHub Pages.
  * Always fetches fresh UI when online so pushes appear immediately on iPhone PWAs.
  */
-const CACHE = "the-stack-shell-v50.5.6-voice";
+const CACHE = "the-stack-shell-v50.5.7-one-stack";
 const SHELL = [
   "./",
   "./index.html",
-  "./bg-tahoe.svg?v=50.5.6",
-  "./app.js?v=50.5.6",
-  "./explore.js?v=50.5.6",
-  "./polish.js?v=50.5.6",
-  "./config.js?v=50.5.6",
-  "./style.css?v=50.5.6",
-  "./favicon.svg?v=50.5.6",
-  "./manifest.webmanifest?v=50.5.6",
-  "./icon-180.png?v=50.5.6",
+  "./bg-tahoe.svg?v=50.5.7-one-stack",
+  "./app.js?v=50.5.7-one-stack",
+  "./explore.js?v=50.5.7-one-stack",
+  "./polish.js?v=50.5.7-one-stack",
+  "./config.js?v=50.5.7-one-stack",
+  "./style.css?v=50.5.7-one-stack",
+  "./favicon.svg?v=50.5.7-one-stack",
+  "./manifest.webmanifest?v=50.5.7-one-stack",
+  "./icon-180.png?v=50.5.7-one-stack",
   "./icon-192.png",
   "./icon-512.png"
 ];
