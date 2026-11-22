@@ -1,11 +1,11 @@
-/* The Stack v50.5.5 Voice — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
- * Hard rules: no always-on mic/Jarvis; opt-in TTS (/api/tts + $0 Web Speech fallback); PIN → x-stack-pin; Git is source of truth.
+/* The Stack v50.5.6 Voice — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
+ * Hard rules: no always-on mic/Jarvis; opt-in TTS (/api/tts Sarah + Workers AI Aura-2 + $0 Web Speech fallback); PIN → x-stack-pin; Git is source of truth.
  * No horizontal swipe. Colour only marks the explicit agent states. Connection pill is honest.
  */
 (function () {
   "use strict";
 
-  const VERSION = window.STACK_VERSION || "v50.5.5-voice";
+  const VERSION = window.STACK_VERSION || "v50.5.6-voice";
   const SURFACE_KEY = "stack-surface-v1";
   const OUTBOX_KEY = "stack-rebirth-outbox-v1";
   const DRAFT_KEY = "stack-composer-drafts-v1";
@@ -14,7 +14,7 @@
   const BFF_KEY = "stack-bff-url-v1";
   const ELEVEN_KEY_STORAGE = "stack-elevenlabs-key-v1";
   const ELEVEN_VOICE_STORAGE = "stack-elevenlabs-voice-v1";
-  const DEFAULT_VOICE_ID = "vppqTjjplEh4CplGZuN2";
+  const DEFAULT_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"; // Sarah (premade female, $0 Free tier)
   const VOICE_CONFIRM_KEY = "stack-voice-confirm-v1";
   const VOICE_CALL_STATES = {
     idle: "Idle",
@@ -44,8 +44,8 @@
     { id: "claude", name: "Claude", role: "Architecture", model: "Claude Opus 5.5 / Sonnet 5.5", reset: "4h window" },
     { id: "cursor", name: "Cursor", role: "Engineering", model: "Cursor Composer / Auto", reset: "Daily" },
     { id: "chatgpt", name: "ChatGPT", role: "Ideation & Verify", model: "GPT-5 Thinking", reset: "Daily" },
-    { id: "nori", name: "Nori", role: "Trends & Grok Bots", model: "Grok (latest)", reset: "Daily" },
-    { id: "grokbot", name: "Grokbot", role: "Challenger", model: "Grok 4", reset: "Daily" }
+    { id: "nori", name: "Nori", role: "Trends & Grok Bots", model: "Grok (latest)", reset: "Daily" }
+    // grokbot is a retired alias of Nori (Seth, 22 Nov 2026). Not a live teammate.
   ];
 
   const creds = {
@@ -722,6 +722,8 @@
 
   let activeAudio = null;
   let activeAudioUrl = "";
+  let activeBufferSource = null;
+  let voiceAudioCtx = null;
   let activeSpeechBtn = null;
   let speakingNow = false;
   let speechRequest = null;
@@ -737,7 +739,34 @@
     return typeof window !== "undefined" ? (window.SpeechRecognition || window.webkitSpeechRecognition || null) : null;
   }
 
+  function ensureVoiceAudioCtx() {
+    if (typeof window === "undefined") return null;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    if (!voiceAudioCtx) {
+      try { voiceAudioCtx = new Ctx(); } catch (e) { return null; }
+    }
+    return voiceAudioCtx;
+  }
+
   function primeVoiceAudio() {
+    // Must run synchronously inside tap/gesture so iOS Safari unlocks async fetch playback.
+    const ctx = ensureVoiceAudioCtx();
+    if (ctx) {
+      try {
+        if (ctx.state === "suspended" && typeof ctx.resume === "function") {
+          const resP = ctx.resume();
+          if (resP && typeof resP.catch === "function") resP.catch(function () {});
+        }
+        if (typeof ctx.createBuffer === "function" && typeof ctx.createBufferSource === "function") {
+          const buf = ctx.createBuffer(1, 1, 22050);
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.connect(ctx.destination);
+          src.start(0);
+        }
+      } catch (e) {}
+    }
     if (voiceAudioPrimed || typeof Audio === "undefined") return;
     voiceAudioPrimed = true;
     try {
@@ -1192,7 +1221,15 @@
     try { return localStorage.getItem(ELEVEN_KEY_STORAGE) || ""; } catch (e) { return ""; }
   }
   function getSavedVoiceId() {
-    try { return localStorage.getItem(ELEVEN_VOICE_STORAGE) || DEFAULT_VOICE_ID; } catch (e) { return DEFAULT_VOICE_ID; }
+    try {
+      const saved = localStorage.getItem(ELEVEN_VOICE_STORAGE) || "";
+      // Migrate legacy George / paywalled Shannon W defaults to Free-tier premade Sarah.
+      if (!saved || saved === "JBFqnCBsd6RMkjVDRZzb" || saved === "vppqTjjplEh4CplGZuN2") {
+        if (saved) localStorage.setItem(ELEVEN_VOICE_STORAGE, DEFAULT_VOICE_ID);
+        return DEFAULT_VOICE_ID;
+      }
+      return saved;
+    } catch (e) { return DEFAULT_VOICE_ID; }
   }
 
   function setSpeakingBtn(btn, isOn) {
@@ -1223,6 +1260,12 @@
   }
 
   function clearSpeechAudio() {
+    if (activeBufferSource) {
+      activeBufferSource.onended = null;
+      try { activeBufferSource.stop(); } catch (e) {}
+      try { activeBufferSource.disconnect(); } catch (e) {}
+      activeBufferSource = null;
+    }
     if (activeAudio) {
       activeAudio.onended = null;
       activeAudio.onerror = null;
@@ -1310,17 +1353,15 @@
     const elKey = typeof options.apiKey === "string" ? options.apiKey.trim() : getSavedElevenKey().trim();
     const voiceId = (typeof options.voiceId === "string" && options.voiceId.trim()) ? options.voiceId.trim() : getSavedVoiceId();
 
+    let fallbackReason = (typeof navigator !== "undefined" && navigator.onLine === false) ? "offline" : "";
     if (creds.bff && creds.pin && (typeof navigator === "undefined" || navigator.onLine !== false)) {
       let audio = null;
-      let attemptedServer = false;
       try {
         const headers = {
           "content-type": "application/json",
           "x-stack-pin": creds.pin
         };
-        // Prefer Worker secret ELEVENLABS_API_KEY. Browser key is fallback override when unconfigured.
-        if (elKey && !(serverTtsStatus && serverTtsStatus.configured)) headers["x-elevenlabs-key"] = elKey;
-        attemptedServer = true;
+        if (elKey && !(serverTtsStatus && serverTtsStatus.elevenlabs_configured)) headers["x-elevenlabs-key"] = elKey;
         const res = await fetch(creds.bff.replace(/\/$/, "") + "/api/tts", {
           method: "POST",
           headers: headers,
@@ -1333,8 +1374,44 @@
         });
         const ct = String(res.headers.get("content-type") || "").toLowerCase();
         if (res.ok && ct.indexOf("audio/") !== -1) {
-          const blob = await res.blob();
+          const arrayBuf = await res.arrayBuffer();
           if (speechRequest !== request) return;
+          const ctx = ensureVoiceAudioCtx();
+          if (ctx && typeof ctx.decodeAudioData === "function" && arrayBuf && arrayBuf.byteLength > 64) {
+            try {
+              if (ctx.state === "suspended" && typeof ctx.resume === "function") await ctx.resume();
+              const decoded = await ctx.decodeAudioData(arrayBuf.slice(0));
+              if (speechRequest !== request) return;
+              if (decoded && decoded.duration > 0.05) {
+                const src = ctx.createBufferSource();
+                src.buffer = decoded;
+                src.playbackRate.value = 0.9;
+                src.connect(ctx.destination);
+                activeBufferSource = src;
+                await new Promise(function (resolve) {
+                  speechDoneResolve = resolve;
+                  src.onended = function () {
+                    if (speechDoneResolve === resolve) speechDoneResolve = null;
+                    if (speechRequest === request) stopSpeaking();
+                    resolve();
+                  };
+                  try {
+                    src.start(0);
+                  } catch (playErr) {
+                    if (speechDoneResolve === resolve) speechDoneResolve = null;
+                    clearSpeechAudio();
+                    fallbackReason = (playErr && playErr.name) || "audio context start blocked";
+                    toast("Neural voice unavailable (" + fallbackReason + ") — using browser voice", "warning");
+                    fallbackWebSpeech(cleanText, request).then(resolve);
+                  }
+                });
+                return;
+              }
+            } catch (decodeErr) {
+              if (speechRequest !== request) return;
+            }
+          }
+          const blob = new Blob([arrayBuf], { type: ct || "audio/mpeg" });
           const url = URL.createObjectURL(blob);
           activeAudioUrl = url;
           audio = new Audio(url);
@@ -1352,30 +1429,33 @@
               if (speechDoneResolve === resolve) speechDoneResolve = null;
               if (speechRequest !== request) { resolve(); return; }
               clearSpeechAudio();
-              toast("Using browser voice. ElevenLabs playback was unavailable.", "warning");
+              toast("Neural voice unavailable (audio playback error) — using browser voice", "warning");
               fallbackWebSpeech(cleanText, request).then(resolve);
             };
             const playRes = activeAudio.play();
             if (playRes && typeof playRes.catch === "function") {
-              playRes.catch(function () {
+              playRes.catch(function (playErr) {
                 if (speechDoneResolve === resolve) speechDoneResolve = null;
                 if (speechRequest !== request) { resolve(); return; }
                 clearSpeechAudio();
+                toast("Neural voice unavailable (" + ((playErr && playErr.name) || "autoplay blocked") + ") — using browser voice", "warning");
                 fallbackWebSpeech(cleanText, request).then(resolve);
               });
             }
           });
           return;
         }
+        fallbackReason = "HTTP " + res.status;
       } catch (e) {
         if (speechRequest !== request) return;
         if (audio && activeAudio !== audio) return;
         clearSpeechAudio();
+        fallbackReason = (e && e.message) || "network error";
       }
       if (speechRequest !== request) return;
-      if (attemptedServer && (elKey || options.preferEleven === true)) {
-        toast("Using browser voice. ElevenLabs playback was unavailable.", "warning");
-      }
+      toast("Neural voice unavailable (" + (fallbackReason || "server error") + ") — using browser voice", "warning");
+    } else if (fallbackReason) {
+      toast("Neural voice unavailable (" + fallbackReason + ") — using browser voice", "warning");
     }
     if (speechRequest !== request) return;
     await fallbackWebSpeech(cleanText, request);
@@ -1963,7 +2043,7 @@
   }
 
   function openAssignmentForm(source, existing = []) {
-    const ids = ["chatgpt", "codex", "cursor", "claude", "gemini", "nori", "grokbot"];
+    const ids = ["chatgpt", "codex", "cursor", "claude", "gemini", "nori"];
     const options = '<option value="">Choose a teammate</option>' + ids.map(function (id) {
       return '<option value="' + id + '">' + esc(assignmentName(id)) + '</option>';
     }).join("");
@@ -2634,10 +2714,10 @@
           '<span>Review final transcript before sending (recommended)</span>' +
         '</label>' +
         '<div class="chip-strip">' +
-          '<button type="button" class="ctx-chip" data-voice-preset="vppqTjjplEh4CplGZuN2">Shannon W (Agent)</button>' +
-          '<button type="button" class="ctx-chip" data-voice-preset="EXAVITQu4vr4xnSDxMaL">Sarah ($0 Premade)</button>' +
-          '<button type="button" class="ctx-chip" data-voice-preset="21m00Tcm4TlvDq8ikWAM">Rachel ($0 Premade)</button>' +
-          '<button type="button" class="ctx-chip" data-voice-preset="JBFqnCBsd6RMkjVDRZzb">George</button>' +
+          '<button type="button" class="ctx-chip" data-voice-preset="EXAVITQu4vr4xnSDxMaL">Sarah (Primary $0)</button>' +
+          '<button type="button" class="ctx-chip" data-voice-preset="aura-2-thalia">Thalia (Neural $0)</button>' +
+          '<button type="button" class="ctx-chip" data-voice-preset="aura-2-luna">Luna (Neural $0)</button>' +
+          '<button type="button" class="ctx-chip" data-voice-preset="21m00Tcm4TlvDq8ikWAM">Rachel ($0)</button>' +
         "</div>" +
         (serverReady ? "" :
           '<details id="voice-browser-key-wrap" style="margin-top:10px;"><summary class="sheet-sub">Browser key fallback (server not configured)</summary>' +
@@ -2677,7 +2757,7 @@
           if (clr) clr.remove();
           if (statusEl) {
             const vid = data.default_voice_id || data.voiceId || DEFAULT_VOICE_ID;
-            statusEl.textContent = "Server ElevenLabs active · The Stack — Seth’s workspace voice (" + vid + ", $0 premade fallback ready · 0.9×).";
+            statusEl.textContent = "Server Neural Voice active · " + (data.mode || "server-elevenlabs-sarah") + " (" + vid + ", Workers AI Aura-2 fallback ready · 0.9×).";
           }
         } else if (statusEl) {
           statusEl.textContent = "Worker ElevenLabs not configured — using $0 Web Speech until ELEVENLABS_API_KEY is set on the Worker.";

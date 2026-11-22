@@ -5,7 +5,8 @@
 (function (root) {
   "use strict";
 
-  var AGENT_IDS = ["gemini", "chatgpt", "cursor", "claude", "grokbot", "nori"];
+  // grokbot remains here only so historical author/commit detection still matches; it is a retired alias of nori (Seth, 22 Nov 2026).
+  var AGENT_IDS = ["gemini", "chatgpt", "cursor", "claude", "nori", "grokbot"];
   var STATUSES = { working: 1, waiting: 1, blocked: 1, offline: 1, completed: 1 };
 
   var VIEWS = [
