@@ -52,11 +52,11 @@
   }
   </script>
   
-  <link rel="icon" href="favicon.svg?v=50.6.1-clarity-voice" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="icon-180.png?v=50.6.1-clarity-voice" />
-  <link rel="manifest" href="manifest.webmanifest?v=50.6.1-clarity-voice" />
-  <link rel="stylesheet" href="style.css?v=50.6.1-clarity-voice" />
-  <script src="config.js?v=50.6.1-clarity-voice"></script>
+  <link rel="icon" href="favicon.svg?v=50.6.2-clarity" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icon-180.png?v=50.6.2-clarity" />
+  <link rel="manifest" href="manifest.webmanifest?v=50.6.2-clarity" />
+  <link rel="stylesheet" href="style.css?v=50.6.2-clarity" />
+  <script src="config.js?v=50.6.2-clarity"></script>
   <script>
     (function () {
       try {
@@ -114,14 +114,14 @@
           <span id="sb-triage-badge" class="dot amber hidden"></span>
         </button>
         <button type="button" class="sb-item" data-view="agents">
-          <span class="sb-item-left"><svg viewBox="0 0 24 24"><path d="M5 17 3.5 20.5V7.5A2.5 2.5 0 0 1 6 5h12a2.5 2.5 0 0 1 2.5 2.5v7A2.5 2.5 0 0 1 18 17Z"/></svg>Agents</span>
+          <span class="sb-item-left"><svg viewBox="0 0 24 24"><path d="M5 17 3.5 20.5V7.5A2.5 2.5 0 0 1 6 5h12a2.5 2.5 0 0 1 2.5 2.5v7A2.5 2.5 0 0 1 18 17Z"/></svg>Team</span>
           <span id="sb-chat-badge" class="dot amber hidden"></span>
         </button>
         <button type="button" class="sb-item" data-view="work">
           <span class="sb-item-left"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M9 10h6M9 14h4"/></svg>Work</span>
         </button>
         <button type="button" class="sb-item" data-view="stats">
-          <span class="sb-item-left"><svg viewBox="0 0 24 24"><path d="M4 18 9 13l4 3 7-9"/></svg>Usage &amp; Git</span>
+          <span class="sb-item-left"><svg viewBox="0 0 24 24"><path d="M4 18 9 13l4 3 7-9"/></svg>Usage</span>
         </button>
         <button type="button" class="sb-item" data-view="ops" id="sb-ops-btn">
           <span class="sb-item-left"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Ops</span>
@@ -130,16 +130,15 @@
           <span class="sb-item-left"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><path d="m11 7-5 9m7-9 5 9M7 18h10"/></svg>Explore</span>
         </button>
       </nav>
-      <div class="sb-section">Agents · Live State</div>
+      <div class="sb-section">Teammates</div>
       <nav class="sb-nav" id="sb-agents-nav"></nav>
       <div class="sb-footer">
         <button type="button" id="sb-outbox-btn" class="sb-item">
-          <span class="sb-item-left"><span id="sb-outbox-dot" class="dot muted"></span><span id="sb-outbox-lbl">Outbox · 0</span></span>
-          <span class="mono">Git</span>
+          <span class="sb-item-left"><span id="sb-outbox-dot" class="dot muted"></span><span id="sb-outbox-lbl">Waiting · 0</span></span>
         </button>
           <button type="button" id="sb-refresh-btn" class="sb-item">
-          <span class="sb-item-left"><span class="dot muted"></span><span>Sync Vault</span></span>
-          <span class="mono">↻</span>
+          <span class="sb-item-left"><span class="dot muted"></span><span>Refresh</span></span>
+          <span>↻</span>
         </button>
       </div>
     </aside>
@@ -148,7 +147,7 @@
       <div id="pull-ind" class="pull-ind" aria-live="polite"></div>
       <header class="topbar">
         <div class="topbar-left">
-          <h1 id="page-heading" class="page-heading">Today</h1>
+          <h1 id="page-heading" class="page-heading">Home</h1>
           <button type="button" id="sync-pill" class="glass-pill-tag" title="Git head commit and sync status">
             <span id="sync-dot" class="dot muted" aria-hidden="true"></span>
             <span id="sync-text">Connecting…</span>
@@ -180,7 +179,7 @@
       </button>
       <button type="button" class="dock-btn" data-view="agents">
         <svg viewBox="0 0 24 24"><path d="M5 17 3.5 20.5V7.5A2.5 2.5 0 0 1 6 5h12a2.5 2.5 0 0 1 2.5 2.5v7A2.5 2.5 0 0 1 18 17Z"/></svg>
-        <span>Agents</span>
+        <span>Team</span>
         <span id="dk-chat-dot" class="dock-dot hidden"></span>
       </button>
       <button type="button" class="dock-btn" data-view="work">
@@ -204,8 +203,8 @@
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="polish.js?v=50.6.1-clarity-voice"></script>
-  <script src="explore.js?v=50.6.1-clarity-voice"></script>
-  <script src="app.js?v=50.6.1-clarity-voice"></script>
+  <script src="polish.js?v=50.6.2-clarity"></script>
+  <script src="explore.js?v=50.6.2-clarity"></script>
+  <script src="app.js?v=50.6.2-clarity"></script>
 </body>
 </html>

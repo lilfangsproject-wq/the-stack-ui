@@ -52,12 +52,12 @@
   };
 
   const DEFAULT_ROSTER = [
-    { id: "peer-floor", name: "#peer-floor", role: "Shared Floor", model: "Multi-Agent Room", reset: "Git-native" },
-    { id: "gemini", name: "Gemini", role: "Research & Workspace", model: "gemini-3.8-flash / 4-hydrogen", reset: "4h window" },
-    { id: "claude", name: "Claude", role: "Architecture", model: "Claude Opus 5.5 / Sonnet 5.5", reset: "4h window" },
-    { id: "cursor", name: "Cursor", role: "Engineering", model: "Cursor Composer / Auto", reset: "Daily" },
-    { id: "chatgpt", name: "ChatGPT", role: "Ideation & Verify", model: "GPT-5 Thinking", reset: "Daily" },
-    { id: "nori", name: "Nori", role: "Trends & Grok Bots", model: "Grok (latest)", reset: "Daily" }
+    { id: "peer-floor", name: "Team chat", role: "Everyone", model: "Shared room", reset: "Always on" },
+    { id: "gemini", name: "Gemini", role: "Research", model: "Gemini", reset: "Resets every ~4 hours" },
+    { id: "claude", name: "Claude", role: "Architecture", model: "Claude", reset: "Resets every ~4 hours" },
+    { id: "cursor", name: "Cursor", role: "Engineering", model: "Cursor", reset: "Resets daily" },
+    { id: "chatgpt", name: "ChatGPT", role: "Ideas & checks", model: "ChatGPT", reset: "Resets daily" },
+    { id: "nori", name: "Nori", role: "Trends", model: "Grok", reset: "Resets daily" }
     // grokbot is a retired alias of Nori (Seth, 22 Nov 2026). Not a live teammate.
   ];
 
@@ -2365,8 +2365,13 @@
     const slug = dmSlugForAgent(agent.id);
     const msgs = state.messagesBySlug[slug] || [];
     const usageTone = agent.usagePct >= 85 ? "red" : agent.usagePct >= 70 ? "amber" : "";
-    const pctText = agent.hasLiveUsage ? agent.usagePct + "% used · Manual · " + relTime(agent.usageObservedAt) : "Quota unavailable";
+    const pctText = agent.hasLiveUsage
+      ? agent.usagePct + "% used · updated " + relTime(agent.usageObservedAt)
+      : "Usage not recorded yet";
     const memEntries = state.sharedMemory.entries || [];
+    const plainActivity = agent.id === "peer-floor"
+      ? (agent.activitySummary || "Message everyone here")
+      : (agent.activitySummary || agent.lastSeen || "No recent chat");
 
     const switcher = state.agents.map(function (a) {
       const am = agentMeta(a.status);
@@ -2386,44 +2391,43 @@
       '<div class="agent-strip" style="margin-bottom:10px;">' + switcher + "</div>" +
       '<section class="hero chat-hero">' +
         '<div class="hero-top">' +
-          '<div style="min-width:0;"><span class="kicker">' + esc(agent.role) + " · " + esc(agent.model) + '</span><h2 class="hero-title">' + esc(agent.name) + "</h2></div>" +
+          '<div style="min-width:0;"><span class="kicker">' + esc(agent.role) + '</span><h2 class="hero-title">' + esc(agent.name) + "</h2></div>" +
           '<div class="hero-top-actions">' +
             '<span class="badge ' + st.tone + '"><span class="dot ' + st.tone + '"></span>' + esc(st.label) + "</span>" +
-            '<button type="button" class="btn btn-sec btn-sm" id="btn-agent-memory" aria-label="Memory (' + memEntries.length + ')" title="Memory (' + memEntries.length + ')">🧠 <span class="hide-xs">Memory </span>(' + memEntries.length + ")</button>" +
-            '<button type="button" class="btn btn-sec btn-sm voice-btn" id="btn-voice-agent" data-voice-slug="' + esc(slug) + '" aria-label="Read latest reply" title="Read latest reply">🔊<span class="hide-xs"> Read Reply</span></button>' +
-            '<button type="button" class="btn btn-pri btn-sm" id="btn-start-voice" aria-pressed="' + (voiceCall && voiceCall.alive && voiceCall.slug === slug ? "true" : "false") + '" title="Start opt-in live voice call">' + (voiceCall && voiceCall.alive && voiceCall.slug === slug ? "Stop Voice" : "Start Voice") + "</button>" +
+            '<button type="button" class="btn btn-sec btn-sm" id="btn-agent-memory" aria-label="Notes (' + memEntries.length + ')" title="Shared notes">Notes (' + memEntries.length + ")</button>" +
+            '<button type="button" class="btn btn-sec btn-sm voice-btn" id="btn-voice-agent" data-voice-slug="' + esc(slug) + '" aria-label="Read latest reply" title="Read latest reply">Read reply</button>' +
+            '<button type="button" class="btn btn-pri btn-sm" id="btn-start-voice" aria-pressed="' + (voiceCall && voiceCall.alive && voiceCall.slug === slug ? "true" : "false") + '" title="Start opt-in live voice call">' + (voiceCall && voiceCall.alive && voiceCall.slug === slug ? "Stop voice" : "Start voice") + "</button>" +
             '<button type="button" class="btn btn-sec btn-sm kb-done-btn" id="btn-chat-kb-done" aria-label="Hide keyboard">Done</button>' +
           "</div>" +
         "</div>" +
         '<div class="chat-subbar">' +
           '<div class="chat-subbar-top">' +
             (agent.id !== "peer-floor"
-              ? '<span><strong>' + esc(pctText) + "</strong> · " + esc(agent.reset) + " · " + esc(agent.activitySummary) + "</span>" +
-                '<span class="mono">' + esc(agent.lastSeen || agent.evidence) + "</span>"
-              : '<span>Shared room for all teammates</span><span class="mono">' + esc(agent.activitySummary) + "</span>") +
+              ? '<span><strong>' + esc(pctText) + "</strong> · " + esc(agent.reset) + "</span><span>" + esc(plainActivity) + "</span>"
+              : '<span>Everyone can see this room</span><span>' + esc(plainActivity) + "</span>") +
           "</div>" +
           (agent.id !== "peer-floor" ? '<div class="meter" style="margin-top:5px;height:4px;"><div class="meter-fill ' + usageTone + '" style="width:' + agent.usagePct + '%"></div></div>' : "") +
         "</div>" +
         (agent.id !== "peer-floor" && agent.session ? sessionCardHtml(agent.session) : "") +
         '<div class="chat-log-wrap">' +
-          '<div id="chat-log" class="chat-log">' + (msgHtml || '<div class="empty">No messages yet — type or tap 🎙 below to talk to your team.</div>') + "</div>" +
+          '<div id="chat-log" class="chat-log">' + (msgHtml || '<div class="empty">No messages yet — type below or use the mic.</div>') + "</div>" +
           '<button type="button" id="chat-jump-bottom" class="chat-jump-pill hidden">↓ Latest</button>' +
         "</div>" +
         '<div class="chip-strip">' +
           (agent.id === "peer-floor" ? '<button type="button" class="ctx-chip" data-cloud-prompt>Copy team prompt</button>' : "") +
-          (agent.id === "peer-floor" ? '<button type="button" class="ctx-chip" data-insert="@all">@all</button>' + state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
-            return '<button type="button" class="ctx-chip" data-insert="@' + esc(a.name) + '">@' + esc(a.name) + "</button>";
+          (agent.id === "peer-floor" ? '<button type="button" class="ctx-chip" data-insert="@all ">Everyone</button>' + state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
+            return '<button type="button" class="ctx-chip" data-insert="@' + esc(a.name) + ' ">' + esc(a.name) + "</button>";
           }).join("") : "") +
-          '<button type="button" class="ctx-chip" data-insert="Give me a plain-English update: what works right now, what is broken, and what you need from me.">Plain status update</button>' +
-          '<button type="button" class="ctx-chip" data-insert="Please test the latest fix end-to-end on phone and confirm everything actually works.">Test on phone</button>' +
+          '<button type="button" class="ctx-chip" data-insert="Give me a plain-English update: what works right now, what is broken, and what you need from me.">Ask for status</button>' +
+          '<button type="button" class="ctx-chip" data-insert="Please test the latest fix end-to-end on phone and confirm everything actually works.">Ask phone test</button>' +
         "</div>" +
         voiceCallBarHtml(slug) +
         '<div class="composer-wrap">' +
           '<div id="agent-mention-pop" class="mention-pop hidden" role="listbox" aria-label="Mention suggestions"></div>' +
           '<form id="agent-chat-form" class="composer">' +
-            '<input id="agent-chat-input" data-draft-channel="' + esc(slug) + '" data-slug="' + esc(slug) + '" class="input" placeholder="' + (agent.id === "peer-floor" ? "Message #peer-floor… type @ to mention" : "Message " + esc(agent.name) + "…") + '" autocomplete="off" enterkeyhint="send" required />' +
+            '<input id="agent-chat-input" data-draft-channel="' + esc(slug) + '" data-slug="' + esc(slug) + '" class="input" placeholder="' + (agent.id === "peer-floor" ? "Message the whole team…" : "Message " + esc(agent.name) + "…") + '" autocomplete="off" enterkeyhint="send" required />' +
             dictationButton("agent-chat-input") +
-            '<button type="submit" class="btn btn-pri btn-sm">' + (agent.id === "peer-floor" ? "Send" : "Ping") + "</button>" +
+            '<button type="submit" class="btn btn-pri btn-sm">Send</button>' +
           "</form>" +
         "</div>" +
       "</section>"
@@ -2826,24 +2830,24 @@
 
     const heroHtml = hero ? (
       '<section class="hero">' +
-        '<div class="hero-top"><span class="kicker">' + (hero.rawKind === "opportunity" ? "Featured Opportunity" : "Core Workstream") + '</span><span class="badge ' + st.tone + '"><span class="dot ' + st.tone + '"></span>' + esc(st.label) + "</span>" + (heroConflict.length ? '<span class="badge amber">Conflict</span>' : "") + "</div>" +
+        '<div class="hero-top"><span class="kicker">' + (hero.rawKind === "opportunity" ? "Opportunity" : "Main work") + '</span><span class="badge ' + st.tone + '"><span class="dot ' + st.tone + '"></span>' + esc(st.label) + "</span>" + (heroConflict.length ? '<span class="badge amber">Clash</span>' : "") + "</div>" +
         '<h2 class="hero-title">' + esc(hero.title) + "</h2>" +
-        '<p class="hero-copy">' + esc(hero.summary) + (heroConflict.length ? " Shared path touched by " + esc(heroConflict[0].agents.join(" and ")) + "." : "") + "</p>" +
-        '<div class="hero-meta"><span>Owner: <strong>' + esc(hero.owner) + "</strong></span>" + (hero.ref ? '<span class="git-chip">' + esc(hero.ref) + "</span>" : "") + "</div>" +
+        '<p class="hero-copy">' + esc(hero.summary) + (heroConflict.length ? " " + esc(heroConflict[0].agents.join(" and ")) + " both touched related files." : "") + "</p>" +
+        '<div class="hero-meta"><span>Owner <strong>' + esc(hero.owner) + "</strong></span></div>" +
         '<div class="hero-actions">' +
-          '<button type="button" class="btn btn-pri" data-inspect="' + esc(hero.id) + '">Open Details</button>' +
+          '<button type="button" class="btn btn-pri" data-inspect="' + esc(hero.id) + '">Open</button>' +
           '<button type="button" class="btn btn-sec" data-jump-agent="' + esc(hero.ownerId) + '">Chat ' + esc(hero.owner) + "</button>" +
-          '<button type="button" class="btn btn-sec" data-qc="' + esc(hero.id) + '">File QC</button>' +
+          '<button type="button" class="btn btn-sec" data-qc="' + esc(hero.id) + '">Mark checked</button>' +
         "</div>" +
       "</section>"
     ) : (
       '<section class="hero">' +
-        '<div class="hero-top"><span class="kicker">Work Board · ' + VERSION + '</span><span class="badge neutral">Empty Filter</span></div>' +
-        '<h2 class="hero-title">No items in this view</h2>' +
-        '<p class="hero-copy">Nothing matches the selected work filter right now. Switch back to Active workstreams or sync with Git.</p>' +
+        '<div class="hero-top"><span class="kicker">Work</span><span class="badge neutral">Empty</span></div>' +
+        '<h2 class="hero-title">Nothing in this view</h2>' +
+        '<p class="hero-copy">Try Active, or refresh to pull the latest from your workspace.</p>' +
         '<div class="hero-actions">' +
-          '<button type="button" class="btn btn-pri" data-work-filter="all">Show Active</button>' +
-          '<button type="button" class="btn btn-sec" id="btn-sync-now">Sync Now</button>' +
+          '<button type="button" class="btn btn-pri" data-work-filter="all">Show active</button>' +
+          '<button type="button" class="btn btn-sec" id="btn-sync-now">Refresh</button>' +
         "</div>" +
       "</section>"
     );
@@ -2854,7 +2858,7 @@
       return (
         '<button type="button" class="row" data-inspect="' + esc(i.id) + '">' +
           '<div class="row-main"><div class="row-title">' + esc(i.title) + ' <span class="dot ' + info.tone + '"></span></div><div class="row-sub">' + esc(i.owner) + (i.deadline ? " · Due " + esc(i.deadline) : "") + (hit.length ? " · " + esc(hit[0].agents.join(" · ")) : "") + "</div></div>" +
-          '<div class="row-right">' + (hit.length ? '<span class="badge amber">Conflict</span>' : "") + '<span>' + esc(info.label) + "</span><span>›</span></div>" +
+          '<div class="row-right">' + (hit.length ? '<span class="badge amber">Clash</span>' : "") + '<span>' + esc(info.label) + "</span><span>›</span></div>" +
         "</button>"
       );
     }).join("");
@@ -2862,12 +2866,12 @@
     return (
       (state.assignmentMode ? '<div class="section-head"><h2 class="section-title">Work</h2><button type="button" class="btn btn-sec btn-sm" data-open-assignments>Assignments</button></div>' : "") +
       '<div class="seg" role="tablist">' +
-        [{ id: "all", label: "Active" }, { id: "opportunities", label: "Opportunities" }, { id: "workstreams", label: "Core" }, { id: "hold", label: "Parked" }].map(function (t) {
+        [{ id: "all", label: "Active" }, { id: "opportunities", label: "Ideas" }, { id: "workstreams", label: "Core" }, { id: "hold", label: "Parked" }].map(function (t) {
           return '<button type="button" class="seg-btn ' + (state.workFilter === t.id ? "active" : "") + '" data-work-filter="' + t.id + '">' + t.label + "</button>";
         }).join("") +
       "</div>" +
       heroHtml +
-      '<div class="section-head"><span class="section-title">Connected Board</span></div>' +
+      '<div class="section-head"><span class="section-title">More work</span></div>' +
       '<div class="panel">' + (rows || '<div class="empty">No other items here.</div>') + "</div>"
     );
   }
@@ -2880,65 +2884,62 @@
     const usageRows = modelAgents.map(function (a) {
       const m = agentMeta(a.status);
       const tone = a.usagePct >= 85 ? "red" : a.usagePct >= 70 ? "amber" : "";
-      const pctLabel = a.hasLiveUsage ? a.usagePct + "% · Manual · " + relTime(a.usageObservedAt) : "Quota unavailable";
+      const pctLabel = a.hasLiveUsage ? a.usagePct + "% · " + relTime(a.usageObservedAt) : "Not recorded";
       const lastCallTxt = a.lastCallAt ? (" · last " + relTime(a.lastCallAt)) : "";
       return (
         '<div class="usage-row">' +
           '<div class="usage-row-top">' +
             '<div class="usage-row-main">' +
-              '<div class="row-title"><span class="dot ' + m.tone + '"></span>' + esc(a.name) + ' <span class="mono">· ' + esc(a.model) + "</span></div>" +
-              '<div class="row-sub">' + esc(m.label) + " · " + esc(a.reset) + esc(lastCallTxt) + " · " + esc(a.activitySummary) + "</div>" +
+              '<div class="row-title"><span class="dot ' + m.tone + '"></span>' + esc(a.name) + "</div>" +
+              '<div class="row-sub">' + esc(m.label) + " · " + esc(a.reset) + esc(lastCallTxt) + " · " + esc(a.activitySummary || "") + "</div>" +
             "</div>" +
             '<div class="usage-row-actions">' +
-              '<strong class="mono">' + esc(pctLabel) + "</strong>" +
-              '<button type="button" class="btn btn-sec btn-sm" data-edit-usage="' + esc(a.id) + '">Calibrate</button>' +
-              '<button type="button" class="btn btn-sec btn-sm" data-jump-agent="' + esc(a.id) + '">DM ›</button>' +
+              '<strong>' + esc(pctLabel) + "</strong>" +
+              '<button type="button" class="btn btn-sec btn-sm" data-edit-usage="' + esc(a.id) + '">Update</button>' +
+              '<button type="button" class="btn btn-sec btn-sm" data-jump-agent="' + esc(a.id) + '">Chat</button>' +
             "</div>" +
           "</div>" +
           '<div class="meter" style="margin-top:0;"><div class="meter-fill ' + tone + '" style="width:' + (a.hasLiveUsage ? a.usagePct : 0) + '%"></div></div>' +
-          '<div class="usage-row-meta">' +
-            '<span class="git-chip">' + esc(a.evidence) + "</span>" +
-            (a.usageNote ? '<span class="row-sub" style="margin-top:0;">' + esc(a.usageNote) + "</span>" : "") +
-          "</div>" +
+          (a.usageNote ? '<div class="usage-row-meta"><span class="row-sub" style="margin-top:0;">' + esc(a.usageNote) + "</span></div>" : "") +
         "</div>"
       );
     }).join("");
 
     const healthLine = state.health
-      ? ('Health: <strong>' + esc(state.health.status || "—") + "</strong> · open approvals " + esc(String(state.health.open_approvals || 0)) + " · cap $" + esc(String(state.health.zero_spend_cap_usd ?? ZERO_SPEND)))
-      : "Health not loaded";
+      ? ("Status <strong>" + esc(state.health.status || "—") + "</strong> · spend cap $" + esc(String(state.health.zero_spend_cap_usd ?? ZERO_SPEND)))
+      : "Status not loaded yet";
     const shaTone = state.link === "live" ? "green" : state.link === "polling" ? "amber" : "neutral";
     const autoBadgeTone = state.online ? "green" : "neutral";
     const usageStatus = state.usageAutoSynced
-      ? ("Auto-synced" + (state.usageSyncedAt ? " · " + relTime(state.usageSyncedAt) : ""))
-      : (anyLiveUsage ? "Manual quota readings" : (state.online ? "Live Git & floor activity" : "Offline — tap Sync Now"));
+      ? ("Updated" + (state.usageSyncedAt ? " · " + relTime(state.usageSyncedAt) : ""))
+      : (anyLiveUsage ? "Manual readings" : (state.online ? "Live activity" : "Offline — tap Refresh"));
 
     return (
       '<section class="hero">' +
         '<div class="hero-top">' +
-          '<span class="kicker">System &amp; Quota Pulse · ' + esc(VERSION) + "</span>" +
+          '<span class="kicker">Usage</span>' +
           '<div class="hero-top-actions">' +
-            '<span class="badge ' + autoBadgeTone + '">' + (state.online ? '<span class="dot green"></span>' : "") + "Auto-Sync · 20s</span>" +
-            '<span class="badge ' + shaTone + '"><span class="dot ' + (shaTone === "neutral" ? "muted" : shaTone) + '"></span>' + esc(state.headCommit) + "</span>" +
+            '<span class="badge ' + autoBadgeTone + '">' + (state.online ? '<span class="dot green"></span>' : "") + (state.online ? "Connected" : "Offline") + "</span>" +
+            '<span class="badge ' + shaTone + '"><span class="dot ' + (shaTone === "neutral" ? "muted" : shaTone) + '"></span>' + (state.link === "live" ? "Synced" : "Waiting") + "</span>" +
           "</div>" +
         "</div>" +
-        '<h2 class="hero-title">Workforce &amp; BFF Pulse</h2>' +
-        '<p class="hero-copy">' + modelAgents.filter(function (a) { return a.hasLiveUsage; }).length + " of " + modelAgents.length + " manual quota readings available · " + totalEvents + " recorded activity events (24h)" + '<br/><span class="mono">' + esc(creds.bff) + "</span> · Last sync " + relTime(state.lastSyncIso) + " · " + state.outbox.length + " pending · Queue OFF · $" + ZERO_SPEND + " cap<br/>" + healthLine + "</p>" +
+        '<h2 class="hero-title">How much each teammate has used</h2>' +
+        '<p class="hero-copy">' + modelAgents.filter(function (a) { return a.hasLiveUsage; }).length + " of " + modelAgents.length + " have a usage reading · " + totalEvents + " activity signals today<br/>Updated " + relTime(state.lastSyncIso) + (state.outbox.length ? " · " + state.outbox.length + " waiting to send" : "") + " · Auto-dispatch off · $" + ZERO_SPEND + " spend<br/>" + healthLine + "</p>" +
         '<div class="hero-actions">' +
-          '<button type="button" class="btn btn-pri btn-sm" id="btn-sync-now">Sync Now</button>' +
-          '<button type="button" class="btn btn-sec btn-sm" id="btn-timemachine">Time Machine</button>' +
-          '<button type="button" class="btn btn-sec btn-sm" id="btn-voice-settings">Voice Settings</button>' +
-          (state.outbox.length ? '<button type="button" class="btn btn-sec btn-sm" id="btn-flush-ob">Flush Outbox (' + state.outbox.length + ")</button>" : "") +
+          '<button type="button" class="btn btn-pri btn-sm" id="btn-sync-now">Refresh</button>' +
+          '<button type="button" class="btn btn-sec btn-sm" id="btn-timemachine">Recent changes</button>' +
+          '<button type="button" class="btn btn-sec btn-sm" id="btn-voice-settings">Voice</button>' +
+          (state.outbox.length ? '<button type="button" class="btn btn-sec btn-sm" id="btn-flush-ob">Send waiting (' + state.outbox.length + ")</button>" : "") +
           '<button type="button" class="btn btn-danger btn-sm" id="btn-sign-out">Lock</button>' +
         "</div>" +
       "</section>" +
-      '<div class="section-head"><span class="section-title">Live All-Agent Usage Tracker</span><span class="mono">' + esc(usageStatus) + "</span></div>" +
+      '<div class="section-head"><span class="section-title">Teammate usage</span><span>' + esc(usageStatus) + "</span></div>" +
       '<div class="panel">' + usageRows + "</div>"
     );
   }
 
   function renderChrome() {
-    const titles = { today: "Today", agents: "Agents", work: "Work", stats: "Usage & Git", explore: "Explore", ops: "Ops" };
+    const titles = { today: "Today", agents: "Team", work: "Work", stats: "Usage", explore: "Explore", ops: "Ops" };
     document.getElementById("page-heading").textContent = titles[state.view] || "The Stack";
     if (state.view === "ops") {
       // Full Control Room runtime lives at /ops/ — take the whole app, don't soft-embed a stub.
@@ -2983,7 +2984,7 @@
 
     const obLbl = document.getElementById("sb-outbox-lbl");
     const obDot = document.getElementById("sb-outbox-dot");
-    if (obLbl) obLbl.textContent = "Outbox · " + state.outbox.length;
+    if (obLbl) obLbl.textContent = "Waiting · " + state.outbox.length;
     if (obDot) obDot.className = "dot " + (state.outbox.length ? "amber" : "muted");
 
     const sbAgents = document.getElementById("sb-agents-nav");
@@ -3098,11 +3099,11 @@
 
   function openQuickInbox() {
     openSheet(
-      '<div class="sheet-head"><div><h2 class="sheet-title">Quick-Action Inbox</h2><p class="sheet-sub">Type or use iPhone keyboard dictation — commits to #peer-floor</p></div><button type="button" class="orb-btn" style="width:32px;height:32px;" data-close-sheet>✕</button></div>' +
+      '<div class="sheet-head"><div><h2 class="sheet-title">Quick capture</h2><p class="sheet-sub">Type or dictate — saves to team chat</p></div><button type="button" class="orb-btn" style="width:32px;height:32px;" data-close-sheet>✕</button></div>' +
       '<form id="quick-form">' +
         '<div class="field"><label for="quick-body">Idea / instruction</label>' +
         '<textarea id="quick-body" class="input" rows="5" placeholder="Dictate with the iPhone keyboard mic, then tap Capture…" required></textarea></div>' +
-        '<div class="hero-actions"><button type="submit" class="btn btn-pri" style="width:100%;">Capture to #peer-floor</button></div>' +
+        '<div class="hero-actions"><button type="submit" class="btn btn-pri" style="width:100%;">Save to team chat</button></div>' +
       "</form>"
     );
     document.getElementById("quick-form").addEventListener("submit", async function (e) {

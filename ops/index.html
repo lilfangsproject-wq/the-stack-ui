@@ -39,17 +39,17 @@
       <div class="brand">
         <a href="../" id="back-to-stack" class="logo-mark" aria-label="Back to The Stack" title="Back to The Stack"></a>
         <div class="brand-text">
-          <strong>Stack Ops</strong>
-          <span>/ CONTROL ROOM <em id="version-tag">V1</em></span>
+          <strong>Ops</strong>
+          <span>/ control room <em id="version-tag">V1</em></span>
         </div>
       </div>
       <nav class="pill-nav" aria-label="Primary">
-        <button type="button" class="pill active" data-view="overview">OVERVIEW</button>
-        <button type="button" class="pill" data-view="agents">AGENTS</button>
-        <button type="button" class="pill" data-view="tasks">TASKS <span class="pill-count" id="tasks-count"></span></button>
-        <button type="button" class="pill" data-view="schedule">SCHEDULE</button>
-        <button type="button" class="pill" data-view="content">CONTENT</button>
-        <button type="button" class="pill" data-view="message">MESSAGE</button>
+        <button type="button" class="pill active" data-view="overview">Home</button>
+        <button type="button" class="pill" data-view="agents">Team</button>
+        <button type="button" class="pill" data-view="tasks">Tasks <span class="pill-count" id="tasks-count"></span></button>
+        <button type="button" class="pill" data-view="schedule">Schedule</button>
+        <button type="button" class="pill" data-view="content">Docs</button>
+        <button type="button" class="pill" data-view="message">Message</button>
       </nav>
       <div class="top-right">
         <span class="link-chip" id="link-chip">Checking</span>
@@ -64,11 +64,11 @@
       <div id="status-banner" class="status-banner" role="status" hidden></div>
       <section class="panel" id="view-overview" data-panel="overview">
         <div class="overview-hero glass">
-          <div class="uplink"><span class="sys-dot"></span><span id="uplink-label">UPLINK —</span></div>
+          <div class="uplink"><span class="sys-dot"></span><span id="uplink-label">Status —</span></div>
           <div class="directive">
-            <p class="kicker">Current directive</p>
-            <h2 id="directive-title">No open handover</h2>
-            <p class="lede" id="directive-body">Vault inbox is quiet.</p>
+            <p class="kicker">Needs attention</p>
+            <h2 id="directive-title">No open handovers</h2>
+            <p class="lede" id="directive-body">Nothing waiting in team inboxes.</p>
             <div class="directive-actions" id="directive-actions"></div>
           </div>
           <div class="vault-health">
@@ -95,8 +95,8 @@
       <section class="panel hidden" id="view-agents" data-panel="agents">
         <div class="section-head">
           <div>
-            <p class="kicker accent">SUBAGENTS</p>
-            <h2>The collective.</h2>
+            <p class="kicker accent">TEAM</p>
+            <h2>Your teammates.</h2>
           </div>
           <div class="count-pills" id="count-pills"></div>
         </div>
@@ -104,8 +104,8 @@
         <div id="agent-grid" class="agent-grid"></div>
         <div class="section-head tight">
           <div>
-            <p class="kicker accent">AGENT STATISTICS</p>
-            <h2>Vault pulse.</h2>
+            <p class="kicker accent">ACTIVITY</p>
+            <h2>Recent pulse.</h2>
           </div>
           <p class="hint" id="stats-hint">Memory events + inbox evidence</p>
         </div>
@@ -125,10 +125,10 @@
       <section class="panel hidden" id="view-tasks" data-panel="tasks">
         <div class="section-head">
           <div>
-            <p class="kicker accent">TASK BOARD</p>
-            <h2>Operator board.</h2>
+            <p class="kicker accent">TASKS</p>
+            <h2>Open handovers.</h2>
           </div>
-          <p class="hint" id="tasks-hint">From Dispatch/Inbox</p>
+          <p class="hint" id="tasks-hint">From team inboxes</p>
         </div>
         <div class="kanban" id="kanban"></div>
       </section>
@@ -199,7 +199,7 @@
       <span id="mode-chip">mode —</span>
       <span id="mem-chip">memory —</span>
       <span id="generated-at">—</span>
-      <span>Vault SoT · queue disabled · Mission Control shell</span>
+      <span>Live vault · auto-dispatch off</span>
     </footer>
   </div>
 
