@@ -2489,8 +2489,13 @@
   }
 
   function renderChrome() {
-    const titles = { today: "Today", agents: "Agents", work: "Work", stats: "Usage & Git", explore: "Explore" };
+    const titles = { today: "Today", agents: "Agents", work: "Work", stats: "Usage & Git", explore: "Explore", ops: "Ops" };
     document.getElementById("page-heading").textContent = titles[state.view] || "The Stack";
+    if (state.view === "ops") {
+      // Full Control Room runtime lives at /ops/ — take the whole app, don't soft-embed a stub.
+      window.location.assign(new URL("ops/", window.location.href).href);
+      return;
+    }
     document.querySelectorAll("[data-view]").forEach(function (el) { el.classList.toggle("active", el.dataset.view === state.view); });
 
     const unreadNotifs = state.notifications.filter(function (n) { return n.unread; }).length;
@@ -3143,6 +3148,7 @@
     else if (row.action === "view:work") { state.view = "work"; render(); }
     else if (row.action === "view:stats") { state.view = "stats"; render(); }
     else if (row.action === "view:explore") { state.view = "explore"; render(); }
+    else if (row.action === "view:ops") { state.view = "ops"; render(); }
     else if (row.action.indexOf("agent:") === 0) await jumpToAgent(row.action.slice(6));
     else if (row.action.indexOf("inspect:") === 0) openItemSheet(row.action.slice(8));
     else if (row.action === "new") openQuickInbox();

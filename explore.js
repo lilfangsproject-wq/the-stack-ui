@@ -14,7 +14,7 @@
     "project:The-Stack": "Your home base for talking to your AI team and keeping track of their work.",
     "project:Unchained-Studio": "Experimental local-only lab for comparing AI models. Useful patterns stay here; do not merge its host runtime into The Stack cloud app.",
     "project:ZeroSpendTradingLab": "A research project that tests trading ideas against past market data. Keep as a separate lab surface via Explore — never mix trading scripts into the Stack BFF.",
-    "project:AI-Ops-Control-Room": "Retired (closed 10 Nov). Inventory only — useful ideas live in The Stack Work/Agents/Assignments. Do not revive as a second app.",
+    "project:AI-Ops-Control-Room": "Ported into The Stack as Ops (/ops/). Full Control Room UI + vault snapshot via Stack BFF — not a link, the runtime itself.",
     "project:AgentHandoffs-iOS": "Archived after unique-capability check. Stack PWA covers channels, DMs and assignments; local Wi-Fi/accessory discovery stays experimental/out of scope."
   };
   const statusMeaning = {
