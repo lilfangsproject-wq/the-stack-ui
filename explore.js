@@ -4,11 +4,25 @@
 
   const categories = {
     project: "Projects", agent: "Agents", skill: "Skills", service: "Services",
-    model: "Models", pull: "Pull requests", code: "Code", documentation: "Documentation"
+    model: "AI models", pull: "Recent changes", code: "Code files", documentation: "Notes and guides"
   };
   const statuses = {
-    deployed: "Deployed", verified: "Verified", experimental: "Experimental",
-    unverified: "Unverified", parked: "Parked", indexed: "Indexed"
+    deployed: "Live", verified: "Checked", experimental: "In testing",
+    unverified: "Status unknown", parked: "On hold", indexed: "Listed"
+  };
+  const introductions = {
+    "project:The-Stack": "Your home base for talking to your AI team and keeping track of their work.",
+    "project:Unchained-Studio": "A test workspace for trying different AI models and comparing their answers. It runs on a computer set up for it.",
+    "project:ZeroSpendTradingLab": "A research project that tests trading ideas against past market data.",
+    "project:AI-Ops-Control-Room": "An earlier project for keeping track of AI work.",
+    "project:AgentHandoffs-iOS": "An iPhone app prototype for passing work between AI agents."
+  };
+  const statusMeaning = {
+    deployed: "A published version was confirmed.",
+    verified: "There is a record of a successful check.",
+    experimental: "Still being tried out. Some parts may need a local setup.",
+    unverified: "It’s listed in the workspace. We haven’t confirmed whether it’s running.",
+    parked: "Set aside for now."
   };
   const dependencies = new Set(["contains", "uses", "calls", "runs on", "reads from", "requires", "invokes", "served by", "implemented by"]);
   const home = "everything";
@@ -19,6 +33,9 @@
   const safeSha = (sha) => /^[a-f0-9]{7,40}$/i.test(sha || "");
   const date = (iso) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
   const displayName = (name) => name.replace(/[-_]/g, " ");
+  const visibleName = (node) => node.pr
+    ? node.pr.title.replace(/^(?:feat|fix|docs|chore|test|refactor|build|ci|perf|style)(?:\([^)]*\))?!?:\s*/i, "")
+    : node.label;
   const safePath = (path) => path.split("/").map(encodeURIComponent).join("/");
 
   function buildGraph(inventory) {
@@ -135,40 +152,66 @@
     const container = document.createElement("section");
     container.className = "explore";
     container.innerHTML = `
-      <header class="explore-head">
-        <div><h2>Everything</h2><p data-snapshot role="status">Loading inventory…</p></div>
-        <button type="button" class="btn btn-sec btn-sm" data-refresh>Refresh</button>
-      </header>
-      <div class="explore-filters">
-        <input class="input" type="search" aria-label="Search inventory" placeholder="Search names, paths or PR numbers">
-        <select class="select" aria-label="Filter by type"><option value="">All types</option>
-          ${Object.entries(categories).map(([key, value]) => `<option value="${key}">${value}</option>`).join("")}
-        </select>
-        <select class="select" aria-label="Filter by status"><option value="">All statuses</option>
-          ${Object.entries(statuses).map(([key, value]) => `<option value="${key}">${value}</option>`).join("")}
-        </select>
+      <div data-browse>
+        <header class="explore-head">
+          <div><h2>Everything in your workspace</h2><p>Find what you’re building, who’s helping, and what’s changed.</p></div>
+        </header>
+        <input class="input explore-search" type="search" aria-label="Search your workspace" placeholder="Search, e.g. Unchained Studio">
+        <nav class="explore-choices" aria-label="Browse your workspace">
+          <button type="button" class="btn btn-sec" data-kind="project" aria-pressed="true">Projects</button>
+          <button type="button" class="btn btn-sec" data-kind="agent" aria-pressed="false">AI team</button>
+          <button type="button" class="btn btn-sec" data-kind="pull" aria-pressed="false">Recent changes</button>
+        </nav>
+        <details class="explore-more">
+          <summary>More categories and filters</summary>
+          <div class="explore-filters">
+            <select class="select" aria-label="Category"><option value="">All categories</option>
+              ${Object.entries(categories).map(([key, value]) => `<option value="${key}">${key === "agent" ? "AI team" : value}</option>`).join("")}
+            </select>
+            <select class="select" aria-label="Status"><option value="">Any status</option>
+              ${Object.entries(statuses).map(([key, value]) => `<option value="${key}">${value}</option>`).join("")}
+            </select>
+          </div>
+        </details>
+        <section data-search-results aria-label="Workspace items" hidden></section>
+        <p data-load-status role="status">Loading your workspace…</p>
+        <details class="explore-more explore-snapshot">
+          <summary>About this list</summary>
+          <p data-snapshot></p>
+          <button type="button" class="btn btn-sec btn-sm" data-refresh>Reload list</button>
+        </details>
       </div>
-      <div data-search-results aria-label="Inventory results" hidden></div>
-      <div class="explore-workspace">
-        <div class="explore-map panel">
-          <div class="explore-map-bar">
-            <button type="button" class="btn btn-sec btn-sm" data-pick="everything">Overview</button>
-            <div role="group" aria-label="Map zoom">
-              <button type="button" class="btn btn-sec btn-sm" data-zoom="out" aria-label="Zoom out">−</button>
-              <button type="button" class="btn btn-sec btn-sm" data-zoom="reset" aria-label="Fit map">Fit</button>
-              <button type="button" class="btn btn-sec btn-sm" data-zoom="in" aria-label="Zoom in">+</button>
-            </div>
-          </div>
-          <div class="explore-viewport" aria-label="Relationship map">
-            <div class="explore-scene"><canvas aria-hidden="true"></canvas><div data-map-nodes></div></div>
-          </div>
-          <p class="explore-map-note" data-map-note>Open a component to see its connections.</p>
+      <div data-open-item hidden>
+        <div class="explore-item-tools">
+          <button type="button" class="btn btn-sec btn-sm" data-back>← Back to browse</button>
+          <button type="button" class="btn btn-sec btn-sm" data-toggle-map aria-expanded="false">Show connections map</button>
         </div>
-        <aside class="explore-inspector panel" aria-label="Selection details" data-detail></aside>
+        <div class="explore-workspace">
+          <aside class="explore-inspector panel" aria-label="Item details" data-detail></aside>
+          <div class="explore-map panel" hidden>
+            <div class="explore-map-bar">
+              <button type="button" class="btn btn-sec btn-sm" data-pick="everything">Overview</button>
+              <div role="group" aria-label="Map zoom">
+                <button type="button" class="btn btn-sec btn-sm" data-zoom="out" aria-label="Zoom out">−</button>
+                <button type="button" class="btn btn-sec btn-sm" data-zoom="reset" aria-label="Fit map">Fit</button>
+                <button type="button" class="btn btn-sec btn-sm" data-zoom="in" aria-label="Zoom in">+</button>
+              </div>
+            </div>
+            <div class="explore-viewport" aria-label="Relationship map">
+              <div class="explore-scene"><canvas aria-hidden="true"></canvas><div data-map-nodes></div></div>
+            </div>
+            <p class="explore-map-note" data-map-note>Choose an item to see what it connects to.</p>
+          </div>
+        </div>
       </div>`;
 
     const $ = (selector) => container.querySelector(selector);
     const snapshot = $("[data-snapshot]");
+    const loadStatus = $("[data-load-status]");
+    const browse = $("[data-browse]");
+    const openItem = $("[data-open-item]");
+    const map = $(".explore-map");
+    const mapToggle = $("[data-toggle-map]");
     const results = $("[data-search-results]");
     const inspector = $("[data-detail]");
     const viewport = $(".explore-viewport");
@@ -177,11 +220,13 @@
     const canvasNodes = $("[data-map-nodes]");
     let disposed = false;
     const search = $('input[type="search"]');
-    const type = $('select[aria-label="Filter by type"]');
-    const status = $('select[aria-label="Filter by status"]');
+    const type = $('select[aria-label="Category"]');
+    const status = $('select[aria-label="Status"]');
+    type.value = "project";
 
     let inventory, graph, selected = home, resultLimit = 15, fileLimit = 30;
     let mode = "details", connectionLimit = 24, activeDrag = null, zoom = 1, panX = 0, panY = 0;
+    let browseFocus = null;
 
     function el(tag, content, className) {
       const element = document.createElement(tag);
@@ -239,6 +284,7 @@
     }
 
     function renderMap() {
+      if (map.hidden) return;
       canvasNodes.replaceChildren();
       const width = viewport.clientWidth;
       const height = viewport.clientHeight;
@@ -312,9 +358,9 @@
           : "Select a node to follow its connections. Drag to pan.";
     }
 
-    function listRow(node, detail) {
+    function listRow(node, detail, label = node.label) {
       const item = el("li");
-      item.append(pick(node.id, node.label));
+      item.append(pick(node.id, label));
       if (detail) item.append(el("span", detail, "explore-muted"));
       return item;
     }
@@ -323,26 +369,52 @@
       results.replaceChildren();
       const query = search.value.trim().toLowerCase();
       const terms = query.split(/\s+/);
-      results.hidden = !graph || !(query || type.value || status.value);
+      for (const choice of container.querySelectorAll("[data-kind]")) {
+        choice.setAttribute("aria-pressed", String(choice.dataset.kind === type.value));
+      }
+      results.hidden = !graph;
       if (results.hidden) return;
       const matched = [...graph.nodes.values()].filter((node) => categories[node.kind] &&
         (!type.value || node.kind === type.value) && (!status.value || node.status === status.value) &&
-        terms.every((term) => [node.label, node.path, node.summary, node.pr?.state, statuses[node.status]].join(" ").toLowerCase().includes(term)));
+        terms.every((term) => [node.label, node.path, introductions[node.id], node.summary, node.pr?.state, statuses[node.status]].join(" ").toLowerCase().includes(term)));
       if (query) {
         const rank = (node) => node.label.toLowerCase() === query ? 0
           : node.label.toLowerCase().startsWith(query) ? 1 : node.label.toLowerCase().includes(query) ? 2 : 3;
         matched.sort((a, b) => rank(a) - rank(b));
+      } else if (type.value === "pull") {
+        matched.sort((a, b) => b.pr.updated.localeCompare(a.pr.updated));
+      } else if (type.value === "project") {
+        const rank = (node) => node.status === "deployed" ? 0 : node.status === "experimental" ? 1 : 2;
+        matched.sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label));
       }
-      const list = el("ul", null, "explore-list");
-      for (const node of matched.slice(0, resultLimit)) list.append(listRow(node,
-        (node.path || (node.pr?.state || categories[node.kind])) + (node.status !== "indexed" && node.status ? " · " + statuses[node.status] : "")));
-      results.append(el("p", matched.length === 1 ? "1 result" : `${matched.length} results`, "explore-muted"), list);
+      const title = query ? "Search results" : type.value === "agent" ? "AI team" : (categories[type.value] || "All items");
+      results.append(el("h3", title));
+      if (!matched.length) {
+        results.append(el("p", "Nothing matched. Try another word or clear your filters.", "explore-muted"));
+        return;
+      }
+      const list = el("ul", null, "explore-list explore-browse-list");
+      for (const node of matched.slice(0, resultLimit)) {
+        const item = el("li");
+        const button = pick(node.id, visibleName(node));
+        const caption = [node.pr ? "#" + node.pr.number + " · " + node.pr.state : statuses[node.status], introductions[node.id]].filter(Boolean).join(" · ");
+        if (caption) button.append(el("span", caption, "explore-muted"));
+        item.append(button);
+        list.append(item);
+      }
+      results.append(list);
       if (matched.length > resultLimit) {
         const more = el("button", "Show more results", "btn btn-sec btn-sm");
         more.type = "button";
         more.dataset.more = "";
         results.append(more);
       }
+    }
+
+    function disclosure(label) {
+      const details = el("details", null, "explore-more");
+      details.append(el("summary", label));
+      return details;
     }
 
     function details(node) {
@@ -353,26 +425,31 @@
         inspector.append(summary);
       }
       if (node.id !== home && node.kind !== "category") {
-        if (node.summary) inspector.append(el("p", node.summary));
+        const description = introductions[node.id] || node.summary;
+        if (description) inspector.append(el("p", description, "explore-description"));
+        if (statusMeaning[node.status]) inspector.append(el("p", statusMeaning[node.status]));
         if (node.pr) {
-          inspector.append(el("p", `${node.pr.state} · Updated ${date(node.pr.updated)}`));
-          if (safeSha(node.pr.head)) inspector.append(anchor(repo + "/commit/" + node.pr.head, "Head commit " + node.pr.head.slice(0, 10)));
-          if (safeSha(node.pr.merge)) inspector.append(anchor(repo + "/commit/" + node.pr.merge, "Merge commit " + node.pr.merge.slice(0, 10)));
+          inspector.append(el("p", `GitHub change #${node.pr.number} · Updated ${date(node.pr.updated)}`));
         }
         if (node.href || node.path || node.sources?.length) {
-          inspector.append(el("h4", "Provenance"));
-          if (node.href) inspector.append(anchor(node.href, node.pr ? "View pull request" : "View source"));
-          if (node.path) inspector.append(node.directory
+          const sources = disclosure("Sources and technical notes");
+          if (introductions[node.id] && node.summary) sources.append(el("p", node.summary));
+          if (node.pr && safeSha(node.pr.head)) sources.append(anchor(repo + "/commit/" + node.pr.head, "Head commit " + node.pr.head.slice(0, 10)));
+          if (node.pr && safeSha(node.pr.merge)) sources.append(anchor(repo + "/commit/" + node.pr.merge, "Merge commit " + node.pr.merge.slice(0, 10)));
+          if (node.href) sources.append(anchor(node.href, node.pr ? "Open change in GitHub" : "Open source"));
+          if (node.path) sources.append(node.directory
             ? anchor(repo + "/tree/" + inventory.revision + "/" + safePath(node.path), node.path)
             : sourceLink({ path: node.path }));
           for (const source of node.sources || []) {
             const link = sourceLink(source);
-            if (link) inspector.append(link);
+            if (link) sources.append(link);
           }
+          inspector.append(sources);
         }
       }
       if (!neighbors.length) return;
-      inspector.append(el("h4", node.kind === "category" ? "Inventory" : "Connections"));
+      const connections = disclosure("Related items");
+      connections.open = node.kind === "category" || node.id === home || connectionLimit > 24;
       for (const [id, edges] of neighbors.slice(0, connectionLimit)) {
         const other = graph.nodes.get(id);
         const detail = node.kind === "category" && other.path ? other.path : edges.map((edge) =>
@@ -384,10 +461,11 @@
         }
         list.append(item);
       }
-      inspector.append(list);
-      if (neighbors.length > connectionLimit) inspector.append(action(
+      connections.append(list);
+      if (neighbors.length > connectionLimit) connections.append(action(
         `Show more connections (${connectionLimit} of ${neighbors.length})`, "connections"
       ));
+      inspector.append(connections);
     }
 
     function getImpact(node) {
@@ -399,10 +477,24 @@
 
     function impact(node) {
       const { seeds, downstream } = getImpact(node);
+      inspector.append(el("h4", "Things that may be affected"));
+      if (downstream.length) {
+        inspector.append(el("p", "These items are linked to the change and may need a closer look."));
+        const list = el("ul", null, "explore-list");
+        for (const hit of downstream) {
+          const item = listRow(graph.nodes.get(hit.id), `Linked through ${visibleName(graph.nodes.get(hit.via))}`);
+          if (hit.edge.path) item.append(sourceLink({ path: hit.edge.path, label: "See the link in GitHub" }));
+          list.append(item);
+        }
+        inspector.append(list);
+      } else {
+        inspector.append(el("p", "This list has no recorded links to other affected items."));
+      }
       if (node.pr) {
         const outcome = node.pr;
-        inspector.append(el("h4", "Changed files from GitHub"));
-        inspector.append(anchor(node.href + "/files", "View original diff"));
+        const files = disclosure("Files that changed");
+        files.open = fileLimit > 30;
+        files.append(anchor(node.href + "/files", "See file changes in GitHub"));
         const list = el("ul", null, "explore-list");
         for (const change of outcome.files.slice(0, fileLimit)) {
           const matching = [change.path, change.previous].filter(Boolean).map(fileId).filter((id) => graph.nodes.has(id));
@@ -410,30 +502,17 @@
           if (matching.length) list.append(listRow({ id: matching[0], label }, change.change));
           else list.append(el("li", label + " · " + change.change));
         }
-        if (outcome.files.length) inspector.append(list);
-        else inspector.append(el("p", "No changed files are in the inventory’s path scope."));
-        if (outcome.files.length > fileLimit) inspector.append(action(
+        if (outcome.files.length) files.append(list);
+        else files.append(el("p", "This list has no files for this change."));
+        if (outcome.files.length > fileLimit) files.append(action(
           `Show more changed files (${fileLimit} of ${outcome.files.length})`, "files"
         ));
-        if (!outcome.complete || outcome.outsideInventory) inspector.append(el("p",
+        if (!outcome.complete || outcome.outsideInventory) files.append(el("p",
           (!outcome.complete ? "GitHub’s changed-file listing reached the page limit. " : "") +
           (outcome.outsideInventory ? `${outcome.outsideInventory} file changes fall outside the inventory’s path scope.` : ""), "explore-muted"));
-        if (outcome.files.length && !seeds.length) inspector.append(el("p", "The changed paths fall outside this inventory snapshot."));
+        if (outcome.files.length && !seeds.length) files.append(el("p", "The files changed here are outside the scope of this list."));
+        inspector.append(files);
       }
-
-      inspector.append(el("h4", "Potential impact"));
-      inspector.append(el("p", "Paths follow recorded dependencies back to their consumers. A connection identifies a review target.", "explore-muted"));
-      if (!downstream.length) {
-        inspector.append(el("p", "No downstream dependencies are recorded for this selection."));
-        return;
-      }
-      const list = el("ul", null, "explore-list");
-      for (const hit of downstream) {
-        const item = listRow(graph.nodes.get(hit.id), `${hit.depth} ${hit.depth === 1 ? "step" : "steps"} · ${hit.edge.relation} ${graph.nodes.get(hit.via).label}`);
-        if (hit.edge.path) item.append(sourceLink({ path: hit.edge.path, label: "Dependency evidence" }));
-        list.append(item);
-      }
-      inspector.append(list);
     }
 
     function action(label, name) {
@@ -447,14 +526,14 @@
       inspector.replaceChildren();
       if (!graph) return;
       const node = graph.nodes.get(selected);
-      const heading = el("h3", node.label);
+      const heading = el("h3", visibleName(node));
       heading.tabIndex = -1;
       inspector.append(heading);
       if (node.status) inspector.append(el("span", node.pr?.state || statuses[node.status], "explore-status status-" + node.status));
 
       if (node.id !== home && node.kind !== "category") {
         const tabs = el("div", null, "explore-detail-actions");
-        for (const [id, label] of [["details", "Details"], ["impact", "Trace impact"]]) {
+        for (const [id, label] of [["details", "About this"], ["impact", "What could this affect?"]]) {
           const button = action(label, id);
           button.setAttribute("aria-pressed", String(id === mode));
           tabs.append(button);
@@ -469,7 +548,7 @@
       if (!graph?.nodes.has(id)) return;
       selected = id;
       connectionLimit = 24;
-      mode = graph.nodes.get(id).kind === "pull" ? "impact" : "details";
+      mode = "details";
       fileLimit = 30;
       fit();
       renderMap();
@@ -480,7 +559,7 @@
     async function refresh() {
       const refreshButton = $("[data-refresh]");
       refreshButton.disabled = true;
-      snapshot.textContent = "Loading inventory…";
+      loadStatus.textContent = "Loading your workspace…";
       try {
         const next = await request("/api/explore/inventory");
         if (disposed) return;
@@ -490,8 +569,9 @@
         graph = nextGraph;
         select(graph.nodes.has(selected) ? selected : home, false);
         renderSearch();
-        snapshot.replaceChildren("Source ", anchor(repo + "/commit/" + inventory.revision, inventory.revision.slice(0, 10)),
-          ` · ${date(inventory.committedAt)} · ${inventory.pulls.length} GitHub pull requests checked ${date(inventory.pullCheckedAt)}`);
+        loadStatus.textContent = "";
+        snapshot.replaceChildren(`GitHub checked ${date(inventory.pullCheckedAt)} · ${inventory.pulls.length} saved changes · `,
+          anchor(repo + "/commit/" + inventory.revision, "Version of this list"));
       } catch (error) {
         if (disposed) return;
         if (error.status === 401) {
@@ -500,7 +580,10 @@
           renderMap();
         }
         if (!graph) inspector.replaceChildren(el("p", "Inventory could not be loaded. Use Refresh to try again."));
-        snapshot.textContent = graph ? "Refresh failed. Showing the previous inventory." : "Inventory unavailable";
+        const retry = el("button", "Try again", "btn btn-sec btn-sm");
+        retry.type = "button";
+        retry.dataset.refresh = "";
+        loadStatus.replaceChildren(graph ? "Couldn’t reload. Your last list is still here. " : "Couldn’t load your workspace. ", retry);
       } finally {
         refreshButton.disabled = false;
       }
@@ -509,9 +592,38 @@
     container.addEventListener("click", (event) => {
       const button = event.target.closest("button");
       if (!button) return;
+      if (button.dataset.kind) {
+        type.value = button.dataset.kind;
+        search.value = "";
+        status.value = "";
+        resultLimit = 15;
+        renderSearch();
+      }
+      if ("back" in button.dataset) {
+        openItem.hidden = true;
+        browse.hidden = false;
+        map.hidden = true;
+        mapToggle.setAttribute("aria-expanded", "false");
+        mapToggle.textContent = "Show connections map";
+        (browseFocus?.isConnected ? browseFocus : search).focus();
+      }
+      if ("toggleMap" in button.dataset) {
+        map.hidden = !map.hidden;
+        mapToggle.setAttribute("aria-expanded", String(!map.hidden));
+        mapToggle.textContent = map.hidden ? "Show connections map" : "Hide connections map";
+        if (!map.hidden) {
+          renderMap();
+          map.scrollIntoView({ block: "nearest" });
+        }
+      }
       if (button.dataset.pick) {
+        if (browse.contains(button)) {
+          browseFocus = button;
+          browse.hidden = true;
+          openItem.hidden = false;
+        }
         select(button.dataset.pick, true);
-        if (results.contains(button) && window.innerWidth < 860) inspector.scrollIntoView({ block: "start" });
+        if (browse.hidden) openItem.scrollIntoView({ block: "start" });
       }
       if ("refresh" in button.dataset) refresh();
       if ("more" in button.dataset) {
@@ -545,7 +657,12 @@
       }
     });
 
-    for (const filter of [search, type, status]) filter.addEventListener("input", () => { resultLimit = 15; renderSearch(); });
+    search.addEventListener("input", () => {
+      type.value = search.value.trim() ? "" : "project";
+      resultLimit = 15;
+      renderSearch();
+    });
+    for (const filter of [type, status]) filter.addEventListener("change", () => { resultLimit = 15; renderSearch(); });
     viewport.addEventListener("pointerdown", (event) => {
       if (!event.isPrimary || event.button !== 0 || event.target.closest("button")) return;
       activeDrag = { x: event.clientX - panX, y: event.clientY - panY };

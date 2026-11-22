@@ -1,16 +1,16 @@
 /* The Stack v50.5.5 Voice — network-first shell cache for Cloudflare Pages / GitHub Pages.
  * Always fetches fresh UI when online so pushes appear immediately on iPhone PWAs.
  */
-const CACHE = "the-stack-shell-v50.5.5-voice-explore";
+const CACHE = "the-stack-shell-v50.5.5-voice-explore-browse";
 const SHELL = [
   "./",
   "./index.html",
   "./bg-tahoe.svg?v=50.5.5",
   "./app.js?v=50.5.5-explore",
-  "./explore.js?v=50.5.5-explore",
+  "./explore.js?v=50.5.5-explore-browse",
   "./polish.js?v=50.5.5-explore",
   "./config.js?v=50.5.5",
-  "./style.css?v=50.5.5-explore",
+  "./style.css?v=50.5.5-explore-browse",
   "./favicon.svg?v=50.5.5",
   "./manifest.webmanifest?v=50.5.5",
   "./icon-180.png?v=50.5.5",
