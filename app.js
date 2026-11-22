@@ -2281,6 +2281,12 @@
   }
 
   function openAssignmentForm(source, existing = []) {
+    // Assign from a message: populate the job with that exact message, not a blank form.
+    const linkedMessage = source && source.channel && source.message_id
+      ? (state.messagesBySlug[source.channel] || []).find(function (m) { return String(m.id) === String(source.message_id); })
+      : null;
+    const linkedBody = linkedMessage ? String(linkedMessage.body || "").trim() : "";
+    const linkedTitle = linkedBody.split(/\r?\n/).find(function (line) { return line.trim(); }) || "";
     const ids = ["chatgpt", "codex", "cursor", "claude", "gemini", "nori"];
     const options = '<option value="">Choose a teammate</option>' + ids.map(function (id) {
       return '<option value="' + id + '">' + esc(assignmentName(id)) + '</option>';
@@ -2302,6 +2308,10 @@
       (source ? '<p class="sheet-sub">Linked to a message in #' + esc(source.channel) + '</p>' : '') +
       '<div class="hero-actions"><button type="submit" class="btn btn-pri">Save assignment</button></div><p id="assignment-error" role="status"></p></form>');
     const form = document.getElementById("assignment-form");
+    if (linkedMessage) {
+      form.querySelector("#assignment-title").value = linkedTitle.slice(0, 160);
+      form.querySelector("#assignment-instructions").value = linkedBody.slice(0, 4000);
+    }
     form.addEventListener("submit", async function (event) {
       event.preventDefault();
       const status = form.querySelector("#assignment-error");
