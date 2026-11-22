@@ -12,7 +12,8 @@
     { id: "today", title: "Today", keywords: "today view home brief" },
     { id: "agents", title: "Agents", keywords: "agents chats roster" },
     { id: "work", title: "Work", keywords: "work workstreams opportunities board" },
-    { id: "stats", title: "Usage & Git", keywords: "usage stats git models" }
+    { id: "stats", title: "Usage & Git", keywords: "usage stats git models" },
+    { id: "explore", title: "Explore Everything", keywords: "graph inventory dependencies impact" }
   ];
 
   var ACTIONS = [

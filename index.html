@@ -55,7 +55,7 @@
   <link rel="icon" href="favicon.svg?v=50.5.5" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icon-180.png?v=50.5.5" />
   <link rel="manifest" href="manifest.webmanifest?v=50.5.5" />
-  <link rel="stylesheet" href="style.css?v=50.5.5" />
+  <link rel="stylesheet" href="style.css?v=50.5.5-explore" />
   <script src="config.js?v=50.5.5"></script>
   <script>
     (function () {
@@ -120,6 +120,9 @@
         <button type="button" class="sb-item" data-view="stats">
           <span class="sb-item-left"><svg viewBox="0 0 24 24"><path d="M4 18 9 13l4 3 7-9"/></svg>Usage &amp; Git</span>
         </button>
+        <button type="button" class="sb-item" data-view="explore">
+          <span class="sb-item-left"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><path d="m11 7-5 9m7-9 5 9M7 18h10"/></svg>Explore</span>
+        </button>
       </nav>
       <div class="sb-section">Agents · Live State</div>
       <nav class="sb-nav" id="sb-agents-nav"></nav>
@@ -182,6 +185,10 @@
         <svg viewBox="0 0 24 24"><path d="M4 18 9 13l4 3 7-9"/></svg>
         <span>Usage</span>
       </button>
+      <button type="button" class="dock-btn" data-view="explore">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><path d="m11 7-5 9m7-9 5 9M7 18h10"/></svg>
+        <span>Explore</span>
+      </button>
     </nav>
     <button type="button" id="fab-new" class="dock-fab" aria-label="Quick-Action Inbox" title="Quick-Action Inbox">+</button>
   </div>
@@ -191,7 +198,8 @@
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="polish.js?v=50.5.5"></script>
-  <script src="app.js?v=50.5.5"></script>
+  <script src="polish.js?v=50.5.5-explore"></script>
+  <script src="explore.js?v=50.5.5-explore"></script>
+  <script src="app.js?v=50.5.5-explore"></script>
 </body>
 </html>

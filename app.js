@@ -223,6 +223,7 @@
     } catch (e) {}
   }
   function clearCreds() {
+    window.StackExplore?.reset();
     creds.pin = "";
     composerDrafts = { bff: "", channels: {} };
     try {
@@ -2139,7 +2140,7 @@
   }
 
   function renderChrome() {
-    const titles = { today: "Today", agents: "Agents", work: "Work", stats: "Usage & Git" };
+    const titles = { today: "Today", agents: "Agents", work: "Work", stats: "Usage & Git", explore: "Explore" };
     document.getElementById("page-heading").textContent = titles[state.view] || "The Stack";
     document.querySelectorAll("[data-view]").forEach(function (el) { el.classList.toggle("active", el.dataset.view === state.view); });
 
@@ -2228,6 +2229,7 @@
     if (state.view === "today") root.innerHTML = renderToday();
     else if (state.view === "agents") root.innerHTML = renderAgents();
     else if (state.view === "work") root.innerHTML = renderWork();
+    else if (state.view === "explore") window.StackExplore.mount(root, bff);
     else root.innerHTML = renderStats();
 
     document.body.classList.toggle("view-agents", state.view === "agents");
@@ -2785,6 +2787,7 @@
     else if (row.action === "view:agents") { state.view = "agents"; state.forceChatBottom = true; render(); await loadActiveAgentMessages(); render(); }
     else if (row.action === "view:work") { state.view = "work"; render(); }
     else if (row.action === "view:stats") { state.view = "stats"; render(); }
+    else if (row.action === "view:explore") { state.view = "explore"; render(); }
     else if (row.action.indexOf("agent:") === 0) await jumpToAgent(row.action.slice(6));
     else if (row.action.indexOf("inspect:") === 0) openItemSheet(row.action.slice(8));
     else if (row.action === "new") openQuickInbox();
@@ -3201,7 +3204,7 @@
     }
 
     stage.addEventListener("touchstart", function (e) {
-      if (state.view === "agents") { pulling = false; return; }
+      if (state.view === "agents" || state.view === "explore") { pulling = false; return; }
       if (e.target && e.target.closest && e.target.closest(".chat-log, #today-floor-log, .agent-strip, .chip-strip, .composer-wrap, .sheet, input, textarea")) {
         pulling = false;
         return;
