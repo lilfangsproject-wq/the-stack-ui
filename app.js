@@ -1,11 +1,11 @@
-/* The Stack v50.5.3 Tahoe — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
+/* The Stack v50.5.4 Session Registry — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
  * Hard rules: no always-on mic/Jarvis; opt-in TTS (/api/tts + $0 Web Speech fallback); PIN → x-stack-pin; Git is source of truth.
  * No horizontal swipe. Colour only marks the explicit agent states. Connection pill is honest.
  */
 (function () {
   "use strict";
 
-  const VERSION = window.STACK_VERSION || "v50.5.3-tahoe";
+  const VERSION = window.STACK_VERSION || "v50.5.4-session-registry";
   const SURFACE_KEY = "stack-surface-v1";
   const OUTBOX_KEY = "stack-rebirth-outbox-v1";
   const DRAFT_KEY = "stack-composer-drafts-v1";
@@ -1288,9 +1288,18 @@
           items.map(renderAssignment).join("") + '</section>' : '';
       }).join("");
       const directory = (data.peers || []).map(function (peer) {
+        const canEnroll = ["chatgpt", "cursor", "claude", "gemini", "nori"].includes(peer.id);
+        const sessionControl = data.actor === "seth" && canEnroll && peer.d1_session_registered
+          ? '<button type="button" class="btn btn-sec btn-sm" data-session-revoke="' + esc(peer.id) + '">Revoke D1 session</button>'
+          : data.actor === "seth" && data.enabled && canEnroll && !peer.configured
+            ? '<button type="button" class="btn btn-sec btn-sm" data-session-issue="' + esc(peer.id) + '">Issue session token</button>'
+            : '';
+        const managedNote = data.actor === "seth" && peer.credential_source === "worker_secret"
+          ? '<small>' + (peer.d1_session_registered ? 'Worker secret active' : 'Managed by Worker secret') + '</small>' : '';
         return '<li>' + esc(assignmentName(peer.id)) + ' · ' +
           (peer.checked_in_at ? 'Checked in ' + esc(new Date(peer.checked_in_at).toLocaleString())
-            : peer.configured ? 'Configured · no check-in' : 'No session configured') + '</li>';
+            : peer.configured ? 'Configured · no check-in' : 'No session configured') +
+          sessionControl + managedNote + '<div data-session-result></div></li>';
       }).join("");
       assignmentSheet("Assignments",
         '<p class="sheet-sub">' + (data.enabled ? 'Agents pick up assigned work from their sessions.' : 'Assignment pickup is paused.') + '</p>' +
@@ -1326,6 +1335,65 @@
       });
       document.querySelectorAll("[data-assignment-discussion]").forEach(function (section) {
         bindAssignmentDiscussion(section, data.enabled);
+      });
+      document.querySelectorAll("[data-session-issue]").forEach(function (button) {
+        button.addEventListener("click", async function () {
+          const peer = button.dataset.sessionIssue;
+          const result = button.closest("li").querySelector("[data-session-result]");
+          button.disabled = true;
+          try {
+            const issued = await bff("/api/assignments/sessions", {
+              method: "POST", body: JSON.stringify({ peer: peer })
+            });
+            result.replaceChildren();
+            const note = document.createElement("p");
+            note.textContent = "Shown once. Copy this token into " + assignmentName(peer) + "’s runtime secret store now. If it is lost, revoke and issue a replacement. Do not paste it into a chat or commit it.";
+            const token = document.createElement("textarea");
+            token.className = "input mono";
+            token.setAttribute("aria-label", assignmentName(peer) + " assignment access token");
+            token.readOnly = true;
+            token.rows = 2;
+            token.value = issued.token;
+            const copy = document.createElement("button");
+            copy.type = "button";
+            copy.className = "btn btn-sec btn-sm";
+            copy.textContent = "Copy token";
+            const status = document.createElement("span");
+            status.setAttribute("role", "status");
+            copy.addEventListener("click", async function () {
+              try {
+                await navigator.clipboard.writeText(issued.token);
+                status.textContent = "Copied. Store it in the agent runtime now.";
+              } catch {
+                token.focus();
+                token.select();
+                status.textContent = "Clipboard unavailable. Copy the selected token into the agent runtime.";
+              }
+            });
+            result.append(note, token, copy, status);
+            button.disabled = true;
+            button.textContent = "Session issued · Refresh list";
+          } catch (error) {
+            result.textContent = error.message;
+            button.disabled = false;
+          }
+        });
+      });
+      document.querySelectorAll("[data-session-revoke]").forEach(function (button) {
+        button.addEventListener("click", async function () {
+          const peer = button.dataset.sessionRevoke;
+          button.disabled = true;
+          try {
+            await bff("/api/assignments/sessions/" + encodeURIComponent(peer) + "/revoke", {
+              method: "POST", body: "{}"
+            });
+            await openAssignmentInbox();
+          } catch (error) {
+            const result = button.closest("li").querySelector("[data-session-result]");
+            if (result) result.textContent = error.message;
+            button.disabled = false;
+          }
+        });
       });
       document.getElementById("refresh-assignments").addEventListener("click", openAssignmentInbox);
       document.getElementById("new-assignment")?.addEventListener("click", function () { openAssignmentForm(null, data.assignments); });
