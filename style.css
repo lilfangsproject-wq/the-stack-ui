@@ -933,3 +933,54 @@ html[data-surface="light"] .chat-subbar {
 .assignment-messages li { border-bottom: 1px solid var(--hairline); padding-block: 8px; }
 .assignment-messages small { display: block; color: var(--ink-2); }
 .assignment-messages p { margin: 4px 0 0; }
+
+/* Opt-in dictation button + live voice call bar (Agents chat & composer) */
+.dictation-btn.listening {
+  border-color: var(--st-green, #2ea44f);
+  color: var(--st-green, #2ea44f);
+}
+.voice-call-bar {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: 18px;
+  border: 1px solid var(--glass-panel-bd);
+  background: var(--glass-panel-bg, rgba(255,255,255,0.06));
+}
+.voice-call-row, .voice-call-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.voice-call-row { justify-content: space-between; }
+.voice-call-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--st-amber, #d4a017);
+  box-shadow: 0 0 0 0 rgba(212,160,23,0.45);
+  animation: voice-pulse 1.4s ease-out infinite;
+}
+.voice-call-bar[data-state="listening"] .voice-call-dot,
+.voice-call-bar[data-state="speaking"] .voice-call-dot { background: var(--st-green, #2ea44f); }
+.voice-call-bar[data-state="thinking"] .voice-call-dot,
+.voice-call-bar[data-state="sending"] .voice-call-dot { background: var(--st-amber, #d4a017); }
+.voice-call-bar[data-state="muted"] .voice-call-dot,
+.voice-call-bar[data-state="disconnected"] .voice-call-dot { background: var(--st-muted); animation: none; }
+.voice-call-bar[data-state="error"] .voice-call-dot { background: var(--st-red, #d14949); animation: none; }
+.voice-call-transcript {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--ink-1);
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--input-bg);
+  border: 1px solid var(--hairline);
+}
+.voice-call-review .voice-call-actions { margin-top: 8px; justify-content: flex-end; }
+@keyframes voice-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(46,164,79,0.35); }
+  70% { box-shadow: 0 0 0 10px rgba(46,164,79,0); }
+  100% { box-shadow: 0 0 0 0 rgba(46,164,79,0); }
+}
