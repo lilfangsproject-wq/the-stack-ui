@@ -1,19 +1,19 @@
-/* The Stack v50.6.2 CLARITY — network-first shell cache for Cloudflare Pages / GitHub Pages.
+/* The Stack v50.6.3 WORKFLOWS — network-first shell cache for Cloudflare Pages / GitHub Pages.
  * Always fetches fresh UI when online so pushes appear immediately on iPhone PWAs.
  */
-const CACHE = "the-stack-shell-v50.6.2-clarity";
+const CACHE = "the-stack-shell-v50.6.3-workflows";
 const SHELL = [
   "./",
   "./index.html",
-  "./bg-tahoe.svg?v=50.6.2-clarity",
-  "./app.js?v=50.6.2-clarity",
-  "./explore.js?v=50.6.2-clarity",
-  "./polish.js?v=50.6.2-clarity",
-  "./config.js?v=50.6.2-clarity",
-  "./style.css?v=50.6.2-clarity",
-  "./favicon.svg?v=50.6.2-clarity",
-  "./manifest.webmanifest?v=50.6.2-clarity",
-  "./icon-180.png?v=50.6.2-clarity",
+  "./bg-tahoe.svg?v=50.6.3-workflows",
+  "./app.js?v=50.6.3-workflows",
+  "./explore.js?v=50.6.3-workflows",
+  "./polish.js?v=50.6.3-workflows",
+  "./config.js?v=50.6.3-workflows",
+  "./style.css?v=50.6.3-workflows",
+  "./favicon.svg?v=50.6.3-workflows",
+  "./manifest.webmanifest?v=50.6.3-workflows",
+  "./icon-180.png?v=50.6.3-workflows",
   "./icon-192.png",
   "./icon-512.png"
 ];

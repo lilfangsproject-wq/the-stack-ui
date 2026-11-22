@@ -69,6 +69,7 @@
   const state = {
     view: "today",
     assignmentMode: null,
+    assignments: null,
     activeAgentId: "peer-floor",
     workFilter: "all",
     notifFilter: "all",
@@ -310,6 +311,13 @@
     return isoFresh(session?.last_execution_verified_at, SESSION_LIVE_MS);
   }
 
+  function hostObservation(session) {
+    if (session?.verification !== "d1_host_runtime" || !isoFresh(session.last_reported_at, SESSION_LIVE_MS)) return "";
+    const reported = sessionReportedState(session);
+    if (reported === "offline") return "Host reports app closed";
+    return reported === "running" ? "App seen on host" : "Host checked in";
+  }
+
   function sessionMeta(session) {
     if (!session) return Object.assign({}, SESSION_STATES.unknown, { key: "unknown" });
     const reported = sessionReportedState(session);
@@ -321,12 +329,12 @@
       // Authentication proves presence, not that a task is executing.
       return { label: "Checked in · execution unverified", tone: "amber", key: "waiting_prompt" };
     }
-    if (reported === "offline") {
-      return { label: "Reported: Offline", tone: "muted", key: "offline" };
-    }
+    const host = hostObservation(session);
+    if (host) return { label: host, tone: "muted", key: "host" };
     if (!Number.isFinite(age) || age > SESSION_STALE_MS || age < -300000) {
       return { label: "Status unknown · stale report", tone: "muted", key: "unknown" };
     }
+    if (reported === "offline") return { label: "Reported: Offline", tone: "muted", key: "offline" };
     if (reported === "running") {
       return { label: "Active reported · unverified", tone: "muted", key: "unknown" };
     }
@@ -350,11 +358,12 @@
 
   function primarySession(agentId) {
     const list = sessionsForAgent(agentId);
-    const rank = { running: 0, waiting_prompt: 1, paused_quota: 2, blocked: 3, offline: 4, unknown: 5 };
+    function rank(session) {
+      const ranks = { running: 0, blocked: 2, paused_quota: 3, host: 4, waiting_prompt: 5, offline: 6, unknown: 7 };
+      return sessionHasAuthCheckin(session) ? 1 : (ranks[sessionMeta(session).key] ?? 8);
+    }
     return list.slice().sort(function (a, b) {
-      const ka = sessionMeta(a).key;
-      const kb = sessionMeta(b).key;
-      return (rank[ka] ?? 9) - (rank[kb] ?? 9);
+      return rank(a) - rank(b) || (Date.parse(sessionTimestamp(b)) || 0) - (Date.parse(sessionTimestamp(a)) || 0);
     })[0] || null;
   }
 
@@ -375,13 +384,15 @@
     const lastActivity = session.last_reported_at || session.checked_in_at || session.last_authenticated_checkin_at;
     const activity = lastActivity ? "Last update " + relTime(lastActivity) : "No recent update";
     const plainStatus = st.key === "running" ? "Working now · verified" :
-      st.key === "waiting_prompt" && sessionHasAuthCheckin(session) ? "Connected · work not confirmed" :
-      reported === "paused_quota" ? "Paused · usage limit" :
-      reported === "blocked" ? "Blocked" :
-      reported === "offline" ? "Offline" : "Activity not confirmed";
-    const plainExplanation = st.key === "running" ? "Recent execution has been verified." :
-      sessionHasAuthCheckin(session) ? "This agent checked in, but we cannot confirm it is doing work." :
-      "We cannot confirm this agent is working right now.";
+      sessionHasAuthCheckin(session) ? "Teammate checked in" :
+      st.key === "paused_quota" ? "Reported paused" :
+      st.key === "blocked" ? "Reported blocked" :
+      st.key === "offline" ? "Reported offline" :
+      st.key === "host" ? st.label : "Activity unconfirmed";
+    const plainExplanation = st.key === "running" ? "Recent work was verified." :
+      sessionHasAuthCheckin(session) ? "The teammate signed in. Current work is unconfirmed." :
+      st.key === "host" ? "The host reported the app’s status. Current work is unconfirmed." :
+      "Waiting for a recent update.";
     const openBtn = sessionUrl
       ? '<a class="btn btn-pri btn-sm" href="' + esc(sessionUrl) + '" target="_blank" rel="noopener">Open session</a>'
       : "";
@@ -813,7 +824,13 @@
       state.link = "live";
       state.lastSyncIso = sync.synced_at || new Date().toISOString();
       normalizeHubData();
-      await loadMessagesForSlug("peer-floor");
+      const todayAssignments = state.assignmentMode === "enabled"
+        ? bff("/api/assignments").then(function (data) {
+          return Array.isArray(data.assignments) ? data.assignments : null;
+        }).catch(function () { return null; })
+        : Promise.resolve(null);
+      const [assignments] = await Promise.all([todayAssignments, loadMessagesForSlug("peer-floor")]);
+      state.assignments = assignments;
       if (state.view === "agents" && state.activeAgentId !== "peer-floor") await loadActiveAgentMessages();
       normalizeHubData();
       if (!silent) toast("Updated · spend stays at $0", "info");
@@ -868,6 +885,7 @@
             merged.push(m);
           }
         });
+        merged.sort(function (a, b) { return String(a.created_at || "").localeCompare(String(b.created_at || "")); });
         state.messagesBySlug[slug] = merged.slice(-60);
         return;
       }
@@ -882,10 +900,12 @@
     await loadMessagesForSlug(slug);
   }
 
-  async function postMessage(slug, body, requestId) {
+  async function postMessage(slug, body, requestId, voiceReply) {
     const out = await bff("/api/ping", {
       method: "POST",
-      body: JSON.stringify({ slug: slug, author: "Seth", body: body, request_id: requestId })
+      body: JSON.stringify({
+        slug: slug, author: "Seth", body: body, request_id: requestId, noAutoReply: voiceReply !== true
+      })
     });
     if (!out || out.ok !== true || !out.message || !out.message.id) {
       throw new Error("Backend acceptance could not be confirmed");
@@ -899,6 +919,7 @@
     if (out.reply) messages.push(out.reply);
     messages.sort(function (a, b) { return String(a.created_at || "").localeCompare(String(b.created_at || "")); });
     state.messagesBySlug[slug] = messages.slice(-60);
+    return out.message.id;
   }
 
   let flushingOutbox = false;
@@ -910,7 +931,7 @@
       for (const ev of state.outbox.slice()) {
         if (ev.type !== "message" && ev.type !== "quick") continue;
         try {
-          await postMessage(ev.slug, ev.body, ev.requestId);
+          await postMessage(ev.slug, ev.body, ev.requestId, ev.voiceReply);
           state.outbox = state.outbox.filter(function (entry) { return entry !== ev; });
           saveOutbox();
           sent += 1;
@@ -922,7 +943,7 @@
       flushingOutbox = false;
       render();
     }
-    toast(sent ? "Backend accepted " + sent + " queued message(s)" : "Outbox still pending", sent ? "info" : "warning");
+    toast(sent ? "Saved " + sent + " from Outbox" : "Messages are still waiting in Outbox", sent ? "info" : "warning");
   }
 
   /* ===================== VOICE (OPT-IN) ===================== */
@@ -1231,8 +1252,7 @@
     stopVoiceRecognition();
     render();
     try {
-      const beforeIds = new Set((state.messagesBySlug[slug] || []).map(function (m) { return m && m.id; }));
-      const sendRes = await sendToSlug(slug, text, agentId);
+      const sendRes = await sendToSlug(slug, text, agentId, true);
       if (!voiceCall || voiceCall !== session || !session.alive || session.turnId !== turnId) return;
       if (!sendRes || sendRes.accepted !== true) {
         session.pendingTranscript = "";
@@ -1247,26 +1267,17 @@
         saveComposerDraft(input);
       }
       setVoiceCallState("thinking");
-      let reply = null;
-      const msgs = state.messagesBySlug[slug] || [];
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        const m = msgs[i];
-        if (!m || !m.body || beforeIds.has(m.id)) continue;
-        if (/^seth$/i.test(m.author || "")) continue;
-        reply = m;
-        break;
+      function findReply() {
+        return (state.messagesBySlug[slug] || []).slice().reverse().find(function (message) {
+          return message.body && (message.parent_id === sendRes.messageId || message.reply_to === sendRes.messageId) &&
+            !/^seth$/i.test(message.author || "");
+        });
       }
+      let reply = findReply();
       if (!reply) {
         await loadMessagesForSlug(slug);
-        if (!voiceCall || voiceCall !== session || !session.alive) return;
-        const refreshed = state.messagesBySlug[slug] || [];
-        for (let i = refreshed.length - 1; i >= 0; i--) {
-          const m = refreshed[i];
-          if (!m || !m.body || beforeIds.has(m.id)) continue;
-          if (/^seth$/i.test(m.author || "")) continue;
-          reply = m;
-          break;
-        }
+        if (voiceCall !== session || !session.alive || session.turnId !== turnId) return;
+        reply = findReply();
       }
       session.pendingTranscript = "";
       if (!reply) {
@@ -2058,11 +2069,15 @@
   function humanizeTechnicalMessage(body, isMe) {
     const raw = String(body || "");
     if (!raw || isMe) return null;
-    const hasJargon = /\b(BFF|PAQC|D1|JSONL|CORS|HMAC)\b|reviewer\s*!==\s*builder|\b[0-9a-f]{7,40}\b|\.(js|mjs|json|jsonl|css|html)\b|issuecomment-|#peer-floor|\bPR #\d+/i.test(raw);
+    const hasJargon = /\b(BFF|PAQC|D1|JSONL|CORS|HMAC)\b|reviewer\s*!==\s*builder|operator_registry|ACK posted|implementation evidence|\b[0-9a-f]{7,40}\b|\.(js|mjs|json|jsonl|css|html)\b|issuecomment-|#peer-floor|\bPR #\d+/i.test(raw);
     if (!hasJargon && raw.length <= 220) return null;
 
     let clean = raw
       .replace(/https?:\/\/github\.com\/[^\s]+/gi, "GitHub link")
+      .replace(/\boperator_registry\b/gi, "teammate report")
+      .replace(/\bPR #(\d+)\b/gi, "change #$1")
+      .replace(/\bACK posted\b/gi, "an acknowledgement was reported")
+      .replace(/\bimplementation evidence\b/gi, "record of the change")
       .replace(/#peer-floor/gi, "Team Room")
       .replace(/\bProjects\/The-Stack\/[^\s]+/gi, "Stack files")
       .replace(/\b[0-9a-f]{8,40}\b/gi, "")
@@ -2094,20 +2109,30 @@
     let receipt = "";
     if (showFoot && isMe) {
       if (m.backend_accepted_at || m._accepted) {
-        receipt = '<details class="msg-foot msg-receipt"><summary class="git-chip">Backend accepted</summary>' +
-          '<div>Saved to channel history' + (m.backend_accepted_at ? ' · <time datetime="' + esc(m.backend_accepted_at) + '">' + esc(m.backend_accepted_at) + '</time>' : '') +
-          '<br>Agent delivery · Unconfirmed<br>Agent acknowledgement · Unconfirmed<br>Verified completion · Unconfirmed</div></details>';
+        const linked = (state.assignments || []).filter(function (task) {
+          return task.channel === slug && task.message_id === m.id;
+        });
+        receipt = '<details class="msg-foot msg-receipt"><summary class="git-chip">Saved to conversation</summary>' +
+          (m.backend_accepted_at ? '<div><time datetime="' + esc(m.backend_accepted_at) + '">' + esc(m.backend_accepted_at) + '</time></div>' : '') +
+          '<div>Teammate receipt hasn’t been confirmed for this message.</div>' +
+          (linked.length ? '<div>' + linked.map(function (task) {
+            return esc(task.title + ' · ' + assignmentLabels[task.status]);
+          }).join('<br>') + '</div><button type="button" class="btn btn-sec btn-sm" data-open-assignments>Open assignments</button>' : '') +
+          '</details>';
       } else {
-        const label = m._queued ? "Outbox · Acceptance unconfirmed" : m._submitting ? "Submitted · Awaiting backend" : "Receipt unavailable";
+        const label = m._queued ? "In Outbox · Send unconfirmed" : m._submitting ? "Saving message…" : "No send receipt available";
         receipt = '<div class="msg-foot"><span class="git-chip">' + label + '</span></div>';
       }
     }
     const rawBody = String(m.body || "");
     const plainSummary = humanizeTechnicalMessage(rawBody, isMe);
+    const source = rawBody.match(/https:\/\/github\.com\/lilfangsproject-wq\/[a-z0-9_.-]+\/(?:pull|issues)\/\d+(?:#(?:issuecomment|pullrequestreview)-\d+)?/i)?.[0];
+    const sourceLink = source ? '<a class="btn btn-sec btn-sm" href="' + esc(source) +
+      '" target="_blank" rel="noopener noreferrer">' + (source.includes("/pull/") ? "View change" : "View issue") + '</a>' : "";
     const bodyHtml = plainSummary
-      ? '<div class="msg-plain-summary">' + esc(plainSummary) + "</div>" +
+      ? '<div class="msg-plain-summary">' + esc(plainSummary) + "</div>" + sourceLink +
         '<details class="msg-tech-details"><summary>Show technical log</summary><div class="msg-tech-raw" style="white-space:pre-wrap;">' + esc(rawBody) + "</div></details>"
-      : '<div style="white-space:pre-wrap;">' + esc(rawBody) + "</div>";
+      : '<div style="white-space:pre-wrap;">' + esc(rawBody) + "</div>" + sourceLink;
     return (
       '<div class="msg ' + (isMe ? "me" : "") + '">' +
         '<div class="msg-head"><span class="msg-author">' + esc(isAutomated ? "Stack automation" : m.author || "Agent") + '</span><span class="msg-time">' + relTime(m.created_at) + "</span></div>" +
@@ -2125,19 +2150,31 @@
       const st = sessionMeta(session);
       if (st.key === "running") return { label: "Working now", tone: "green", detail: session.task_title || "Verified work in progress" };
       if (sessionHasAuthCheckin(session)) return { label: "Checked in", tone: "amber", detail: "Online, but work isn’t confirmed yet" };
-      if (sessionReportedState(session) === "paused_quota") return { label: "Paused", tone: "amber", detail: "Hit a usage limit" };
-      if (sessionReportedState(session) === "blocked") return { label: "Blocked", tone: "red", detail: "Needs a decision or unblock" };
-      if (sessionReportedState(session) === "offline") return { label: "Offline", tone: "muted", detail: "No recent activity" };
+      if (st.key === "host") return { label: st.label, tone: "muted", detail: "The host reported the app’s status" };
+      if (st.key === "paused_quota") return { label: "Reported paused", tone: "amber", detail: "Hit a usage limit" };
+      if (st.key === "blocked") return { label: "Reported blocked", tone: "red", detail: "May need a decision or help" };
+      if (st.key === "waiting_prompt") return { label: "Reported waiting", tone: "amber", detail: "Waiting for a message" };
+      if (st.key === "offline") return { label: "Reported offline", tone: "muted", detail: "No recent check-in" };
     }
-    const m = agentMeta(agent.status);
-    if (m.key === "blocked" || agent.status === "blocked") return { label: "Blocked", tone: "red", detail: agent.role || "Needs attention" };
-    if (m.key === "waiting" || agent.status === "waiting" || agent.status === "waiting_prompt") {
-      return { label: "Waiting", tone: "amber", detail: agent.role || "Waiting on something" };
+    return { label: "No recent check-in", tone: "muted", detail: "Current activity is unconfirmed" };
+  }
+
+  function todayAssignmentSummary(task) {
+    const assignee = assignmentName(task.recipient);
+    const reviewer = assignmentName(task.reviewer);
+    switch (task.status) {
+      case "review_pending": return assignee + " sent their result. " + reviewer + " needs to check it.";
+      case "verified": return reviewer + " checked " + assignee + "’s result.";
+      case "assigned": return "Waiting for " + assignee + " to pick this up.";
+      case "received": return assignee + " picked this up. Waiting for them to accept.";
+      case "running": return assignee + " accepted this. Their result is still due.";
+      case "scheduled": return "Available to " + assignee + " " + new Date(task.available_at).toLocaleString() + ".";
+      case "waiting_dependency": return "This can start after the earlier task is checked.";
+      case "failed":
+      case "timed_out":
+      case "interrupted": return "The last attempt stopped. Open the assignment for details.";
+      default: return assignmentLabels[task.status] || "Open the assignment for details.";
     }
-    if (m.key === "working" || agent.status === "working" || agent.status === "running" || agent.status === "completed") {
-      return { label: "Active", tone: "green", detail: agent.role || "On the roster" };
-    }
-    return { label: "Quiet", tone: "muted", detail: "No confirmed activity right now" };
   }
 
   function renderToday() {
@@ -2145,7 +2182,7 @@
     const allFloorMsgs = state.messagesBySlug["peer-floor"] || [];
     const floorMsgs = allFloorMsgs.slice(-8);
     const floorHtml = floorMsgs.map(function (m) {
-      return renderMessageBubble(m, false);
+      return renderMessageBubble(m, true, "peer-floor");
     }).join("");
 
     const mentionChips = '<button type="button" class="ctx-chip" data-floor-mention="@all ">Everyone</button>' + state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
@@ -2184,10 +2221,19 @@
     }).join("");
     const conflictCount = (state.conflicts || []).length;
     const commitCount = (state.commits || []).length;
-    const openAssignments = (state.assignments || []).filter(function (a) {
-      const s = String(a && a.status || "").toLowerCase();
-      return s && s !== "verified" && s !== "cancelled" && s !== "done" && s !== "complete";
+    const assignments = state.assignments || [];
+    const openAssignments = assignments.filter(function (task) {
+      return !["verified", "cancelled", "failed", "timed_out"].includes(task.status);
     }).length;
+    const upcoming = assignments.find(function (task) { return task.status === "scheduled" || task.status === "waiting_dependency"; });
+    const needsReview = assignments.find(function (task) { return task.status === "review_pending"; });
+    const taskUpdates = [...new Set([needsReview, upcoming, assignments[0]].filter(Boolean))];
+    const taskRows = taskUpdates.map(function (task) {
+      return '<button type="button" class="row" data-open-assignments>' +
+        '<span class="row-main"><span class="row-title">' + esc(task.title) + '</span>' +
+        '<span class="row-sub">' + esc(todayAssignmentSummary(task)) + '</span></span>' +
+        '<span class="row-right">›</span></button>';
+    }).join("");
 
     const composerHtml =
       '<div class="hero-composer">' +
@@ -2244,10 +2290,11 @@
       heroBadge = '<span class="badge ' + pulseTone + '"><span class="dot ' + (pulseTone === "neutral" ? "muted" : pulseTone) + '"></span>' +
         (state.link === "live" ? "Connected" : state.link === "polling" ? "Updating…" : "Offline") + "</span>";
       heroBodyHtml =
-        '<h2 class="hero-title">' + (workingCount ? workingCount + " on work · " + waitingCount + " waiting" : "Nothing urgent right now") + "</h2>" +
+        '<h2 class="hero-title">' + (state.link !== "live" ? (state.syncing ? "Checking your workspace…" : "Workspace disconnected") :
+          workingCount ? workingCount + " working now" : "Your workspace at a glance") + "</h2>" +
         '<p class="hero-copy">' +
           (openAssignments ? openAssignments + " open assignment" + (openAssignments === 1 ? "" : "s") + " · " : "") +
-          "Synced " + relTime(state.lastSyncIso) + ". Spend stays at $0. Auto-dispatch is off." +
+          (state.lastSyncIso ? "Last updated " + relTime(state.lastSyncIso) + "." : "Waiting for the first update.") +
         "</p>" +
         '<div class="hero-actions">' +
           '<button type="button" class="btn btn-pri" data-view="ops">Open Ops</button>' +
@@ -2290,7 +2337,7 @@
       '<section class="panel live-sessions-panel" aria-label="Your team">' +
         '<div class="section-head"><span class="section-title">Your team</span>' +
         '<button type="button" class="section-link" id="btn-sheet-workforce-top">Everyone ›</button></div>' +
-        '<p class="today-plain-hint">Green means verified work. Checked in only means they showed up — not that a job is running.</p>' +
+        '<p class="today-plain-hint">Check-ins show who connected. Verified work has its own status.</p>' +
         '<div class="teammate-list">' + teammateRows + "</div>" +
       "</section>";
 
@@ -2316,7 +2363,10 @@
             '<div class="row-main"><div class="row-title">Ops</div><div class="row-sub">Full control room — agents, handovers, activity</div></div>' +
             '<div class="row-right"><span>Open</span><span>›</span></div>' +
           "</button>" +
-          (state.assignmentMode ? '<button type="button" class="row" data-open-assignments><div class="row-main"><div class="row-title">Assignments</div><div class="row-sub">' + (openAssignments ? openAssignments + " open" : "Hand work to a teammate") + '</div></div><div class="row-right"><span>›</span></div></button>' : "") +
+          (state.assignmentMode ? '<button type="button" class="row" data-open-assignments><div class="row-main"><div class="row-title">Assignments</div><div class="row-sub">' + (state.assignments ? openAssignments + " open" : "Open your task list") + '</div></div><div class="row-right"><span>›</span></div></button>' : "") +
+          '<button type="button" class="row" data-view="explore">' +
+            '<span class="row-main"><span class="row-title">Explore projects</span><span class="row-sub">Open source files and project records</span></span>' +
+            '<span class="row-right">›</span></button>' +
           '<button type="button" class="row" id="btn-sheet-workforce">' +
             '<div class="row-main"><div class="row-title"><span class="dot ' + wfTone + '"></span>Team overview</div><div class="row-sub">' + esc(wfSub) + "</div></div>" +
             '<div class="row-right"><span>' + rosterOnly.length + "</span><span>›</span></div>" +
@@ -2329,6 +2379,7 @@
             '<div class="row-main"><div class="row-title">Recent changes</div><div class="row-sub">Updated ' + relTime(state.lastSyncIso) + "</div></div>" +
             '<div class="row-right"><span>' + commitCount + "</span><span>›</span></div>" +
           "</button>" +
+          (taskRows ? '<div class="section-head"><span class="section-title">Assignment updates</span></div>' + taskRows : "") +
           (verifiedRows ? '<div class="section-head"><span class="section-title">Recently checked</span></div>' + verifiedRows : "") +
           '<button type="button" class="row" id="btn-quick-inbox">' +
             '<div class="row-main"><div class="row-title">Quick capture</div><div class="row-sub">Save an idea to the team chat</div></div>' +
@@ -2562,6 +2613,10 @@
     try {
       const data = await bff("/api/assignments");
       if (!loading.isConnected || !document.getElementById("overlay").classList.contains("open")) return;
+      if (Array.isArray(data.assignments)) {
+        state.assignments = data.assignments;
+        render();
+      }
       function renderAssignment(item) {
         const canCancel = !["verified", "failed", "cancelled", "timed_out"].includes(item.status);
         const prerequisite = item.dependency_id && data.assignments.find(function (other) { return other.id === item.dependency_id; });
@@ -2579,7 +2634,7 @@
           '<p>Checks the result: ' + esc(assignmentName(item.reviewer)) + (item.attempt > 1 ? ' · Try ' + item.attempt : '') + '</p>' +
           (live ? sessionCardHtml(live) : '<p class="session-meta">No verified live session for ' + esc(assignmentName(item.recipient)) + ' (shows unknown rather than inventing “working”).</p>') +
           (item.channel ? '<details class="assignment-history" data-assignment-source="' + esc(item.message_id) + '" data-source-channel="' +
-            esc(item.channel) + '"><summary>Original message in #' + esc(item.channel) + '</summary><p role="status"></p></details>' : '') +
+            esc(item.channel) + '"><summary>Original message</summary><p role="status"></p></details>' : '') +
           (item.dependency_id ? '<p>Starts after: ' + esc(prerequisite?.title || "another task") + ' · ' + esc(assignmentLabels[item.dependency_status] || "Status unknown") + '</p>' : '') +
           (item.status === "scheduled" || item.status === "retry_wait" ? '<p>Available ' + esc(new Date(item.available_at).toLocaleString()) + '</p>' : '') +
           (item.evidence ? '<p class="assignment-text"><strong>Result and proof</strong><br>' + esc(item.evidence) + '</p>' : '') +
@@ -2727,7 +2782,7 @@
         });
       });
       document.getElementById("refresh-assignments").addEventListener("click", openAssignmentInbox);
-      document.getElementById("new-assignment")?.addEventListener("click", function () { openAssignmentForm(null, data.assignments); });
+      document.getElementById("new-assignment")?.addEventListener("click", function () { openAssignmentForm(null, data); });
       document.querySelectorAll("[data-cancel-assignment]").forEach(function (button) {
         button.addEventListener("click", async function () {
           const id = button.dataset.cancelAssignment;
@@ -2754,18 +2809,35 @@
     }
   }
 
-  function openAssignmentForm(source, existing = []) {
+  async function openAssignmentForm(source, directory) {
     // Assign from a message: populate the job with that exact message, not a blank form.
     const linkedMessage = source && source.channel && source.message_id
       ? (state.messagesBySlug[source.channel] || []).find(function (m) { return String(m.id) === String(source.message_id); })
       : null;
     const linkedBody = linkedMessage ? String(linkedMessage.body || "").trim() : "";
     const linkedTitle = linkedBody.split(/\r?\n/).find(function (line) { return line.trim(); }) || "";
-    const ids = ["chatgpt", "codex", "cursor", "claude", "gemini", "nori"];
-    const options = '<option value="">Choose a teammate</option>' + ids.map(function (id) {
-      return '<option value="' + id + '">' + esc(assignmentName(id)) + '</option>';
+    if (!directory) {
+      assignmentSheet("New assignment", '<p role="status">Checking teammate connections…</p>');
+      const loading = document.querySelector("#sheet [role=status]");
+      try {
+        directory = await bff("/api/assignments");
+      } catch (error) {
+        if (loading.isConnected) loading.textContent = "Couldn’t load teammates. " + error.message;
+        return;
+      }
+      if (!loading.isConnected || !document.getElementById("overlay").classList.contains("open")) return;
+    }
+    if (!directory.enabled) {
+      assignmentSheet("New assignment", '<p role="status">Assignments are paused.</p>');
+      return;
+    }
+    const peers = directory.peers || [];
+    const available = peers.filter(function (peer) { return peer.configured; });
+    const unavailable = peers.filter(function (peer) { return !peer.configured; });
+    const options = '<option value="">Choose a teammate</option>' + available.map(function (peer) {
+      return '<option value="' + esc(peer.id) + '">' + esc(assignmentName(peer.id)) + '</option>';
     }).join("");
-    const dependencyOptions = existing.filter(function (item) { return item.sender === "seth"; }).map(function (item) {
+    const dependencyOptions = directory.assignments.filter(function (item) { return item.sender === "seth"; }).map(function (item) {
       return '<option value="' + esc(item.id) + '">' + esc(item.title) + '</option>';
     }).join("");
     assignmentSheet("New assignment",
@@ -2775,13 +2847,28 @@
       '<textarea class="input" id="assignment-instructions" name="instructions" rows="4" required maxlength="4000"></textarea></div>' +
       '<div class="field"><label for="assignment-recipient">Who does the work?</label><select class="input" id="assignment-recipient" name="recipient" required>' + options + '</select></div>' +
       '<div class="field"><label for="assignment-reviewer">Who checks the result?</label><select class="input" id="assignment-reviewer" name="reviewer" required>' + options + '</select></div>' +
+      (unavailable.length ? '<p class="sheet-sub">Without an assignment connection: ' +
+        unavailable.map(function (peer) { return esc(assignmentName(peer.id)); }).join(", ") + '.</p>' : '') +
+      (available.length < 2 ? '<p role="status">Two teammates need an assignment connection so someone else can check the work.</p>' : '') +
+      (unavailable.length ? '<button type="button" class="btn btn-sec btn-sm" id="assignment-connections">Manage teammate connections</button>' : '') +
       '<details><summary>More options</summary>' +
       '<div class="field"><label for="assignment-schedule">Start after this time</label><input class="input" type="datetime-local" id="assignment-schedule"></div>' +
       (dependencyOptions ? '<div class="field"><label for="assignment-dependency">Wait for another task to be checked</label><select class="input" id="assignment-dependency"><option value="">No need to wait</option>' + dependencyOptions + '</select></div>' : '') +
       '</details>' +
       (source ? '<p class="sheet-sub">Linked to a message in #' + esc(source.channel) + '</p>' : '') +
-      '<div class="hero-actions"><button type="submit" class="btn btn-pri">Save assignment</button></div><p id="assignment-error" role="status"></p></form>');
+      '<div class="hero-actions"><button type="submit" class="btn btn-pri"' + (available.length < 2 ? ' disabled' : '') + '>Save assignment</button></div><p id="assignment-error" role="status"></p></form>');
     const form = document.getElementById("assignment-form");
+    const recipient = form.elements.recipient;
+    const reviewer = form.elements.reviewer;
+    recipient.addEventListener("change", function () {
+      if (reviewer.value === recipient.value) reviewer.value = "";
+      for (const option of reviewer.options) option.disabled = !!option.value && option.value === recipient.value;
+    });
+    form.querySelector("#assignment-connections")?.addEventListener("click", async function () {
+      await openAssignmentInbox();
+      const directoryList = document.querySelector("#sheet .assignment-teammates");
+      if (directoryList) directoryList.closest("details").open = true;
+    });
     if (linkedMessage) {
       form.querySelector("#assignment-title").value = linkedTitle.slice(0, 160);
       form.querySelector("#assignment-instructions").value = linkedBody.slice(0, 4000);
@@ -3655,7 +3742,7 @@
     render();
   }
 
-  async function sendToSlug(slug, text, agentIdForOutbox) {
+  async function sendToSlug(slug, text, agentIdForOutbox, voiceReply) {
     const body = String(text || "").trim();
     const channel = slug || "peer-floor";
     if (!body) return { accepted: false, empty: true };
@@ -3668,18 +3755,19 @@
     render();
 
     try {
-      await postMessage(channel, body, requestId);
-      toast("Backend accepted message", "info");
+      const messageId = await postMessage(channel, body, requestId, voiceReply);
+      toast("Message saved", "info");
       state.forceChatBottom = true;
       normalizeHubData();
       render();
-      return { accepted: true, requestId: requestId };
+      return { accepted: true, messageId: messageId };
     } catch (e) {
       // A sync may already have recovered a write whose response was lost.
       const recovered = (state.messagesBySlug[channel] || []).some(function (m) { return m.id === requestId && m.backend_accepted_at; });
       if (!recovered) {
         const evt = { id: requestId, requestId: requestId, type: "message", slug: channel, body: body };
         if (agentIdForOutbox) evt.agentId = agentIdForOutbox;
+        if (voiceReply === true) evt.voiceReply = true;
         state.outbox.unshift(evt);
         saveOutbox();
         pending._queued = true;
@@ -3689,7 +3777,7 @@
       state.link = (typeof navigator !== "undefined" && navigator.onLine === false) ? "offline" : state.link;
       state.forceChatBottom = true;
       render();
-      return { accepted: recovered, queued: !recovered, requestId: requestId, error: e };
+      return { accepted: recovered, queued: !recovered, messageId: requestId, error: e };
     } finally {
       state.sendingPing = Math.max(0, state.sendingPing - 1);
     }

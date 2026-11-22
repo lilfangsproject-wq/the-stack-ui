@@ -428,6 +428,12 @@
         const description = introductions[node.id] || node.summary;
         if (description) inspector.append(el("p", description, "explore-description"));
         if (statusMeaning[node.status]) inspector.append(el("p", statusMeaning[node.status]));
+        if (node.kind === "project" && node.directory && node.path) {
+          const source = anchor(repo + "/tree/main/" + safePath(node.path), "");
+          source.className = "row";
+          source.append(el("span", "Open current project in GitHub", "row-title"));
+          inspector.append(source, el("p", "This opens a private repository in a new tab. Use the GitHub account that has access."));
+        }
         if (node.pr) {
           inspector.append(el("p", `GitHub change #${node.pr.number} · Updated ${date(node.pr.updated)}`));
         }
