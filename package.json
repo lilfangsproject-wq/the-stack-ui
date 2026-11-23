@@ -1,0 +1,23 @@
+{
+  "name": "the-stack-mobile",
+  "version": "51.0.0-rea-unified",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 8787 --host",
+    "build": "vite build",
+    "preview": "vite preview --port 8787",
+    "test": "node --test tests/*.test.js",
+    "lint": "eslint src --ext .js,.jsx"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "zustand": "^4.4.7"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "vite": "^5.0.10",
+    "vite-plugin-pwa": "^0.17.4",
+    "workbox-window": "^7.0.0"
+  }
+}

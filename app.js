@@ -61,6 +61,118 @@
     // grokbot is a retired alias of Nori (Seth, 22 Nov 2026). Not a live teammate.
   ];
 
+  // ============================================================================
+  // REA: Attention Queue (AI Maestro pattern) + Evidence Gates (Agent HQ)
+  // ============================================================================
+  class StackAttentionQueue {
+    constructor(stateRef) {
+      this.state = stateRef;
+    }
+
+    getItems() {
+      const items = [];
+      const { assignments, heartbeats, needsSeth, items: workItems } = this.state;
+
+      // 1. Stale runs (Watchdog pattern from Agent HQ)
+      if (assignments) {
+        for (const a of assignments) {
+          if (a.lastHeartbeatAt) {
+            const ageMin = Math.round((Date.now() - new Date(a.lastHeartbeatAt).getTime()) / 60000);
+            if (ageMin > 5) { // > 5 min stale
+              items.push({
+                id: `stale-${a.id}`,
+                type: 'stale_run',
+                title: `Stale run: ${a.title || a.id}`,
+                detail: `No heartbeat for ${ageMin} min`,
+                severity: ageMin > 30 ? 'red' : 'amber',
+                agent: a.agentId,
+                action: ageMin > 30 ? 'Re-dispatch' : 'Check in',
+                ref: a.id
+              });
+            }
+          }
+        }
+      }
+
+      // 2. Evidence gates failed (Agent HQ pattern)
+      if (workItems) {
+        for (const w of workItems) {
+          if (w.blockedReason || (w.state && w.state.key === 'blocked')) {
+            items.push({
+              id: `blocked-${w.id}`,
+              type: 'blocked_work',
+              title: `Blocked: ${w.title}`,
+              detail: w.blockedReason || 'Missing evidence gate',
+              severity: 'red',
+              agent: w.ownerId,
+              action: 'Provide evidence',
+              ref: w.id
+            });
+          }
+        }
+      }
+
+      // 3. Needs Seth decisions
+      if (needsSeth) {
+        for (const n of needsSeth) {
+          items.push({
+            id: `need-${n.id}`,
+            type: 'needs_seth',
+            title: `Decision: ${n.title}`,
+            detail: n.detail || n.action || 'Seth input required',
+            severity: 'amber',
+            agent: 'Seth',
+            action: 'Decide and unblock',
+            ref: n.id
+          });
+        }
+      }
+
+      // 4. Idle agents (checked in but no execution verified)
+      if (heartbeats) {
+        for (const [agent, hb] of Object.entries(heartbeats)) {
+          if (hb.last_authenticated_checkin_at && !hb.last_execution_verified_at) {
+            const ageMin = Math.round((Date.now() - new Date(hb.last_authenticated_checkin_at).getTime()) / 60000);
+            if (ageMin > 60) {
+              items.push({
+                id: `idle-${agent}`,
+                type: 'idle_agent',
+                title: `${agent} checked in but not executing`,
+                detail: `Checked in ${ageMin} min ago · no execution verified`,
+                severity: 'amber',
+                agent,
+                action: 'Dispatch work or investigate',
+                ref: agent
+              });
+            }
+          }
+        }
+      }
+
+      // Sort: red > amber > green
+      const sevOrder = { red: 0, amber: 1, green: 2, muted: 3 };
+      return items.sort((a, b) => (sevOrder[a.severity] || 99) - (sevOrder[b.severity] || 99));
+    }
+
+    getCount() {
+      return this.getItems().length;
+    }
+
+    // Get items for mobile 4-question view
+    getMobileQuestions() {
+      const items = this.getItems();
+      return {
+        needsAttention: items.filter(i => i.severity === 'red').length,
+        whoIsWorking: items.filter(i => i.type === 'idle_agent' || i.type === 'stale_run').length,
+        whoCheckedProof: items.filter(i => i.type === 'blocked_work').length,
+        whatHappened: items.filter(i => i.type === 'needs_seth').length
+      };
+    }
+  }
+
+  // Attach to window for global access
+  window.StackAttentionQueue = StackAttentionQueue;
+
   const creds = {
     pin: "",
     bff: ""
@@ -2388,7 +2500,11 @@
         "</div>" +
       "</div>";
 
-    return heroHtml + sessionsPanel + '<div class="today-grid">' + streamCol + sheetsCol + "</div>";
+    // Insert attention banner before the hero if there are items
+    const attentionBanner = renderAttentionBanner();
+    const finalHeroHtml = attentionBanner + heroHtml;
+
+    return finalHeroHtml + sessionsPanel + '<div class="today-grid">' + streamCol + sheetsCol + "</div>";
   }
 
   async function copyCloudPrompt() {
@@ -2924,6 +3040,10 @@
       if (state.workFilter === "opportunities") return i.rawKind === "opportunity" && m.label !== "On Hold";
       if (state.workFilter === "workstreams") return i.rawKind === "workstream" && m.label !== "On Hold";
       if (state.workFilter === "hold") return m.label === "On Hold";
+      if (state.workFilter === "attention") {
+        // Show items that need attention: blocked, needs review, needs Seth
+        return m.key === "blocked" || m.key === "review_pending" || (i.needsSeth && i.needsSeth.length > 0);
+      }
       return true;
     });
     const hero = filtered[0] || (state.workFilter === "all" ? state.items[0] : null);
@@ -2969,7 +3089,7 @@
     return (
       (state.assignmentMode ? '<div class="section-head"><h2 class="section-title">Work</h2><button type="button" class="btn btn-sec btn-sm" data-open-assignments>Assignments</button></div>' : "") +
       '<div class="seg" role="tablist">' +
-        [{ id: "all", label: "Active" }, { id: "opportunities", label: "Ideas" }, { id: "workstreams", label: "Core" }, { id: "hold", label: "Parked" }].map(function (t) {
+        [{ id: "all", label: "Active" }, { id: "opportunities", label: "Ideas" }, { id: "workstreams", label: "Core" }, { id: "hold", label: "Parked" }, { id: "attention", label: "Attention" }].map(function (t) {
           return '<button type="button" class="seg-btn ' + (state.workFilter === t.id ? "active" : "") + '" data-work-filter="' + t.id + '">' + t.label + "</button>";
         }).join("") +
       "</div>" +
@@ -3844,6 +3964,23 @@
     root.querySelectorAll("[data-inspect]").forEach(function (b) { b.addEventListener("click", function () { openItemSheet(b.dataset.inspect); }); });
     root.querySelectorAll("[data-qc]").forEach(function (b) { b.addEventListener("click", function () { openQcSheet(b.dataset.qc); }); });
     root.querySelectorAll("[data-edit-usage]").forEach(function (b) { b.addEventListener("click", function () { openUsageEditSheet(b.dataset.editUsage); }); });
+    root.querySelectorAll("[data-attention-ref]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        const ref = b.dataset.attentionRef;
+        const type = b.dataset.attentionType;
+        if (type === 'stale_run' || type === 'blocked_work') {
+          state.workFilter = 'attention';
+          state.view = 'work';
+          render();
+        } else if (type === 'needs_seth') {
+          state.view = 'today';
+          render();
+        } else if (type === 'idle_agent') {
+          state.view = 'agents';
+          jumpToAgent(ref);
+        }
+      });
+    });
 
     ["btn-voice-brief", "btn-voice-brief-inline"].forEach(function (id) {
       const vbBtn = document.getElementById(id);
