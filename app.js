@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const VERSION = window.STACK_VERSION || "v50.7.0-human-tabs";
+  const VERSION = window.STACK_VERSION || "v50.8.0-phone-ux";
   const SURFACE_KEY = "stack-surface-v1";
   const OUTBOX_KEY = "stack-rebirth-outbox-v1";
   const DRAFT_KEY = "stack-composer-drafts-v1";
@@ -206,6 +206,7 @@
     notifications: [],
     sharedMemory: { entries: [] },
     qcReceipts: [],
+    wakes: [],
     health: null,
     outbox: loadOutbox(),
     readNotifs: loadReadNotifs()
@@ -799,14 +800,11 @@
       const callsToday = prov && prov.calls_today != null ? Math.max(0, Number(prov.calls_today) || 0) : 0;
       const activity24h = callsToday + commits24h + floorMsgs24h + hbActive24h;
 
-      const rawPct = prov ? (prov.pct_used ?? prov.pct ?? prov.used_pct ?? prov.usage_pct ?? prov.percent ?? (typeof prov.used === "number" && typeof prov.limit === "number" && prov.limit > 0 ? Math.round((prov.used / prov.limit) * 100) : null)) : null;
-      const observedAt = Date.parse(prov && (prov.quota_observed_at || prov.updated_at) || "");
-      const resetMs = Date.parse(prov && prov.reset_at || "");
-      const hasLiveUsage = !!prov && (prov.quota_source || prov.source) === "manual-ui" &&
-        Number.isFinite(observedAt) && observedAt <= nowMs && nowMs - observedAt <= 2 * 3600000 &&
-        (!Number.isFinite(resetMs) || resetMs > nowMs) &&
-        typeof rawPct === "number" && Number.isFinite(rawPct);
-      const usagePct = hasLiveUsage ? Math.max(0, Math.min(100, Math.round(rawPct))) : 0;
+      const usageInfo = window.StackPolish && typeof window.StackPolish.classifyProviderUsage === "function"
+        ? window.StackPolish.classifyProviderUsage(prov, nowMs)
+        : { available: false, pct: null, stale: false, status: "unavailable", observedAt: "", resetAt: "", windowLabel: "", source: "" };
+      const hasLiveUsage = usageInfo.status === "fresh";
+      const usagePct = usageInfo.available ? usageInfo.pct : 0;
       const pctEstimated = false;
 
       const lastCallAt = (prov && (prov.last_call_at || prov.updated_at)) || (hb && hb.ts) || (commit && (commit.date || commit.created_at)) || "";
@@ -820,9 +818,9 @@
         ? (activityParts.join(" · ") + " (24h)")
         : (lastCallAt ? ("Seen " + relTime(lastCallAt)) : "0 events (24h)");
 
-      const rawResetAt = (prov && prov.reset_at) || "";
-      const windowLabel = (prov && (prov.window_label || prov.reset)) || base.reset;
-      const resetDisplay = hasLiveUsage ? formatResetLabel(rawResetAt, windowLabel) : "Reset unconfirmed";
+      const rawResetAt = usageInfo.resetAt || (prov && prov.reset_at) || "";
+      const windowLabel = usageInfo.windowLabel || (prov && (prov.window_label || prov.reset)) || base.reset;
+      const resetDisplay = usageInfo.available ? formatResetLabel(rawResetAt, windowLabel) : "Reset unconfirmed";
 
       return Object.assign({}, base, {
         status: status,
@@ -830,7 +828,10 @@
         lastSeen: lastSeen,
         session: liveSession,
         usagePct: usagePct,
-        usageObservedAt: hasLiveUsage ? (prov.quota_observed_at || prov.updated_at) : "",
+        usageAvailable: usageInfo.available,
+        usageStale: usageInfo.stale,
+        usageStatus: usageInfo.status,
+        usageObservedAt: usageInfo.observedAt || "",
         pctEstimated: pctEstimated,
         hasLiveUsage: hasLiveUsage,
         callsToday: callsToday,
@@ -841,7 +842,7 @@
         activitySummary: activitySummary,
         lastCallAt: lastCallAt,
         usageNote: usageNote,
-        usageSource: (prov && prov.source) || "",
+        usageSource: usageInfo.source || (prov && prov.source) || "",
         resetAt: rawResetAt,
         windowLabel: windowLabel,
         reset: resetDisplay,
@@ -948,6 +949,7 @@
       state.heartbeats = sync.heartbeats || state.heartbeats || {};
       state.agentSessions = sync.agent_sessions || state.agentSessions || { version: 1, sessions: [] };
       state.qcReceipts = Array.isArray(sync.qc_receipts) ? sync.qc_receipts : (state.qcReceipts || []);
+      state.wakes = Array.isArray(sync.wakes) ? sync.wakes : (state.wakes || []);
       state.sharedMemory = memory || { entries: [] };
       state.online = true;
       state.link = "live";
@@ -2442,6 +2444,80 @@
     }
   }
 
+  function formatAgentQuotaBadge(agent) {
+    if (!agent || agent.id === "peer-floor") {
+      return { available: false, stale: false, tone: "muted", shortLabel: "Shared room", label: "Shared room" };
+    }
+    const status = agent.usageStatus || (agent.hasLiveUsage ? "fresh" : "unavailable");
+    const readTxt = agent.usageObservedAt ? ("read " + relTime(agent.usageObservedAt)) : "reading time unknown";
+    const resetTxt = agent.reset || "Reset unconfirmed";
+    if (status === "fresh") {
+      const tone = agent.usagePct >= 85 ? "red" : agent.usagePct >= 70 ? "amber" : "green";
+      return {
+        available: true, stale: false, tone: tone,
+        shortLabel: agent.usagePct + "% · Fresh",
+        label: agent.usagePct + "% used · " + readTxt + " · " + resetTxt
+      };
+    }
+    if (status === "stale") {
+      return {
+        available: true, stale: true, tone: "amber",
+        shortLabel: agent.usagePct + "% · Stale",
+        label: agent.usagePct + "% used · Stale (" + readTxt + ") · " + resetTxt
+      };
+    }
+    return {
+      available: false, stale: false, tone: "muted",
+      shortLabel: "Quota unavailable",
+      label: "Quota unavailable · " + resetTxt
+    };
+  }
+
+  function renderNeedsSethSection(appState) {
+    if (!window.StackPolish || typeof window.StackPolish.buildNeedsSethItems !== "function") return "";
+    const items = window.StackPolish.buildNeedsSethItems(appState, { nameOf: assignmentName });
+    if (!items.length) return "";
+    const cards = items.map(function (item) {
+      let actionHtml = "";
+      if (item.kind === "assignment" && item.assignmentId) {
+        actionHtml = '<div class="needs-seth-actions">' +
+          '<button type="button" class="btn btn-pri btn-sm" data-open-assignment="' + esc(item.assignmentId) + '">Open assignment</button>' +
+        "</div>";
+      } else if (item.kind === "decision") {
+        const keyTitle = (item.needPayload && (item.needPayload.title || item.needPayload.key)) || item.title || "need";
+        actionHtml = '<div class="needs-seth-actions">' +
+          '<button type="button" class="btn btn-pri btn-sm" data-ping-floor="Approved go on: ' + esc(keyTitle) + '">Approve</button>' +
+          '<button type="button" class="btn btn-sec btn-sm" data-ping-floor="HOLD: ' + esc(keyTitle) + '">Hold</button>' +
+          '<button type="button" class="btn btn-sec btn-sm" data-jump-agent="peer-floor">Team chat</button>' +
+        "</div>";
+      } else if (item.kind === "blocked_work" && item.workId) {
+        actionHtml = '<div class="needs-seth-actions">' +
+          '<button type="button" class="btn btn-sec btn-sm" data-inspect="' + esc(item.workId) + '">Open work</button>' +
+        "</div>";
+      }
+      return (
+        '<article class="needs-seth-card" data-severity="' + esc(item.severity || "amber") + '">' +
+          '<div class="needs-seth-top">' +
+            '<span class="needs-seth-title"><span class="dot ' + esc(item.severity || "amber") + '"></span>' + esc(item.title) + '</span>' +
+            '<span class="badge ' + esc(item.severity || "amber") + '">' + esc(item.waitLabel || "Waiting") + '</span>' +
+          '</div>' +
+          '<p class="needs-seth-what">' + esc(item.whatHappened) + '</p>' +
+          '<div class="needs-seth-meta">' +
+            '<span>Owner: <strong>' + esc(item.owner) + '</strong></span>' +
+            '<span>Next: ' + esc(item.nextAction) + '</span>' +
+          '</div>' +
+          actionHtml +
+        '</article>'
+      );
+    }).join("");
+    return (
+      '<section class="panel needs-seth-panel" id="needs-seth-panel" aria-label="Needs Seth">' +
+        '<div class="section-head"><span class="section-title">Needs Seth (' + items.length + ')</span><span class="row-sub" style="margin:0;">Decisions, overdue acks &amp; blocked work</span></div>' +
+        '<div class="needs-seth-list">' + cards + '</div>' +
+      '</section>'
+    );
+  }
+
   function renderToday() {
     const topNeed = state.needsSeth[0] || null;
     const allFloorMsgs = roomMessages("peer-floor");
@@ -2494,7 +2570,7 @@
     const needsReview = assignments.find(function (task) { return task.status === "review_pending"; });
     const taskUpdates = [...new Set([needsReview, upcoming, assignments[0]].filter(Boolean))];
     const taskRows = taskUpdates.map(function (task) {
-      return '<button type="button" class="row" data-open-assignments>' +
+      return '<button type="button" class="row" data-open-assignment="' + esc(task.id) + '">' +
         '<span class="row-main"><span class="row-title">' + esc(task.title) + '</span>' +
         '<span class="row-sub">' + esc(todayAssignmentSummary(task)) + '</span></span>' +
         '<span class="row-right">›</span></button>';
@@ -2583,6 +2659,7 @@
     const teammateRows = teammateStatuses.map(function (row) {
       const session = primarySession(row.agent.id);
       const st = row.status;
+      const quota = formatAgentQuotaBadge(row.agent);
       const taskLine = session && session.task_title && st.tone === "green"
         ? esc(session.task_title)
         : esc(st.detail);
@@ -2591,6 +2668,7 @@
           '<span class="teammate-row-main">' +
             '<span class="teammate-name"><span class="dot ' + st.tone + '"></span>' + esc(row.agent.name) + "</span>" +
             '<span class="teammate-detail">' + taskLine + "</span>" +
+            '<span class="teammate-quota' + (quota.stale ? ' is-stale' : '') + '">Quota: ' + esc(quota.label) + "</span>" +
           "</span>" +
           '<span class="badge ' + st.tone + '">' + esc(st.label) + "</span>" +
         "</button>" +
@@ -2659,7 +2737,7 @@
         (state.assignments ? openAssignments : "—") + '</strong><span>Open assignments</span></button>' : '') +
       '<button type="button" class="control-stat" data-go="agents"><strong>' + totalUnread() + '</strong><span>Unread messages</span></button>' +
       '</nav>';
-    return heroHtml + brief + renderAttentionBanner(state) + sessionsPanel + '<div class="today-grid">' + streamCol + sheetsCol + "</div>";
+    return heroHtml + brief + renderNeedsSethSection(state) + renderAttentionBanner(state) + sessionsPanel + '<div class="today-grid">' + streamCol + sheetsCol + "</div>";
   }
 
   function renderAttentionBanner(appState) {
@@ -2699,10 +2777,11 @@
     const st = agentMeta(agent.status);
     const slug = dmSlugForAgent(agent.id);
     const msgs = roomMessages(slug);
-    const usageTone = agent.usagePct >= 85 ? "red" : agent.usagePct >= 70 ? "amber" : "";
-    const pctText = agent.hasLiveUsage
-      ? agent.usagePct + "% used · updated " + relTime(agent.usageObservedAt)
-      : "Usage not recorded yet";
+    const quota = formatAgentQuotaBadge(agent);
+    const usageTone = agent.usageStale ? "amber" : (agent.usagePct >= 85 ? "red" : agent.usagePct >= 70 ? "amber" : "");
+    const pctText = quota.available
+      ? (agent.usagePct + "% used" + (agent.usageStale ? " · Stale" : "") + (agent.usageObservedAt ? " · read " + relTime(agent.usageObservedAt) : ""))
+      : "Quota unavailable";
     const memEntries = state.sharedMemory.entries || [];
     const plainActivity = agent.id === "peer-floor"
       ? (msgs.length + " messages · tap a teammate below to @mention")
@@ -2769,7 +2848,7 @@
               ? '<span><strong>' + esc(pctText) + "</strong> · " + esc(agent.reset) + "</span><span>" + esc(plainActivity) + "</span>"
               : '<span>Everyone sees messages here</span><span>' + esc(plainActivity) + "</span>") +
           "</div>" +
-          (agent.id !== "peer-floor" ? '<div class="meter" style="margin-top:5px;height:4px;"><div class="meter-fill ' + usageTone + '" style="width:' + agent.usagePct + '%"></div></div>' : "") +
+          (agent.id !== "peer-floor" ? '<div class="meter" style="margin-top:5px;height:4px;"><div class="meter-fill ' + usageTone + (agent.usageStale ? ' is-stale' : '') + '" style="width:' + (quota.available ? agent.usagePct : 0) + '%"></div></div>' : "") +
         "</div>" +
         floorPresenceStrip +
         (agent.id !== "peer-floor" && agent.session ? sessionCardHtml(agent.session) : "") +
@@ -2923,7 +3002,7 @@
     ["Closed", ["verified", "cancelled"]],
   ];
 
-  async function openAssignmentInbox() {
+  async function openAssignmentInbox(targetAssignmentId) {
     assignmentSheet("Assignments", '<p role="status">Loading assignments…</p>');
     const loading = document.querySelector("#sheet [role=status]");
     try {
@@ -2933,8 +3012,48 @@
         state.assignments = data.assignments;
         render();
       }
+      function renderTimelineHtml(item) {
+        if (!window.StackPolish || typeof window.StackPolish.buildAssignmentTimeline !== "function") return "";
+        const tl = window.StackPolish.buildAssignmentTimeline(item, {
+          wakes: state.wakes || [],
+          messages: item.channel ? (state.messagesBySlug[item.channel] || []) : [],
+          nameOf: assignmentName
+        });
+        const deliveryTone = tl.deliveryMode === "manual_relay" ? "amber"
+          : tl.deliveryMode === "automatic_delivery" ? "green"
+          : tl.deliveryMode === "queued" ? "amber" : "muted";
+        const stepsHtml = tl.steps.map(function (step) {
+          const dotTone = step.state === "done" ? "green"
+            : (step.state === "waiting" || step.state === "queued") ? "amber"
+            : step.state === "error" ? "red" : "muted";
+          const timeTxt = step.at ? (relTime(step.at) + " · " + new Date(step.at).toLocaleString()) : "Not yet";
+          return '<li class="tl-step" data-tl-step="' + esc(step.key) + '" data-tl-state="' + esc(step.state) + '">' +
+            '<span class="dot ' + dotTone + '"></span>' +
+            '<div class="tl-body">' +
+              '<div class="tl-head"><strong>' + esc(step.label) + '</strong><span class="tl-time">' + esc(timeTxt) + '</span></div>' +
+              '<div class="tl-detail">' + esc(step.detail) + '</div>' +
+            '</div>' +
+          '</li>';
+        }).join("");
+        const retryBlock = tl.canRetry && data.enabled
+          ? '<div class="tl-retry-box">' +
+              '<p class="row-sub" style="margin:0 0 8px;">' + esc(tl.retrySummary) + '</p>' +
+              '<button type="button" class="btn btn-pri btn-sm" data-retry-assignment="' + esc(item.id) + '">Retry assignment</button>' +
+            '</div>'
+          : "";
+        return '<section class="assignment-timeline-wrap" aria-label="What happened timeline">' +
+          '<div class="tl-banner">' +
+            '<span class="section-title" style="font-size:12px;">What happened?</span>' +
+            '<span class="badge ' + deliveryTone + '" data-delivery-mode="' + esc(tl.deliveryMode) + '">' + esc(tl.deliveryLabel) + '</span>' +
+          '</div>' +
+          '<ol class="assignment-timeline">' + stepsHtml + '</ol>' +
+          retryBlock +
+        '</section>';
+      }
       function renderAssignment(item) {
         const canCancel = !["verified", "failed", "cancelled", "timed_out"].includes(item.status);
+        const canReassign = !["verified", "cancelled"].includes(item.status) && data.enabled;
+        const isTarget = !!targetAssignmentId && String(item.id) === String(targetAssignmentId);
         const prerequisite = item.dependency_id && data.assignments.find(function (other) { return other.id === item.dependency_id; });
         const live = primarySession(item.recipient);
         const history = item.history.map(function (event) {
@@ -2945,10 +3064,11 @@
         }).join("");
         const sticky = item.needs_attention || ["failed", "interrupted", "timed_out"].includes(item.status);
         const sessionLine = live ? sessionCardHtml(live) : '<p class="session-meta">No verified live session for ' + esc(assignmentName(item.recipient)) + ' (shows unknown rather than inventing “working”).</p>';
-        return '<details class="assignment-row"' + (sticky ? ' data-needs-attention="sticky"' : '') + '><summary><strong>' + esc(item.title) +
+        return '<details class="assignment-row" data-assignment-id="' + esc(item.id) + '"' + (sticky ? ' data-needs-attention="sticky"' : '') + (isTarget ? ' open' : '') + '><summary><strong>' + esc(item.title) +
           '</strong><span>' + esc(assignmentName(item.recipient)) + ' · ' +
           esc(assignmentLabels[item.status] || item.status) +
           (sticky ? ' · Needs attention' : '') + '</span></summary>' +
+          renderTimelineHtml(item) +
           '<dl class="assignment-plain">' +
           '<div><dt>What needs attention right now?</dt><dd>' + esc(sticky
             ? (item.attention_reason || "This stopped without a checked handoff. It stays in Needs Attention until you decide or follow-up automation moves it.")
@@ -2958,9 +3078,6 @@
           '<div><dt>Who checked the proof?</dt><dd>' + esc(item.status === "verified"
             ? assignmentName(item.reviewer) + " checked the proof."
             : assignmentName(item.reviewer) + " has not checked the proof yet.") + '</dd></div>' +
-          '<div><dt>What happened?</dt><dd>' + (history
-            ? 'See the trail below.'
-            : 'Nothing recorded yet.') + '</dd></div>' +
           '</dl>' +
           '<p class="assignment-text">' + esc(item.instructions) + '</p>' +
           '<p>Checks the result: ' + esc(assignmentName(item.reviewer)) + (item.attempt > 1 ? ' · Try ' + item.attempt : '') + '</p>' +
@@ -2970,7 +3087,7 @@
           (item.dependency_id ? '<p>Starts after: ' + esc(prerequisite?.title || "another task") + ' · ' + esc(assignmentLabels[item.dependency_status] || "Status unknown") + '</p>' : '') +
           (item.status === "scheduled" || item.status === "retry_wait" ? '<p>Available ' + esc(new Date(item.available_at).toLocaleString()) + '</p>' : '') +
           (item.evidence ? '<p class="assignment-text"><strong>Result and proof</strong><br>' + esc(item.evidence) + '</p>' : '') +
-          '<details class="assignment-history"><summary>What happened</summary><ol>' + history + '</ol>' +
+          '<details class="assignment-history"><summary>Receipt log</summary><ol>' + history + '</ol>' +
           (item.lease_until ? '<p>Current work window ends at ' + esc(new Date(item.lease_until).toLocaleString()) + '</p>' : '') +
           '<button type="button" class="btn btn-sec btn-sm" data-copy-assignment="' + esc(item.id) + '">Copy task ID</button>' +
           '<input class="input mono" aria-label="Task ID" readonly hidden value="' + esc(item.id) + '"></details>' +
@@ -2982,7 +3099,10 @@
           '<textarea class="input" rows="2" maxlength="2000" id="discussion-' + esc(item.id) + '" required></textarea></div>' +
           '<button type="submit" class="btn btn-pri btn-sm">Post message</button></form>' : '') +
           '</details>' +
-          (canCancel ? '<button type="button" class="btn btn-sec btn-sm" data-cancel-assignment="' + esc(item.id) + '">Cancel assignment</button>' : '') +
+          '<div class="hero-actions" style="margin-top:10px;">' +
+            (canReassign ? '<button type="button" class="btn btn-sec btn-sm" data-reassign-assignment="' + esc(item.id) + '">Reassign</button>' : '') +
+            (canCancel ? '<button type="button" class="btn btn-sec btn-sm" data-cancel-assignment="' + esc(item.id) + '">Cancel assignment</button>' : '') +
+          '</div>' +
           '</details>';
       }
       const rows = assignmentGroups.map(function (group) {
@@ -3113,8 +3233,62 @@
           }
         });
       });
-      document.getElementById("refresh-assignments").addEventListener("click", openAssignmentInbox);
+      document.getElementById("refresh-assignments").addEventListener("click", function () { openAssignmentInbox(targetAssignmentId); });
       document.getElementById("new-assignment")?.addEventListener("click", function () { openAssignmentForm(null, data); });
+      document.querySelectorAll("[data-reassign-assignment]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          const src = (data.assignments || []).find(function (a) { return String(a.id) === String(button.dataset.reassignAssignment); });
+          if (!src) return;
+          openAssignmentForm(null, data, {
+            title: src.title,
+            instructions: src.instructions,
+            reviewer: src.reviewer,
+            replaceId: src.id
+          });
+        });
+      });
+      document.querySelectorAll("[data-retry-assignment]").forEach(function (button) {
+        button.addEventListener("click", async function () {
+          const src = (data.assignments || []).find(function (a) { return String(a.id) === String(button.dataset.retryAssignment); });
+          if (!src) return;
+          const activeDuplicate = (data.assignments || []).find(function (other) {
+            return String(other.id) !== String(src.id) &&
+              other.title === src.title &&
+              other.recipient === src.recipient &&
+              !["verified", "cancelled", "failed", "timed_out"].includes(other.status);
+          });
+          const status = document.getElementById("assignment-status");
+          if (activeDuplicate) {
+            if (status) status.textContent = "Already active under " + assignmentName(activeDuplicate.recipient) + " (" + (assignmentLabels[activeDuplicate.status] || activeDuplicate.status) + "). Duplicate prevented.";
+            toast("Active assignment already exists — duplicate prevented.", "warning");
+            return;
+          }
+          button.disabled = true;
+          try {
+            const fields = {
+              title: src.title,
+              instructions: src.instructions,
+              recipient: src.recipient,
+              reviewer: src.reviewer,
+              retry_of: src.id,
+              attempt: src.attempt || 1
+            };
+            const key = await assignmentRequestKey(fields);
+            const requestId = assignmentRequestId(key);
+            await bff("/api/assignments", { method: "POST", body: JSON.stringify({ title: src.title, instructions: src.instructions, recipient: src.recipient, reviewer: src.reviewer, request_id: requestId }) });
+            clearAssignmentRequest(key);
+            toast("Retried assignment for " + assignmentName(src.recipient) + ".");
+            if (button.isConnected) await openAssignmentInbox(src.id);
+          } catch (error) {
+            if (button.isConnected && status) status.textContent = error.message;
+            button.disabled = false;
+          }
+        });
+      });
+      if (targetAssignmentId) {
+        const targetEl = document.querySelector('#sheet [data-assignment-id="' + CSS.escape(String(targetAssignmentId)) + '"]');
+        if (targetEl) targetEl.scrollIntoView({ block: "start", behavior: "smooth" });
+      }
       document.querySelectorAll("[data-cancel-assignment]").forEach(function (button) {
         button.addEventListener("click", async function () {
           const id = button.dataset.cancelAssignment;
@@ -3141,7 +3315,7 @@
     }
   }
 
-  async function openAssignmentForm(source, directory) {
+  async function openAssignmentForm(source, directory, prefill) {
     // Assign from a message: populate the job with that exact message, not a blank form.
     const linkedMessage = source && source.channel && source.message_id
       ? (state.messagesBySlug[source.channel] || []).find(function (m) { return String(m.id) === String(source.message_id); })
@@ -3149,7 +3323,7 @@
     const linkedBody = linkedMessage ? String(linkedMessage.body || "").trim() : "";
     const linkedTitle = linkedBody.split(/\r?\n/).find(function (line) { return line.trim(); }) || "";
     if (!directory) {
-      assignmentSheet("New assignment", '<p role="status">Checking teammate connections…</p>');
+      assignmentSheet(prefill && prefill.replaceId ? "Reassign task" : "New assignment", '<p role="status">Checking teammate connections…</p>');
       const loading = document.querySelector("#sheet [role=status]");
       try {
         directory = await bff("/api/assignments");
@@ -3167,17 +3341,20 @@
     const available = peers.filter(function (peer) { return peer.configured; });
     const unavailable = peers.filter(function (peer) { return !peer.configured; });
     const options = '<option value="">Choose a teammate</option>' + available.map(function (peer) {
-      return '<option value="' + esc(peer.id) + '">' + esc(assignmentName(peer.id)) + '</option>';
+      const ag = state.agents.find(function (a) { return a.id === peer.id; });
+      const quota = ag ? formatAgentQuotaBadge(ag) : { shortLabel: "Quota unavailable" };
+      return '<option value="' + esc(peer.id) + '">' + esc(assignmentName(peer.id) + " (" + quota.shortLabel + ")") + '</option>';
     }).join("");
     const dependencyOptions = directory.assignments.filter(function (item) { return item.sender === "seth"; }).map(function (item) {
       return '<option value="' + esc(item.id) + '">' + esc(item.title) + '</option>';
     }).join("");
-    assignmentSheet("New assignment",
+    assignmentSheet(prefill && prefill.replaceId ? "Reassign task" : "New assignment",
       '<form id="assignment-form">' +
       '<div class="field"><label for="assignment-title">Task</label><input class="input" id="assignment-title" name="title" required maxlength="160"></div>' +
       '<div class="field"><label for="assignment-instructions">What should they do, and what does done look like?</label>' +
       '<textarea class="input" id="assignment-instructions" name="instructions" rows="4" required maxlength="4000"></textarea></div>' +
       '<div class="field"><label for="assignment-recipient">Who does the work?</label><select class="input" id="assignment-recipient" name="recipient" required>' + options + '</select></div>' +
+      '<div id="assignment-quota-preview" class="assignment-quota-preview" aria-live="polite"></div>' +
       '<div class="field"><label for="assignment-reviewer">Who checks the result?</label><select class="input" id="assignment-reviewer" name="reviewer" required>' + options + '</select></div>' +
       (unavailable.length ? '<p class="sheet-sub">Without an assignment connection: ' +
         unavailable.map(function (peer) { return esc(assignmentName(peer.id)); }).join(", ") + '.</p>' : '') +
@@ -3192,9 +3369,24 @@
     const form = document.getElementById("assignment-form");
     const recipient = form.elements.recipient;
     const reviewer = form.elements.reviewer;
+    const quotaPreview = form.querySelector("#assignment-quota-preview");
+    function updateQuotaPreview() {
+      if (!quotaPreview) return;
+      const ag = state.agents.find(function (a) { return a.id === recipient.value; });
+      if (!ag) { quotaPreview.innerHTML = ""; return; }
+      const st = teammatePlainStatus(ag);
+      const quota = formatAgentQuotaBadge(ag);
+      quotaPreview.innerHTML =
+        '<div class="quota-preview-row">' +
+          '<span class="badge ' + st.tone + '"><span class="dot ' + st.tone + '"></span>Availability: ' + esc(st.label) + '</span>' +
+          '<span class="badge ' + quota.tone + '">' + esc(quota.label) + '</span>' +
+        '</div>' +
+        (ag.usageStale ? '<p class="row-sub" style="margin:4px 0 0;">Quota reading is stale — verify before assigning a heavy job.</p>' : "");
+    }
     recipient.addEventListener("change", function () {
       if (reviewer.value === recipient.value) reviewer.value = "";
       for (const option of reviewer.options) option.disabled = !!option.value && option.value === recipient.value;
+      updateQuotaPreview();
     });
     form.querySelector("#assignment-connections")?.addEventListener("click", async function () {
       await openAssignmentInbox();
@@ -3204,6 +3396,12 @@
     if (linkedMessage) {
       form.querySelector("#assignment-title").value = linkedTitle.slice(0, 160);
       form.querySelector("#assignment-instructions").value = linkedBody.slice(0, 4000);
+    } else if (prefill) {
+      if (prefill.title) form.querySelector("#assignment-title").value = String(prefill.title).slice(0, 160);
+      if (prefill.instructions) form.querySelector("#assignment-instructions").value = String(prefill.instructions).slice(0, 4000);
+      if (prefill.recipient) recipient.value = prefill.recipient;
+      if (prefill.reviewer && prefill.reviewer !== recipient.value) reviewer.value = prefill.reviewer;
+      updateQuotaPreview();
     }
     form.addEventListener("submit", async function (event) {
       event.preventDefault();
@@ -3312,8 +3510,9 @@
 
     const usageRows = modelAgents.map(function (a) {
       const m = agentMeta(a.status);
-      const tone = a.usagePct >= 85 ? "red" : a.usagePct >= 70 ? "amber" : "";
-      const pctLabel = a.hasLiveUsage ? a.usagePct + "% · " + relTime(a.usageObservedAt) : "Not recorded";
+      const quota = formatAgentQuotaBadge(a);
+      const tone = a.usageStale ? "amber" : (a.usagePct >= 85 ? "red" : a.usagePct >= 70 ? "amber" : "");
+      const pctLabel = quota.shortLabel + (a.usageObservedAt ? (" · read " + relTime(a.usageObservedAt)) : "");
       const lastCallTxt = a.lastCallAt ? (" · last " + relTime(a.lastCallAt)) : "";
       return (
         '<div class="usage-row">' +
@@ -3323,12 +3522,12 @@
               '<div class="row-sub">' + esc(m.label) + " · " + esc(a.reset) + esc(lastCallTxt) + " · " + esc(a.activitySummary || "") + "</div>" +
             "</div>" +
             '<div class="usage-row-actions">' +
-              '<strong>' + esc(pctLabel) + "</strong>" +
+              '<strong class="' + (a.usageStale ? 'is-stale' : '') + '">' + esc(pctLabel) + "</strong>" +
               '<button type="button" class="btn btn-sec btn-sm" data-edit-usage="' + esc(a.id) + '">Update</button>' +
               '<button type="button" class="btn btn-sec btn-sm" data-jump-agent="' + esc(a.id) + '">Chat</button>' +
             "</div>" +
           "</div>" +
-          '<div class="meter" style="margin-top:0;"><div class="meter-fill ' + tone + '" style="width:' + (a.hasLiveUsage ? a.usagePct : 0) + '%"></div></div>' +
+          '<div class="meter" style="margin-top:0;"><div class="meter-fill ' + tone + (a.usageStale ? ' is-stale' : '') + '" style="width:' + (quota.available ? a.usagePct : 0) + '%"></div></div>' +
           (a.usageNote ? '<div class="usage-row-meta"><span class="row-sub" style="margin-top:0;">' + esc(a.usageNote) + "</span></div>" : "") +
         "</div>"
       );
@@ -3361,7 +3560,7 @@
           "</div>" +
         "</div>" +
         '<h2 class="hero-title">How much each teammate has used</h2>' +
-        '<p class="hero-copy">' + modelAgents.filter(function (a) { return a.hasLiveUsage; }).length + " of " + modelAgents.length + " have a usage reading · " + totalEvents + " activity signals today<br/>Updated " + relTime(state.lastSyncIso) + (state.outbox.length ? " · " + state.outbox.length + " waiting to send" : "") + " · Auto-dispatch off · $" + ZERO_SPEND + " spend<br/>" + healthLine + "</p>" +
+        '<p class="hero-copy">' + modelAgents.filter(function (a) { return a.usageAvailable; }).length + " of " + modelAgents.length + " have a usage reading (" + modelAgents.filter(function (a) { return a.hasLiveUsage; }).length + " fresh) · " + totalEvents + " activity signals today<br/>Updated " + relTime(state.lastSyncIso) + (state.outbox.length ? " · " + state.outbox.length + " waiting to send" : "") + " · Auto-dispatch off · $" + ZERO_SPEND + " spend<br/>" + healthLine + "</p>" +
         '<div class="hero-actions">' +
           '<button type="button" class="btn btn-pri btn-sm" id="btn-sync-now">Refresh</button>' +
           '<button type="button" class="btn btn-sec btn-sm" id="btn-timemachine">Recent changes</button>' +
@@ -3771,7 +3970,7 @@
               '<div class="row-title"><span class="dot ' + m.tone + '"></span>' + esc(a.name) + ' <span class="mono">· ' + esc(a.role) + "</span></div>" +
               '<div class="row-sub">' + esc(agentAgeText(a)) + " · " + esc(a.evidence) + "</div>" +
             "</div>" +
-            '<div class="row-right"><span>' + (a.hasLiveUsage ? a.usagePct + "% · Manual" : "Usage not recorded") + "</span><span>›</span></div>" +
+            '<div class="row-right"><span>' + esc(formatAgentQuotaBadge(a).shortLabel) + "</span><span>›</span></div>" +
           "</button>" +
           (session ? sessionCardHtml(session) : '<p class="session-meta">No check-in or heartbeat yet.</p>') +
         "</div>"
@@ -3842,11 +4041,11 @@
         '<div class="quota-top">' +
           '<span class="badge ' + st.tone + '"><span class="dot ' + st.tone + '"></span>' + esc(agent.name) + " · " + esc(st.label) + "</span>" +
           (agent.id !== "peer-floor"
-            ? '<div class="usage-row-actions"><strong class="mono">' + esc(agent.hasLiveUsage ? agent.usagePct + "% · Manual" : "Quota unavailable") + '</strong><button type="button" class="btn btn-sec btn-sm" id="sheet-calibrate-btn" data-sheet-calibrate="' + esc(agent.id) + '">Calibrate</button></div>'
+            ? '<div class="usage-row-actions"><strong class="mono">' + esc(formatAgentQuotaBadge(agent).label) + '</strong><button type="button" class="btn btn-sec btn-sm" id="sheet-calibrate-btn" data-sheet-calibrate="' + esc(agent.id) + '">Calibrate</button></div>'
             : '<span class="mono">' + esc(agent.activitySummary) + "</span>") +
         "</div>" +
         (agent.id !== "peer-floor"
-          ? '<div class="meter"><div class="meter-fill ' + (agent.usagePct >= 85 ? "red" : agent.usagePct >= 70 ? "amber" : "") + '" style="width:' + agent.usagePct + '%"></div></div>' : "") +
+          ? '<div class="meter"><div class="meter-fill ' + (agent.usageStale ? "amber is-stale" : (agent.usagePct >= 85 ? "red" : agent.usagePct >= 70 ? "amber" : "")) + '" style="width:' + (agent.usageAvailable ? agent.usagePct : 0) + '%"></div></div>' : "") +
         '<div class="quota-meta"><span class="git-chip">Evidence: ' + esc(agent.evidence) + '</span><span>' + esc(agent.reset) + " · " + esc(agent.activitySummary) + "</span></div>" +
         (agent.usageNote ? '<div class="row-sub" style="margin-top:6px;">' + esc(agent.usageNote) + "</div>" : "") +
       "</div>"
@@ -4261,7 +4460,10 @@
       });
     });
     root.querySelectorAll("[data-open-assignments]").forEach(function (button) {
-      button.addEventListener("click", openAssignmentInbox);
+      button.addEventListener("click", function () { openAssignmentInbox(); });
+    });
+    root.querySelectorAll("[data-open-assignment]").forEach(function (button) {
+      button.addEventListener("click", function () { openAssignmentInbox(button.dataset.openAssignment); });
     });
     root.querySelectorAll("[data-assign-message]").forEach(function (button) {
       button.addEventListener("click", function () {

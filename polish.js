@@ -380,6 +380,320 @@
     return clipSpoken(intro + " " + label + ": " + last.body, 1180);
   }
 
+  function formatWaitDuration(iso, nowMs) {
+    if (!iso) return "Unknown";
+    var t = Date.parse(iso);
+    if (!Number.isFinite(t)) return "Unknown";
+    var now = typeof nowMs === "number" ? nowMs : Date.now();
+    var diff = Math.max(0, now - t);
+    var mins = Math.floor(diff / 60000);
+    if (mins < 1) return "Just now";
+    if (mins < 60) return mins + "m";
+    var hrs = Math.floor(mins / 60);
+    var remMins = mins % 60;
+    if (hrs < 24) return remMins ? (hrs + "h " + remMins + "m") : (hrs + "h");
+    var days = Math.floor(hrs / 24);
+    var remHrs = hrs % 24;
+    return remHrs ? (days + "d " + remHrs + "h") : (days + "d");
+  }
+
+  function classifyProviderUsage(prov, nowMs) {
+    var now = typeof nowMs === "number" ? nowMs : Date.now();
+    if (!prov || typeof prov !== "object") {
+      return {
+        available: false,
+        pct: null,
+        stale: false,
+        status: "unavailable",
+        observedAt: "",
+        resetAt: "",
+        windowLabel: "",
+        source: ""
+      };
+    }
+    var rawPct = prov.pct_used !== undefined && prov.pct_used !== null ? prov.pct_used
+      : (prov.pct !== undefined && prov.pct !== null ? prov.pct
+      : (prov.used_pct !== undefined && prov.used_pct !== null ? prov.used_pct
+      : (prov.usage_pct !== undefined && prov.usage_pct !== null ? prov.usage_pct
+      : (prov.percent !== undefined && prov.percent !== null ? prov.percent
+      : (typeof prov.used === "number" && typeof prov.limit === "number" && prov.limit > 0
+        ? Math.round((prov.used / prov.limit) * 100) : null)))));
+    var available = typeof rawPct === "number" && Number.isFinite(rawPct);
+    var pct = available ? Math.max(0, Math.min(100, Math.round(rawPct))) : null;
+    var observedAt = String(prov.quota_observed_at || prov.updated_at || "");
+    var observedMs = Date.parse(observedAt);
+    var resetAt = String(prov.reset_at || "");
+    var resetMs = Date.parse(resetAt);
+    var source = String(prov.quota_source || prov.source || "");
+    var staleByFlag = prov.quota_stale === true;
+    var staleByAge = !Number.isFinite(observedMs) || (now - observedMs > 2 * 3600000) || (observedMs - now > 300000);
+    var staleByReset = Number.isFinite(resetMs) && resetMs <= now;
+    var staleBySource = source !== "manual-ui" && source !== "live-api";
+    var stale = available && (staleByFlag || staleByAge || staleByReset || staleBySource);
+    return {
+      available: available,
+      pct: pct,
+      stale: stale,
+      status: !available ? "unavailable" : (stale ? "stale" : "fresh"),
+      observedAt: observedAt,
+      resetAt: resetAt,
+      windowLabel: String(prov.window_label || prov.reset || ""),
+      source: source
+    };
+  }
+
+  function detectWakeDeliveryMode(wake, history, messages) {
+    var hayParts = [];
+    if (wake) {
+      hayParts.push(wake.via, wake.delivery_mode, wake.note, wake.subject, wake.body);
+      if (wake.manual_relay === true) return "manual_relay";
+    }
+    (history || []).forEach(function (ev) {
+      if (ev && ev.note) hayParts.push(ev.note);
+    });
+    (messages || []).forEach(function (m) {
+      if (m && m.body) hayParts.push(m.body);
+    });
+    var hay = hayParts.filter(Boolean).join(" ");
+    if (/manual[\s_-]?relay|relayed manually/i.test(hay)) return "manual_relay";
+    if (wake) {
+      var via = String(wake.via || "").toLowerCase();
+      if (via === "manual" || via === "manual_relay") return "manual_relay";
+      if (via === "actions" || via === "peer_delivery" || (via === "local" && wake.status === "handled" && wake.handled_at)) {
+        return "automatic_delivery";
+      }
+      if (wake.status === "open" || wake.status === "queued") return "queued";
+    }
+    return wake ? "queued" : "none";
+  }
+
+  function buildAssignmentTimeline(assignment, opts) {
+    opts = opts || {};
+    var a = assignment || {};
+    var history = Array.isArray(a.history) ? a.history : [];
+    var wakes = (Array.isArray(opts.wakes) ? opts.wakes : []).filter(function (w) {
+      return w && w.assignment_id === a.id;
+    });
+    var messages = Array.isArray(opts.messages) ? opts.messages : [];
+    var nameOf = typeof opts.nameOf === "function" ? opts.nameOf : function (id) { return id || "Unknown"; };
+
+    var assignEv = history.find(function (e) { return e && e.action === "assign"; });
+    var claimEv = history.find(function (e) { return e && e.action === "claim"; });
+    var ackEv = history.find(function (e) { return e && e.action === "acknowledge"; });
+    var submitEv = history.slice().reverse().find(function (e) { return e && e.action === "submit"; });
+    var reviewEv = history.slice().reverse().find(function (e) { return e && e.action === "review"; });
+    var failEv = history.slice().reverse().find(function (e) { return e && e.action === "fail"; });
+    var cancelEv = history.slice().reverse().find(function (e) { return e && e.action === "cancel"; });
+
+    var primaryWake = wakes[wakes.length - 1] || null;
+    var deliveryMode = detectWakeDeliveryMode(primaryWake, history, messages);
+    var wakeAt = (primaryWake && (primaryWake.created_at || primaryWake.updated_at)) || null;
+    var isAcknowledged = Boolean(ackEv);
+
+    var deliveryLabel = deliveryMode === "manual_relay" ? "Manual relay"
+      : deliveryMode === "automatic_delivery" ? "Automatic delivery"
+      : deliveryMode === "queued" ? "Wake queued (not proof of acknowledgement)"
+      : "No wake recorded";
+
+    var steps = [];
+    steps.push({
+      key: "assigned",
+      label: "Assigned",
+      state: assignEv || a.created_at ? "done" : "pending",
+      at: (assignEv && assignEv.at) || a.created_at || null,
+      detail: nameOf(a.sender) + " → " + nameOf(a.recipient) + (a.reviewer ? " · reviewer " + nameOf(a.reviewer) : ""),
+      actor: a.sender || null
+    });
+
+    var wakeDetail = deliveryLabel;
+    if (primaryWake && primaryWake.handled_by && primaryWake.handled_at) {
+      wakeDetail += " · handled by " + primaryWake.handled_by;
+    } else if (deliveryMode === "queued" && !isAcknowledged) {
+      wakeDetail = "Wake queued — not proof " + nameOf(a.recipient) + " received or accepted the job";
+    }
+    steps.push({
+      key: "wake",
+      label: "Wake recorded",
+      state: deliveryMode === "manual_relay" || deliveryMode === "automatic_delivery" ? "done"
+        : deliveryMode === "queued" ? "queued" : "pending",
+      deliveryMode: deliveryMode,
+      at: wakeAt,
+      detail: wakeDetail,
+      actor: (primaryWake && (primaryWake.handled_by || primaryWake.from)) || null
+    });
+
+    var ackState = isAcknowledged ? "done" : (claimEv ? "waiting" : "pending");
+    var ackDetail = isAcknowledged
+      ? (nameOf(ackEv.actor || a.recipient) + " acknowledged" + (ackEv.session_id ? " (" + ackEv.session_id + ")" : ""))
+      : claimEv
+        ? (nameOf(claimEv.actor || a.recipient) + " picked up, but has not acknowledged yet")
+        : "Not acknowledged yet";
+    steps.push({
+      key: "acknowledged",
+      label: "Agent acknowledged",
+      state: ackState,
+      acknowledged: isAcknowledged,
+      at: (ackEv && ackEv.at) || (claimEv && claimEv.at) || null,
+      detail: ackDetail,
+      actor: (ackEv && ackEv.actor) || (claimEv && claimEv.actor) || null
+    });
+
+    steps.push({
+      key: "result",
+      label: "Result arrived",
+      state: submitEv ? "done" : (failEv ? "error" : "pending"),
+      at: (submitEv && submitEv.at) || (failEv && failEv.at) || null,
+      detail: submitEv
+        ? (nameOf(submitEv.actor || a.recipient) + " submitted proof" + (a.evidence ? ": " + clipSpoken(a.evidence, 120) : ""))
+        : failEv
+          ? ("Attempt stopped" + (failEv.note ? ": " + failEv.note : ""))
+          : "Waiting for result",
+      actor: (submitEv && submitEv.actor) || (failEv && failEv.actor) || null
+    });
+
+    steps.push({
+      key: "reviewed",
+      label: "Reviewed",
+      state: reviewEv ? "done" : (cancelEv ? "muted" : (a.status === "review_pending" ? "waiting" : "pending")),
+      at: (reviewEv && reviewEv.at) || (cancelEv && cancelEv.at) || null,
+      detail: reviewEv
+        ? (nameOf(reviewEv.actor || a.reviewer) + (reviewEv.note ? " · " + reviewEv.note : " · review recorded"))
+        : cancelEv
+          ? ("Cancelled by " + nameOf(cancelEv.actor))
+          : a.status === "review_pending"
+            ? ("Awaiting independent review by " + nameOf(a.reviewer))
+            : ("Pending review by " + nameOf(a.reviewer)),
+      actor: (reviewEv && reviewEv.actor) || (cancelEv && cancelEv.actor) || null
+    });
+
+    var canRetry = ["failed", "interrupted", "timed_out", "retry_wait"].indexOf(a.status) !== -1;
+    return {
+      steps: steps,
+      deliveryMode: deliveryMode,
+      deliveryLabel: deliveryLabel,
+      acknowledged: isAcknowledged,
+      canRetry: canRetry,
+      retrySummary: canRetry
+        ? ("Re-issues \"" + (a.title || "Assignment") + "\" to " + nameOf(a.recipient) + " (reviewed by " + nameOf(a.reviewer) + ") using a deduplicated request key.")
+        : ""
+    };
+  }
+
+  function buildNeedsSethItems(appState, opts) {
+    opts = opts || {};
+    var now = typeof opts.nowMs === "number" ? opts.nowMs : Date.now();
+    var nameOf = typeof opts.nameOf === "function" ? opts.nameOf : function (id) { return id || "Unknown"; };
+    var overdueMs = typeof opts.overdueAckMs === "number" ? opts.overdueAckMs : 15 * 60000;
+    var items = [];
+    var seen = Object.create(null);
+
+    function add(item) {
+      if (!item || !item.id || seen[item.id]) return;
+      seen[item.id] = true;
+      items.push(item);
+    }
+
+    (appState && appState.needsSeth || []).forEach(function (n, idx) {
+      if (!n || n.resolved) return;
+      var id = "need-" + (n.key || n.id || idx);
+      var since = n.created_at || n.updated_at || "";
+      add({
+        id: id,
+        kind: "decision",
+        title: n.title || n.summary || "Decision needed",
+        whatHappened: n.body || n.reason || n.detail || "Waiting on your call in needs_seth.json",
+        owner: n.owner || n.agent || "Team",
+        ownerId: String(n.owner || n.agent || "peer-floor").toLowerCase().split(/[\s/]+/)[0],
+        waitingSince: since,
+        waitLabel: since ? formatWaitDuration(since, now) : "Waiting",
+        nextAction: n.action || "Approve, hold, or reply in Team chat",
+        severity: "amber",
+        needPayload: n
+      });
+    });
+
+    (appState && appState.assignments || []).forEach(function (a) {
+      if (!a || !a.id) return;
+      var ageMs = a.updated_at ? (now - Date.parse(a.updated_at)) : (a.created_at ? (now - Date.parse(a.created_at)) : 0);
+      var since = a.updated_at || a.created_at || "";
+      if (a.status === "review_pending") {
+        add({
+          id: "asg-" + a.id,
+          kind: "assignment",
+          assignmentId: a.id,
+          assignmentStatus: a.status,
+          title: a.title || "Assignment needs review",
+          whatHappened: nameOf(a.recipient) + " submitted a result · awaiting " + nameOf(a.reviewer) + " review",
+          owner: nameOf(a.reviewer) + " (from " + nameOf(a.recipient) + ")",
+          ownerId: a.reviewer || a.recipient,
+          waitingSince: since,
+          waitLabel: since ? formatWaitDuration(since, now) : "Waiting",
+          nextAction: "Open assignment to inspect proof & discussion",
+          severity: "amber"
+        });
+      } else if (a.status === "failed" || a.status === "interrupted" || a.status === "timed_out") {
+        add({
+          id: "asg-" + a.id,
+          kind: "assignment",
+          assignmentId: a.id,
+          assignmentStatus: a.status,
+          title: a.title || "Blocked assignment",
+          whatHappened: a.attention_reason || ("Job " + a.status.replace("_", " ") + " without a verified handoff"),
+          owner: nameOf(a.recipient),
+          ownerId: a.recipient,
+          waitingSince: since,
+          waitLabel: since ? formatWaitDuration(since, now) : "Waiting",
+          nextAction: "Open to retry, reassign, or cancel",
+          severity: "red"
+        });
+      } else if ((a.status === "assigned" || a.status === "received") && Number.isFinite(ageMs) && ageMs >= overdueMs) {
+        add({
+          id: "asg-" + a.id,
+          kind: "assignment",
+          assignmentId: a.id,
+          assignmentStatus: a.status,
+          title: a.title || "Overdue acknowledgement",
+          whatHappened: a.status === "received"
+            ? (nameOf(a.recipient) + " picked up the job, but has not acknowledged it")
+            : ("Overdue acknowledgement · " + nameOf(a.recipient) + " has not picked this up yet"),
+          owner: nameOf(a.recipient),
+          ownerId: a.recipient,
+          waitingSince: since,
+          waitLabel: formatWaitDuration(since, now),
+          nextAction: "Open assignment or reassign to another teammate",
+          severity: "amber"
+        });
+      }
+    });
+
+    (appState && appState.items || []).forEach(function (w) {
+      if (!w) return;
+      var st = String(w.state || "").toLowerCase();
+      if (w.blockedReason || st.indexOf("block") !== -1) {
+        add({
+          id: "work-" + w.id,
+          kind: "blocked_work",
+          workId: w.id,
+          title: w.title || "Blocked work",
+          whatHappened: w.blockedReason || w.blocker || "Blocked workstream needs unblock",
+          owner: w.owner || "Team",
+          ownerId: w.ownerId || "peer-floor",
+          waitingSince: w.deadline || "",
+          waitLabel: w.deadline ? ("Due " + w.deadline) : "Blocked",
+          nextAction: "Open work item or chat owner",
+          severity: "red"
+        });
+      }
+    });
+
+    var sevRank = { red: 0, amber: 1, green: 2, muted: 3 };
+    return items.sort(function (a, b) {
+      var sd = (sevRank[a.severity] ?? 9) - (sevRank[b.severity] ?? 9);
+      if (sd !== 0) return sd;
+      return (Date.parse(a.waitingSince || "") || 0) - (Date.parse(b.waitingSince || "") || 0);
+    });
+  }
+
   var api = {
     AGENT_IDS: AGENT_IDS,
     parsePaletteQuery: parsePaletteQuery,
@@ -398,7 +712,12 @@
     buildTodayBriefText: buildTodayBriefText,
     buildAgentLatestText: buildAgentLatestText,
     buildVoiceReplySpeakText: buildVoiceReplySpeakText,
-    voiceCallStateLabel: voiceCallStateLabel
+    voiceCallStateLabel: voiceCallStateLabel,
+    formatWaitDuration: formatWaitDuration,
+    classifyProviderUsage: classifyProviderUsage,
+    detectWakeDeliveryMode: detectWakeDeliveryMode,
+    buildAssignmentTimeline: buildAssignmentTimeline,
+    buildNeedsSethItems: buildNeedsSethItems
   };
 
   root.StackPolish = api;
