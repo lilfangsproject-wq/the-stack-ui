@@ -2289,6 +2289,29 @@
     }
   }
 
+  function renderAttentionBanner(appState) {
+    if (typeof StackAttentionQueue !== "function") return "";
+    const items = new StackAttentionQueue(appState || state).getItems();
+    if (!items.length) return "";
+    const shown = items.slice(0, 3);
+    const rows = shown.map(function (item) {
+      return '<div class="row">' +
+        '<span class="dot ' + esc(item.severity === "red" ? "red" : "amber") + '"></span>' +
+        '<div class="row-main"><div class="row-title">' + esc(item.title) + '</div>' +
+        '<div class="row-sub">' + esc(item.detail) + '</div></div>' +
+        '<span class="row-right">' + esc(item.action) + '</span>' +
+      '</div>';
+    }).join("");
+    const more = items.length > shown.length
+      ? '<div class="row-sub">' + (items.length - shown.length) + ' more</div>'
+      : "";
+    return '<section class="card" aria-label="Needs attention">' +
+      '<div class="card-head"><span class="card-title">Needs attention</span>' +
+      '<span class="count">' + items.length + '</span></div>' +
+      rows + more +
+    '</section>';
+  }
+
   function renderToday() {
     const topNeed = state.needsSeth[0] || null;
     const allFloorMsgs = state.messagesBySlug["peer-floor"] || [];
@@ -2501,7 +2524,7 @@
       "</div>";
 
     // Insert attention banner before the hero if there are items
-    const attentionBanner = renderAttentionBanner();
+    const attentionBanner = renderAttentionBanner(state);
     const finalHeroHtml = attentionBanner + heroHtml;
 
     return finalHeroHtml + sessionsPanel + '<div class="today-grid">' + streamCol + sheetsCol + "</div>";
