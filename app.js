@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const VERSION = window.STACK_VERSION || "v50.6.5-control-room";
+  const VERSION = window.STACK_VERSION || "v50.7.0-human-tabs";
   const SURFACE_KEY = "stack-surface-v1";
   const OUTBOX_KEY = "stack-rebirth-outbox-v1";
   const DRAFT_KEY = "stack-composer-drafts-v1";
@@ -176,6 +176,7 @@
 
   const state = {
     view: "today",
+    opsFilter: "overview",
     assignmentMode: null,
     assignments: null,
     activeAgentId: "peer-floor",
@@ -2355,21 +2356,26 @@
     const canAssign = state.assignmentMode === "enabled" && showFoot && slug && m.id &&
       !m._submitting && !m._queued && !String(m.id).startsWith("local-");
     const isAutomated = m.auto === true;
+    const authorLabel = isAutomated ? "Stack automation" : (m.author || "Teammate");
     let receipt = "";
     if (showFoot && isMe) {
       if (m.backend_accepted_at || m._accepted) {
         const linked = (state.assignments || []).filter(function (task) {
           return task.channel === slug && task.message_id === m.id;
         });
-        receipt = '<details class="msg-foot msg-receipt"><summary class="git-chip">Saved to conversation</summary>' +
-          (m.backend_accepted_at ? '<div><time datetime="' + esc(m.backend_accepted_at) + '">' + esc(m.backend_accepted_at) + '</time></div>' : '') +
-          '<div>Agent acknowledgement unconfirmed.</div>' +
-          (linked.length ? '<div>' + linked.map(function (task) {
+        const savedAt = m.backend_accepted_at ? relTime(m.backend_accepted_at) : "just now";
+        receipt = '<details class="msg-trail"><summary><span class="git-chip">✓ Saved · ' + esc(savedAt) + '</span></summary>' +
+          '<ol class="msg-trail-steps">' +
+            '<li>Sent from your device</li>' +
+            '<li>Saved to shared room' + (m.backend_accepted_at ? ' (' + esc(relTime(m.backend_accepted_at)) + ')' : '') + '</li>' +
+            '<li>Teammates see this on their next check-in</li>' +
+          '</ol>' +
+          (linked.length ? '<div style="margin-top:6px;">' + linked.map(function (task) {
             return esc(task.title + ' · ' + assignmentLabels[task.status]);
-          }).join('<br>') + '</div><button type="button" class="btn btn-sec btn-sm" data-open-assignments>Open assignments</button>' : '') +
+          }).join('<br>') + '</div><button type="button" class="btn btn-sec btn-sm" style="margin-top:6px;" data-open-assignments>Open assignments</button>' : '') +
           '</details>';
       } else {
-        const label = m._queued ? "In Outbox · Send unconfirmed" : m._submitting ? "Saving message…" : "No send receipt available";
+        const label = m._queued ? "Waiting to send · tap Retry" : m._submitting ? "Sending…" : "Saved to room";
         receipt = '<div class="msg-foot"><span class="git-chip">' + label + '</span>' +
           (m._queued ? ' <button type="button" class="btn btn-sec btn-sm" data-retry-message="' + esc(m.id) +
             '" data-retry-room="' + esc(slug) + '">Retry</button>' : "") + '</div>';
@@ -2384,13 +2390,21 @@
       ? '<div class="msg-plain-summary">' + esc(plainSummary) + "</div>" + sourceLink +
         '<details class="msg-tech-details"><summary>Show technical log</summary><div class="msg-tech-raw" style="white-space:pre-wrap;">' + esc(rawBody) + "</div></details>"
       : '<div style="white-space:pre-wrap;">' + esc(rawBody) + "</div>" + sourceLink;
+    const replyBtn = (!isMe && !isAutomated && slug === "peer-floor" && m.author)
+      ? '<button type="button" class="msg-act" data-reply-author="@' + esc(m.author) + ' ">Reply</button>'
+      : "";
+    const assignBtn = canAssign
+      ? '<button type="button" class="msg-act" data-assign-message="' + esc(m.id) + '" data-assign-channel="' + esc(slug) + '">Make task</button>'
+      : "";
+    const actionsRow = (replyBtn || assignBtn)
+      ? '<div class="msg-actions-row">' + replyBtn + assignBtn + '</div>'
+      : "";
     return (
       '<div class="msg ' + (isMe ? "me" : "") + '">' +
-        '<div class="msg-head"><span class="msg-author">' + esc(isAutomated ? "Stack automation" : m.author || "Agent") + '</span><span class="msg-time">' + relTime(m.created_at) + "</span></div>" +
+        '<div class="msg-head"><span class="msg-author-badge">' + esc(authorLabel) + '</span><span class="msg-time">' + relTime(m.created_at) + "</span></div>" +
         bodyHtml +
         receipt +
-        (canAssign ? '<div class="msg-foot"><button type="button" class="btn btn-sec btn-sm" data-assign-message="' +
-          esc(m.id) + '" data-assign-channel="' + esc(slug) + '">Assign</button></div>' : "") +
+        actionsRow +
       "</div>"
     );
   }
@@ -2681,7 +2695,7 @@
 
   function renderAgents() {
     const agent = state.agents.find(function (a) { return a.id === state.activeAgentId; }) || state.agents[0];
-    if (!agent) return '<div class="empty">Loading agents…</div>';
+    if (!agent) return '<div class="empty">Loading team…</div>';
     const st = agentMeta(agent.status);
     const slug = dmSlugForAgent(agent.id);
     const msgs = roomMessages(slug);
@@ -2691,7 +2705,7 @@
       : "Usage not recorded yet";
     const memEntries = state.sharedMemory.entries || [];
     const plainActivity = agent.id === "peer-floor"
-      ? (agent.activitySummary || "Message everyone here")
+      ? (msgs.length + " messages · tap a teammate below to @mention")
       : (agent.activitySummary || agent.lastSeen || "No recent chat");
 
     const switcher = state.agents.map(function (a) {
@@ -2703,10 +2717,27 @@
           esc(a.id) + '" aria-pressed="' + (a.id === agent.id) + '">' +
           '<span class="agent-pill-top"><span class="dot ' + am.tone + '"></span>' + esc(a.name) +
             '<span class="room-unread" data-unread-room="' + esc(agentSlug) + '"' + (unread ? '' : ' hidden') + '>' + unread + ' unread</span></span>' +
-          '<span class="agent-pill-age">' + esc(agentAgeText(a)) + "</span>" +
+          '<span class="agent-pill-age">' + esc(a.id === "peer-floor" ? "Group room" : agentAgeText(a)) + "</span>" +
         "</button>"
       );
     }).join("");
+
+    const teamOnly = state.agents.filter(function (a) { return a.id !== "peer-floor"; });
+    const floorPresenceStrip = agent.id === "peer-floor" ? (
+      '<div class="peer-presence-strip" aria-label="Team in this room">' +
+        teamOnly.map(function (a) {
+          const ps = teammatePlainStatus(a);
+          const replied24h = msgs.some(function (m) {
+            return m.auto !== true && String(m.author || "").toLowerCase().indexOf(a.id) !== -1 &&
+              (Date.now() - (Date.parse(m.created_at) || 0)) < 86400000;
+          });
+          const tag = replied24h ? "Replied" : (ps.tone === "green" ? "Working" : ps.tone === "amber" ? "Checked in" : "Offline");
+          return '<button type="button" class="peer-chip" data-insert="@' + esc(a.name) + ' " title="Tap to @mention ' + esc(a.name) + '">' +
+            '<span class="dot ' + ps.tone + '"></span><span>' + esc(a.name) + '</span>' +
+            '<span class="peer-chip-tag">' + esc(tag) + '</span></button>';
+        }).join("") +
+      '</div>'
+    ) : "";
 
     const msgHtml = msgs.map(function (m) {
       return renderMessageBubble(m, true, slug);
@@ -2715,13 +2746,13 @@
     return (
       '<div class="conversation-deck">' +
       '<details class="conversation-picker" id="conversation-picker"' + (wideConversations.matches || roomPickerOpen ? ' open' : '') + '>' +
-        '<summary>Conversations <span>' + esc(agent.name) + '</span></summary>' +
+        '<summary>Rooms <span>' + esc(agent.name) + '</span></summary>' +
         '<nav class="agent-strip" aria-label="Conversations">' + switcher + '</nav>' +
       '</details>' +
       '<section class="hero chat-hero">' +
         '<div class="hero-top">' +
           '<div class="chat-room-heading"><h2 class="hero-title">' + esc(agent.name) + '</h2>' +
-            '<div class="chat-room-state"><span class="dot ' + st.tone + '"></span>' + esc(st.label) + '</div></div>' +
+            '<div class="chat-room-state"><span class="dot ' + (agent.id === "peer-floor" ? "green" : st.tone) + '"></span>' + esc(agent.id === "peer-floor" ? "Shared group room" : st.label) + '</div></div>' +
           '<div class="hero-top-actions">' +
             '<details class="chat-tools"' + (wideConversations.matches ? ' open' : '') + '><summary class="btn btn-sec btn-sm">Tools</summary>' +
               '<div class="chat-tool-list">' +
@@ -2736,32 +2767,32 @@
           '<div class="chat-subbar-top">' +
             (agent.id !== "peer-floor"
               ? '<span><strong>' + esc(pctText) + "</strong> · " + esc(agent.reset) + "</span><span>" + esc(plainActivity) + "</span>"
-              : '<span>Everyone can see this room</span><span>' + esc(plainActivity) + "</span>") +
+              : '<span>Everyone sees messages here</span><span>' + esc(plainActivity) + "</span>") +
           "</div>" +
           (agent.id !== "peer-floor" ? '<div class="meter" style="margin-top:5px;height:4px;"><div class="meter-fill ' + usageTone + '" style="width:' + agent.usagePct + '%"></div></div>' : "") +
         "</div>" +
+        floorPresenceStrip +
         (agent.id !== "peer-floor" && agent.session ? sessionCardHtml(agent.session) : "") +
         '<div class="chat-log-wrap">' +
           '<div id="chat-log" class="chat-log" data-chat-room="' + esc(slug) +
             '" aria-label="Messages in ' + esc(agent.name) + '" tabindex="0">' +
             (roomHistory.get(roomKey(slug)) ? '<div class="chat-history"><button type="button" class="btn btn-sec btn-sm" data-earlier-room="' +
               esc(slug) + '">Earlier messages</button></div>' : '') +
-            (msgHtml || '<div class="empty">' + (roomHistory.has(roomKey(slug)) ? "No messages yet." : "Waiting for conversation history…") + '</div>') + "</div>" +
+            (msgHtml || '<div class="empty">' + (roomHistory.has(roomKey(slug)) ? "No messages yet." : "Loading messages…") + '</div>') + "</div>" +
           '<button type="button" id="chat-jump-bottom" class="chat-jump-pill hidden">↓ Latest</button>' +
         "</div>" +
         '<div class="chip-strip">' +
-          (agent.id === "peer-floor" ? '<button type="button" class="ctx-chip" data-cloud-prompt>Copy team prompt</button>' : "") +
-          (agent.id === "peer-floor" ? '<button type="button" class="ctx-chip" data-insert="@all ">Everyone</button>' + state.agents.filter(function (a) { return a.id !== "peer-floor"; }).map(function (a) {
-            return '<button type="button" class="ctx-chip" data-insert="@' + esc(a.name) + ' ">' + esc(a.name) + "</button>";
-          }).join("") : "") +
-          '<button type="button" class="ctx-chip" data-insert="Give me a plain-English update: what works right now, what is broken, and what you need from me.">Ask for status</button>' +
-          '<button type="button" class="ctx-chip" data-insert="Please test the latest fix end-to-end on phone and confirm everything actually works.">Ask phone test</button>' +
+          (agent.id === "peer-floor" ? '<button type="button" class="ctx-chip" data-insert="@all Quick check-in: what are you working on right now and any blockers?">Ping everyone</button>' : "") +
+          (agent.id === "peer-floor" ? '<button type="button" class="ctx-chip" data-cloud-prompt>Copy prompt</button>' : "") +
+          '<button type="button" class="ctx-chip" data-insert="Give me a plain-English update: what works right now, what is broken, and what you need from me.">Status check</button>' +
+          '<button type="button" class="ctx-chip" data-insert="Please test the latest fix end-to-end on phone and confirm everything works.">Phone test</button>' +
+          '<button type="button" class="ctx-chip" data-insert="Anything blocked or waiting on my call?">Blockers?</button>' +
         "</div>" +
         voiceCallBarHtml(slug) +
         '<div class="composer-wrap">' +
           '<div id="agent-mention-pop" class="mention-pop hidden" role="listbox" aria-label="Mention suggestions"></div>' +
           '<form id="agent-chat-form" class="composer">' +
-            '<input id="agent-chat-input" aria-label="Message" data-draft-channel="' + esc(slug) + '" data-slug="' + esc(slug) + '" class="input" placeholder="' + (agent.id === "peer-floor" ? "Message the whole team…" : "Message " + esc(agent.name) + "…") + '" autocomplete="off" enterkeyhint="send" required />' +
+            '<input id="agent-chat-input" aria-label="Message" data-draft-channel="' + esc(slug) + '" data-slug="' + esc(slug) + '" class="input" placeholder="' + (agent.id === "peer-floor" ? "Message the whole team… (type @ to tag someone)" : "Message " + esc(agent.name) + "…") + '" autocomplete="off" enterkeyhint="send" required />' +
             dictationButton("agent-chat-input") +
             '<button type="submit" class="btn btn-pri btn-sm">Send</button>' +
           "</form>" +
@@ -3272,6 +3303,12 @@
     const modelAgents = state.agents.filter(function (a) { return a.id !== "peer-floor"; });
     const anyLiveUsage = modelAgents.some(function (a) { return a.hasLiveUsage; });
     const totalEvents = modelAgents.reduce(function (sum, a) { return sum + (a.activity24h || 0); }, 0);
+    const checkedInCount = modelAgents.filter(function (a) {
+      const st = teammatePlainStatus(a);
+      return st.tone === "green" || st.tone === "amber";
+    }).length;
+    const activeWorkCount = state.items.filter(function (i) { return itemStateMeta(i.state).label !== "On Hold"; }).length;
+    const commitCount = (state.commits || []).length;
 
     const usageRows = modelAgents.map(function (a) {
       const m = agentMeta(a.status);
@@ -3298,13 +3335,21 @@
     }).join("");
 
     const healthLine = state.health
-      ? ("Status <strong>" + esc(state.health.status || "—") + "</strong> · spend cap $" + esc(String(state.health.zero_spend_cap_usd ?? ZERO_SPEND)))
+      ? ("Server <strong>" + esc(state.health.status === "ok" ? "Healthy" : (state.health.status || "—")) + "</strong> · spend cap $" + esc(String(state.health.zero_spend_cap_usd ?? ZERO_SPEND)))
       : "Status not loaded yet";
     const shaTone = state.link === "live" ? "green" : state.link === "polling" ? "amber" : "neutral";
     const autoBadgeTone = state.online ? "green" : "neutral";
     const usageStatus = state.usageAutoSynced
       ? ("Updated" + (state.usageSyncedAt ? " · " + relTime(state.usageSyncedAt) : ""))
       : (anyLiveUsage ? "Manual readings" : (state.online ? "Live activity" : "Offline — tap Refresh"));
+
+    const kpiStrip =
+      '<div class="ops-kpis" aria-label="Live statistics">' +
+        '<div class="ops-kpi"><span class="ops-kpi-lbl">Activity 24h</span><strong class="ops-kpi-val">' + totalEvents + '</strong><span class="ops-kpi-sub">Live team signals</span></div>' +
+        '<button type="button" class="ops-kpi" id="btn-tile-commits"><span class="ops-kpi-lbl">Commits</span><strong class="ops-kpi-val">' + commitCount + '</strong><span class="ops-kpi-sub">Tap to inspect ›</span></button>' +
+        '<button type="button" class="ops-kpi" data-view="ops"><span class="ops-kpi-lbl">Checked in</span><strong class="ops-kpi-val">' + checkedInCount + '/' + modelAgents.length + '</strong><span class="ops-kpi-sub">Open Ops ›</span></button>' +
+        '<button type="button" class="ops-kpi" data-view="work"><span class="ops-kpi-lbl">Active work</span><strong class="ops-kpi-val">' + activeWorkCount + '</strong><span class="ops-kpi-sub">View projects ›</span></button>' +
+      '</div>';
 
     return (
       '<section class="hero">' +
@@ -3322,22 +3367,113 @@
           '<button type="button" class="btn btn-sec btn-sm" id="btn-timemachine">Recent changes</button>' +
           '<button type="button" class="btn btn-sec btn-sm" id="btn-voice-settings">Voice</button>' +
           (state.outbox.length ? '<button type="button" class="btn btn-sec btn-sm" id="btn-flush-ob">Send waiting (' + state.outbox.length + ")</button>" : "") +
-          '<button type="button" class="btn btn-danger btn-sm" id="btn-sign-out">Lock</button>' +
+          '<button type="button" class="btn btn-danger btn-sm" id="btn-sign-out">Sign out</button>' +
         "</div>" +
       "</section>" +
+      kpiStrip +
       '<div class="section-head"><span class="section-title">Teammate usage</span><span>' + esc(usageStatus) + "</span></div>" +
       '<div class="panel">' + usageRows + "</div>"
+    );
+  }
+
+  function renderOps() {
+    const rosterOnly = state.agents.filter(function (a) { return a.id !== "peer-floor"; });
+    const teammateRowsData = rosterOnly.map(function (a) {
+      return { agent: a, status: teammatePlainStatus(a), session: primarySession(a.id) };
+    });
+    const workingCount = teammateRowsData.filter(function (r) { return r.status.tone === "green"; }).length;
+    const checkedInCount = teammateRowsData.filter(function (r) { return r.status.tone === "green" || r.status.tone === "amber"; }).length;
+    const blockedCount = teammateRowsData.filter(function (r) { return r.status.tone === "red"; }).length;
+    const totalEvents = rosterOnly.reduce(function (sum, a) { return sum + (a.activity24h || 0); }, 0);
+    const activeItems = state.items.filter(function (i) { return itemStateMeta(i.state).label !== "On Hold"; });
+    const floorMsgs = roomMessages("peer-floor").slice(-6);
+    const recentCommits = (state.commits || []).slice(0, 8);
+
+    const filterTabs = [
+      { id: "overview", label: "Overview" },
+      { id: "tasks", label: "Tasks" },
+      { id: "team", label: "Team" },
+      { id: "activity", label: "Activity" }
+    ].map(function (t) {
+      return '<button type="button" class="seg-btn ' + (state.opsFilter === t.id ? "active" : "") + '" data-ops-filter="' + t.id + '">' + t.label + "</button>";
+    }).join("");
+
+    const kpiStrip =
+      '<div class="ops-kpis" aria-label="Live operations">' +
+        '<button type="button" class="ops-kpi" data-ops-filter="team"><span class="ops-kpi-lbl">Team checked in</span><strong class="ops-kpi-val">' + checkedInCount + '/' + rosterOnly.length + '</strong><span class="ops-kpi-sub">' + workingCount + ' working · ' + blockedCount + ' blocked</span></button>' +
+        '<button type="button" class="ops-kpi" data-ops-filter="tasks"><span class="ops-kpi-lbl">Active tasks</span><strong class="ops-kpi-val">' + activeItems.length + '</strong><span class="ops-kpi-sub">Tap to inspect ›</span></button>' +
+        '<button type="button" class="ops-kpi" data-ops-filter="activity"><span class="ops-kpi-lbl">Activity 24h</span><strong class="ops-kpi-val">' + totalEvents + '</strong><span class="ops-kpi-sub">' + recentCommits.length + ' recent commits</span></button>' +
+        '<button type="button" class="ops-kpi" data-jump-agent="peer-floor"><span class="ops-kpi-lbl">Team chat</span><strong class="ops-kpi-val">' + roomMessages("peer-floor").length + '</strong><span class="ops-kpi-sub">Open room ›</span></button>' +
+      '</div>';
+
+    const teamSection =
+      '<div class="section-head"><span class="section-title">Teammate status</span><button type="button" class="section-link" data-view="agents">Open Team ›</button></div>' +
+      '<div class="panel">' + teammateRowsData.map(function (r) {
+        return '<button type="button" class="row" data-jump-agent="' + esc(r.agent.id) + '">' +
+          '<div class="row-main"><div class="row-title"><span class="dot ' + r.status.tone + '"></span>' + esc(r.agent.name) + '</div>' +
+          '<div class="row-sub">' + esc(r.status.detail) + ' · ' + esc(r.agent.activitySummary || "No recent activity") + '</div></div>' +
+          '<div class="row-right"><span class="badge ' + r.status.tone + '">' + esc(r.status.label) + '</span><span>›</span></div>' +
+        '</button>';
+      }).join("") + '</div>';
+
+    const tasksSection =
+      '<div class="section-head"><span class="section-title">Active work</span><button type="button" class="section-link" data-view="work">All work ›</button></div>' +
+      '<div class="panel">' + (activeItems.length ? activeItems.slice(0, 8).map(function (i) {
+        const m = itemStateMeta(i.state);
+        return '<button type="button" class="row" data-inspect="' + esc(i.id) + '">' +
+          '<div class="row-main"><div class="row-title"><span class="dot ' + m.tone + '"></span>' + esc(i.title) + '</div>' +
+          '<div class="row-sub">' + esc(i.owner) + (i.summary ? ' · ' + esc(i.summary) : '') + '</div></div>' +
+          '<div class="row-right"><span>' + esc(m.label) + '</span><span>›</span></div>' +
+        '</button>';
+      }).join("") : '<div class="empty">No active work items yet.</div>') + '</div>';
+
+    const activitySection =
+      '<div class="section-head"><span class="section-title">Recent changes</span><button type="button" class="section-link" id="btn-sheet-commits">All history ›</button></div>' +
+      '<div class="panel">' + (recentCommits.length ? recentCommits.map(function (c) {
+        const sha = String(c.sha || "").slice(0, 7);
+        return '<a class="row" href="' + esc(c.url || "#") + '" target="_blank" rel="noopener">' +
+          '<div class="row-main"><div class="row-title">' + esc(String(c.message || "Update").split("\n")[0]) + '</div>' +
+          '<div class="row-sub">' + esc(c.author || "Git") + ' · ' + relTime(c.date) + '</div></div>' +
+          '<span class="git-chip">' + esc(sha) + '</span>' +
+        '</a>';
+      }).join("") : '<div class="empty">No recent commits loaded.</div>') + '</div>';
+
+    const floorSection =
+      '<div class="section-head"><span class="section-title">Latest in team chat</span><button type="button" class="section-link" data-jump-agent="peer-floor">Reply ›</button></div>' +
+      '<div class="panel" style="padding:12px 14px;"><div class="chat-log" style="margin-bottom:0;">' +
+        (floorMsgs.length ? floorMsgs.map(function (m) { return renderMessageBubble(m, true, "peer-floor"); }).join("") : '<div class="empty">No messages yet.</div>') +
+      '</div></div>';
+
+    let bodyHtml = "";
+    if (state.opsFilter === "tasks") bodyHtml = tasksSection;
+    else if (state.opsFilter === "team") bodyHtml = teamSection;
+    else if (state.opsFilter === "activity") bodyHtml = activitySection + floorSection;
+    else bodyHtml = teamSection + tasksSection + activitySection;
+
+    return (
+      '<section class="hero">' +
+        '<div class="hero-top">' +
+          '<span class="kicker">Control room</span>' +
+          '<span class="badge ' + (state.online ? "green" : "neutral") + '">' + (state.online ? '<span class="dot green"></span>Live' : "Offline") + '</span>' +
+        '</div>' +
+        '<h2 class="hero-title">Live team operations</h2>' +
+        '<p class="hero-copy">Updated ' + relTime(state.lastSyncIso) + ' · Auto-dispatch off · $' + ZERO_SPEND + ' spend</p>' +
+        '<div class="hero-actions">' +
+          '<button type="button" class="btn btn-pri btn-sm" id="btn-sync-now">Refresh</button>' +
+          '<button type="button" class="btn btn-sec btn-sm" data-jump-agent="peer-floor">Open team chat</button>' +
+          (state.assignmentMode ? '<button type="button" class="btn btn-sec btn-sm" data-open-assignments>Assignments</button>' : '') +
+        '</div>' +
+      '</section>' +
+      kpiStrip +
+      renderAttentionBanner(state) +
+      '<div class="seg" role="tablist">' + filterTabs + '</div>' +
+      bodyHtml
     );
   }
 
   function renderChrome() {
     const titles = { today: "Today", agents: "Team", work: "Work", stats: "Usage", explore: "Explore", ops: "Ops" };
     document.getElementById("page-heading").textContent = titles[state.view] || "The Stack";
-    if (state.view === "ops") {
-      // Full Control Room runtime lives at /ops/ — take the whole app, don't soft-embed a stub.
-      window.location.assign(new URL("ops/", window.location.href).href);
-      return;
-    }
     document.querySelectorAll("[data-view]").forEach(function (el) { el.classList.toggle("active", el.dataset.view === state.view); });
 
     const unreadNotifs = state.notifications.filter(function (n) { return n.unread; }).length;
@@ -3421,6 +3557,7 @@
     if (state.view === "today") root.innerHTML = renderToday();
     else if (state.view === "agents") root.innerHTML = renderAgents();
     else if (state.view === "work") root.innerHTML = renderWork();
+    else if (state.view === "ops") root.innerHTML = renderOps();
     else if (state.view === "explore") window.StackExplore.mount(root, bff);
     else root.innerHTML = renderStats();
 
@@ -3507,15 +3644,15 @@
   function openQcSheet(workstreamId) {
     const item = state.items.find(function (i) { return i.id === workstreamId; }) || {};
     openSheet(
-      '<div class="sheet-head"><div><h2 class="sheet-title">QC Receipt</h2><p class="sheet-sub">reviewer !== builder · commit SHA · checks</p></div><button type="button" class="orb-btn" style="width:32px;height:32px;" data-close-sheet>✕</button></div>' +
+      '<div class="sheet-head"><div><h2 class="sheet-title">Mark work as checked</h2><p class="sheet-sub">Needs a second pair of eyes (not the person who built it)</p></div><button type="button" class="orb-btn" style="width:32px;height:32px;" data-close-sheet>✕</button></div>' +
       '<form id="qc-form">' +
-        '<div class="field"><label>Workstream</label><input class="input mono" value="' + esc(item.title || workstreamId || "") + '" disabled /></div>' +
-        '<div class="field"><label for="qc-builder">Builder</label><input id="qc-builder" class="input" value="' + esc(item.ownerId || "cursor") + '" required /></div>' +
-        '<div class="field"><label for="qc-reviewer">Reviewer (must differ)</label><input id="qc-reviewer" class="input" placeholder="claude" required /></div>' +
-        '<div class="field"><label for="qc-sha">Commit SHA</label><input id="qc-sha" class="input mono" placeholder="abcdef12" required /></div>' +
-        '<div class="field"><label for="qc-notes">Notes</label><textarea id="qc-notes" class="input" rows="3" placeholder="What was verified"></textarea></div>' +
-        '<label class="check-row"><span class="check-left"><input id="qc-pass" type="checkbox" required /> <span class="check-txt">Checks passed (E2E / tests)</span></span></label>' +
-        '<div class="hero-actions" style="margin-top:12px;"><button type="submit" class="btn btn-pri" style="width:100%;">Commit QC Receipt</button></div>' +
+        '<div class="field"><label>Project</label><input class="input mono" value="' + esc(item.title || workstreamId || "") + '" disabled /></div>' +
+        '<div class="field"><label for="qc-builder">Who built it</label><input id="qc-builder" class="input" value="' + esc(item.ownerId || "cursor") + '" required /></div>' +
+        '<div class="field"><label for="qc-reviewer">Who checked it (someone else)</label><input id="qc-reviewer" class="input" placeholder="claude" required /></div>' +
+        '<div class="field"><label for="qc-sha">Change ID (commit)</label><input id="qc-sha" class="input mono" placeholder="abcdef12" required /></div>' +
+        '<div class="field"><label for="qc-notes">What was checked</label><textarea id="qc-notes" class="input" rows="3" placeholder="Briefly describe what you tested"></textarea></div>' +
+        '<label class="check-row"><span class="check-left"><input id="qc-pass" type="checkbox" required /> <span class="check-txt">Tests and checks passed</span></span></label>' +
+        '<div class="hero-actions" style="margin-top:12px;"><button type="submit" class="btn btn-pri" style="width:100%;">Save check</button></div>' +
       "</form>"
     );
     document.getElementById("qc-form").addEventListener("submit", async function (e) {
@@ -3634,7 +3771,7 @@
               '<div class="row-title"><span class="dot ' + m.tone + '"></span>' + esc(a.name) + ' <span class="mono">· ' + esc(a.role) + "</span></div>" +
               '<div class="row-sub">' + esc(agentAgeText(a)) + " · " + esc(a.evidence) + "</div>" +
             "</div>" +
-            '<div class="row-right"><span>' + (a.hasLiveUsage ? a.usagePct + "% · Manual" : "Quota unavailable") + "</span><span>›</span></div>" +
+            '<div class="row-right"><span>' + (a.hasLiveUsage ? a.usagePct + "% · Manual" : "Usage not recorded") + "</span><span>›</span></div>" +
           "</button>" +
           (session ? sessionCardHtml(session) : '<p class="session-meta">No check-in or heartbeat yet.</p>') +
         "</div>"
@@ -3735,15 +3872,15 @@
     if (!agent) return;
     const initialReset = agent.windowLabel || agent.resetAt || agent.reset || "";
     openSheet(
-      '<div class="sheet-head"><div><h2 class="sheet-title">Calibrate Quota · ' + esc(agent.name) + '</h2><p class="sheet-sub">' + esc(agent.model) + " · commits to usage.json</p></div><button type=\"button\" class=\"orb-btn\" style=\"width:32px;height:32px;\" data-close-sheet>✕</button></div>" +
+      '<div class="sheet-head"><div><h2 class="sheet-title">Update usage · ' + esc(agent.name) + '</h2><p class="sheet-sub">' + esc(agent.model) + " · saves to your workspace</p></div><button type=\"button\" class=\"orb-btn\" style=\"width:32px;height:32px;\" data-close-sheet>✕</button></div>" +
       '<form id="usage-edit-form">' +
         '<div class="field"><label for="usage-pct">% Used (0–100)</label>' +
         '<input id="usage-pct" class="input mono" type="number" min="0" max="100" step="1" value="' + esc(agent.hasLiveUsage ? String(agent.usagePct) : "") + '" required /></div>' +
-        '<div class="field"><label for="usage-reset">Reset Window</label>' +
-        '<input id="usage-reset" class="input" type="text" value="' + esc(initialReset) + '" placeholder="e.g. 4h window, Daily, or ISO reset time" /></div>' +
+        '<div class="field"><label for="usage-reset">When it resets</label>' +
+        '<input id="usage-reset" class="input" type="text" value="' + esc(initialReset) + '" placeholder="e.g. Every 4 hours or Daily" /></div>' +
         '<div class="field"><label for="usage-note">Note</label>' +
-        '<textarea id="usage-note" class="input" rows="3" placeholder="Current quota note or pool status">' + esc(agent.usageNote || "") + "</textarea></div>" +
-        '<div class="hero-actions"><button type="submit" id="usage-save-btn" class="btn btn-pri" style="width:100%;">Save Calibration</button></div>' +
+        '<textarea id="usage-note" class="input" rows="3" placeholder="Any note about this teammate’s limit">' + esc(agent.usageNote || "") + "</textarea></div>" +
+        '<div class="hero-actions"><button type="submit" id="usage-save-btn" class="btn btn-pri" style="width:100%;">Save usage</button></div>' +
       "</form>"
     );
 
@@ -4001,8 +4138,8 @@
     paletteIndex = 0;
     const rows = paletteRows("");
     openSheet(
-      '<div class="sheet-head"><div><h2 class="sheet-title">Command palette</h2><p class="sheet-sub">Jump · actions · send. Filters: agent: status: date:7d</p></div><button type="button" class="orb-btn" style="width:32px;height:32px;" data-close-sheet aria-label="Close">✕</button></div>' +
-      '<input id="cmdk-input" class="input cmdk-input" placeholder="Jump, act, or send to the floor…" autocomplete="off" enterkeyhint="go" role="combobox" aria-expanded="true" aria-controls="cmdk-list" />' +
+      '<div class="sheet-head"><div><h2 class="sheet-title">Quick search</h2><p class="sheet-sub">Type a teammate, project, or message to send</p></div><button type="button" class="orb-btn" style="width:32px;height:32px;" data-close-sheet aria-label="Close">✕</button></div>' +
+      '<input id="cmdk-input" class="input cmdk-input" placeholder="Search or send a message to the team…" autocomplete="off" enterkeyhint="go" role="combobox" aria-expanded="true" aria-controls="cmdk-list" />' +
       '<div id="cmdk-list" class="panel cmdk-list" role="listbox"></div>'
     );
     const input = document.getElementById("cmdk-input");
@@ -4132,6 +4269,7 @@
       });
     });
     root.querySelectorAll("[data-work-filter]").forEach(function (b) { b.addEventListener("click", function () { state.workFilter = b.dataset.workFilter; render(); }); });
+    root.querySelectorAll("[data-ops-filter]").forEach(function (b) { b.addEventListener("click", function () { state.opsFilter = b.dataset.opsFilter; render(); }); });
     root.querySelectorAll("[data-inspect]").forEach(function (b) { b.addEventListener("click", function () { openItemSheet(b.dataset.inspect); }); });
     root.querySelectorAll("[data-qc]").forEach(function (b) { b.addEventListener("click", function () { openQcSheet(b.dataset.qc); }); });
     root.querySelectorAll("[data-edit-usage]").forEach(function (b) { b.addEventListener("click", function () { openUsageEditSheet(b.dataset.editUsage); }); });
@@ -4324,10 +4462,12 @@
         document.documentElement.classList.remove("chat-keyboard");
       });
     }
-    root.querySelectorAll("[data-insert]").forEach(function (c) {
+    root.querySelectorAll("[data-insert], [data-reply-author]").forEach(function (c) {
       c.addEventListener("click", function () {
         if (!chatInput) return;
-        chatInput.value = (chatInput.value ? chatInput.value + " " : "") + c.dataset.insert;
+        const snippet = c.dataset.insert || c.dataset.replyAuthor || "";
+        if (!snippet) return;
+        chatInput.value = (chatInput.value ? chatInput.value + " " : "") + snippet;
         saveComposerDraft(chatInput);
         chatInput.focus();
       });
@@ -4384,6 +4524,8 @@
     if (flushBtn) flushBtn.addEventListener("click", flushOutbox);
     const tmBtn = document.getElementById("btn-timemachine");
     if (tmBtn) tmBtn.addEventListener("click", openTimeMachine);
+    const tileCommitsBtn = document.getElementById("btn-tile-commits");
+    if (tileCommitsBtn) tileCommitsBtn.addEventListener("click", openTimeMachine);
     const signOutBtn = document.getElementById("btn-sign-out");
     if (signOutBtn) signOutBtn.addEventListener("click", function () { clearCreds(); location.reload(); });
   }
@@ -4683,6 +4825,8 @@
     updateChatViewport();
   }
 
+  const initialView = new URLSearchParams(window.location.search).get("view");
+  if (["today", "agents", "work", "stats", "explore", "ops"].indexOf(initialView) !== -1) state.view = initialView;
   loadCreds();
   if (creds.pin && creds.bff) {
     state.link = (typeof navigator !== "undefined" && navigator.onLine === false) ? "offline" : "polling";

@@ -1,20 +1,20 @@
 /* The Stack v50.6.5 Control Room — network-first shell cache for Cloudflare Pages / GitHub Pages.
  * Always fetches fresh UI when online so pushes appear immediately on iPhone PWAs.
  */
-const CACHE = "the-stack-shell-v50.6.5-control-room";
+const CACHE = "the-stack-shell-v50.7.0-human-tabs";
 const SHELL = [
   "./",
   "./index.html",
-  "./bg-tahoe.svg?v=50.6.5-control-room",
-  "./chat.js?v=50.6.5-control-room",
-  "./app.js?v=50.6.5-control-room",
-  "./explore.js?v=50.6.5-control-room",
-  "./polish.js?v=50.6.5-control-room",
-  "./config.js?v=50.6.5-control-room",
-  "./style.css?v=50.6.5-control-room",
-  "./favicon.svg?v=50.6.5-control-room",
-  "./manifest.webmanifest?v=50.6.5-control-room",
-  "./icon-180.png?v=50.6.5-control-room",
+  "./bg-tahoe.svg?v=50.7.0-human-tabs",
+  "./chat.js?v=50.7.0-human-tabs",
+  "./app.js?v=50.7.0-human-tabs",
+  "./explore.js?v=50.7.0-human-tabs",
+  "./polish.js?v=50.7.0-human-tabs",
+  "./config.js?v=50.7.0-human-tabs",
+  "./style.css?v=50.7.0-human-tabs",
+  "./favicon.svg?v=50.7.0-human-tabs",
+  "./manifest.webmanifest?v=50.7.0-human-tabs",
+  "./icon-180.png?v=50.7.0-human-tabs",
   "./icon-192.png",
   "./icon-512.png"
 ];

@@ -82,6 +82,10 @@
       headers["Content-Type"] = "application/json";
     }
     const res = await fetch(state.bff + opsPath, { ...options, headers });
+    if (res.status === 404 && opsPath.startsWith("/api/ops/")) {
+      window.location.replace(new URL("../?view=ops", window.location.href).href);
+      throw new Error("Redirecting to in-app Ops");
+    }
     const data = await res.json().catch(() => ({ ok: false, error: "bad_json" }));
     if (!res.ok || data.ok === false) {
       const err = new Error(errorText(data && data.error, errorText(res.statusText, "request_failed")));
