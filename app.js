@@ -1,6 +1,6 @@
 /* The Stack v50.6.1 CLARITY VOICE — Cloudflare Worker BFF, Zero-Spend · Opt-In Voice, Liquid Glass
  * Hard rules: no always-on mic/Jarvis; opt-in TTS (/api/tts Sarah + Workers AI Aura-2 + $0 Web Speech fallback) & /api/stt Whisper fallback; PIN → x-stack-pin; Git is source of truth.
- * No horizontal swipe. Colour only marks the explicit agent states. Connection pill is honest.
+ * No horizontal swipe. Colour only marks explicit agent states. Connection pill is honest.
  * Operator sessions (#270): show real runtime/session links; never invent "working".
  */
 (function () {
@@ -149,7 +149,6 @@
         }
       }
 
-      // Sort: red > amber > green
       const sevOrder = { red: 0, amber: 1, green: 2, muted: 3 };
       return items.sort((a, b) => (sevOrder[a.severity] || 99) - (sevOrder[b.severity] || 99));
     }
@@ -170,7 +169,6 @@
     }
   }
 
-  // Attach to window for global access
   window.StackAttentionQueue = StackAttentionQueue;
 
   const creds = {
@@ -2523,7 +2521,6 @@
         "</div>" +
       "</div>";
 
-    // Insert attention banner before the hero if there are items
     const attentionBanner = renderAttentionBanner(state);
     const finalHeroHtml = attentionBanner + heroHtml;
 
