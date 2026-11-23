@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const VERSION = window.STACK_VERSION || "v50.6.1-clarity-voice";
+  const VERSION = window.STACK_VERSION || "v50.6.5-control-room";
   const SURFACE_KEY = "stack-surface-v1";
   const OUTBOX_KEY = "stack-rebirth-outbox-v1";
   const DRAFT_KEY = "stack-composer-drafts-v1";
@@ -71,7 +71,7 @@
 
     getItems() {
       const items = [];
-      const { assignments, heartbeats, needsSeth, items: workItems } = this.state;
+      const { assignments, agentSessions, needsSeth, items: workItems } = this.state;
 
       // 1. Stale runs (Watchdog pattern from Agent HQ)
       if (assignments) {
@@ -97,7 +97,7 @@
       // 2. Evidence gates failed (Agent HQ pattern)
       if (workItems) {
         for (const w of workItems) {
-          if (w.blockedReason || (w.state && w.state.key === 'blocked')) {
+          if (w.blockedReason || itemStateMeta(w.state).key === 'blocked') {
             items.push({
               id: `blocked-${w.id}`,
               type: 'blocked_work',
@@ -129,28 +129,26 @@
       }
 
       // 4. Idle agents (checked in but no execution verified)
-      if (heartbeats) {
-        for (const [agent, hb] of Object.entries(heartbeats)) {
-          if (hb.last_authenticated_checkin_at && !hb.last_execution_verified_at) {
-            const ageMin = Math.round((Date.now() - new Date(hb.last_authenticated_checkin_at).getTime()) / 60000);
-            if (ageMin > 60) {
-              items.push({
-                id: `idle-${agent}`,
-                type: 'idle_agent',
-                title: `${agent} checked in but not executing`,
-                detail: `Checked in ${ageMin} min ago · no execution verified`,
-                severity: 'amber',
-                agent,
-                action: 'Dispatch work or investigate',
-                ref: agent
-              });
-            }
-          }
-        }
+      for (const session of agentSessions?.sessions || []) {
+        const agent = session.agent;
+        if (!agent || !session.last_authenticated_checkin_at || session.last_execution_verified_at) continue;
+        const ageMin = Math.round((Date.now() - Date.parse(session.last_authenticated_checkin_at)) / 60000);
+        if (!(ageMin > 60)) continue;
+        const name = this.state.agents?.find((peer) => peer.id === agent)?.name || agent;
+        items.push({
+          id: `idle-${session.id}`,
+          type: 'idle_agent',
+          title: `${name} checked in`,
+          detail: `Checked in ${ageMin} min ago · no execution verified`,
+          severity: 'amber',
+          agent,
+          action: 'Check session',
+          ref: agent
+        });
       }
 
       const sevOrder = { red: 0, amber: 1, green: 2, muted: 3 };
-      return items.sort((a, b) => (sevOrder[a.severity] || 99) - (sevOrder[b.severity] || 99));
+      return items.sort((a, b) => (sevOrder[a.severity] ?? 99) - (sevOrder[b.severity] ?? 99));
     }
 
     getCount() {
@@ -218,6 +216,17 @@
   let toastRankShowing = 0;
   let pollStarted = false;
   let composerDrafts = loadComposerDrafts();
+  const chat = window.StackChat;
+  const roomHistory = new Map();
+  const roomScroll = new Map();
+  const sendsInFlight = new Set();
+  const olderInFlight = new Set();
+  const roomReads = loadRoomReads();
+  let roomPickerOpen = false;
+  let prependRoom = "";
+  let nextInboxAgent = 0;
+  const wideConversations = window.matchMedia("(min-width: 860px)");
+  let pendingChatRender = false;
 
   function esc(s) {
     return String(s == null ? "" : s)
@@ -295,10 +304,18 @@
   }
 
   function loadOutbox() {
-    try { return JSON.parse(localStorage.getItem(OUTBOX_KEY) || "[]") || []; } catch (e) { return []; }
+    try {
+      const entries = JSON.parse(localStorage.getItem(OUTBOX_KEY) || "[]");
+      return Array.isArray(entries) ? entries.filter(function (entry) {
+        return entry && typeof entry.slug === "string" && typeof entry.body === "string";
+      }) : [];
+    } catch (e) { return []; }
   }
   function saveOutbox() {
-    try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(state.outbox)); } catch (e) {}
+    try {
+      localStorage.setItem(OUTBOX_KEY, JSON.stringify(state.outbox));
+      return true;
+    } catch (e) { return false; }
   }
   function loadReadNotifs() {
     try { return new Set(JSON.parse(localStorage.getItem(READ_NOTIF_KEY) || "[]")); } catch (e) { return new Set(); }
@@ -351,6 +368,7 @@
     window.StackExplore?.reset();
     creds.pin = "";
     composerDrafts = { bff: "", channels: {} };
+    resetChatCache();
     try {
       localStorage.removeItem(PIN_KEY);
     } catch (e) {}
@@ -941,12 +959,21 @@
         : Promise.resolve(null);
       const [assignments] = await Promise.all([todayAssignments, loadMessagesForSlug("peer-floor")]);
       state.assignments = assignments;
-      if (state.view === "agents" && state.activeAgentId !== "peer-floor") await loadActiveAgentMessages();
+      const activeId = state.view === "agents" ? state.activeAgentId : "peer-floor";
+      const otherAgents = state.agents.filter(function (agent) {
+        return agent.id !== "peer-floor" && agent.id !== activeId;
+      });
+      const inboxAgent = otherAgents.length ? otherAgents[nextInboxAgent++ % otherAgents.length] : null;
+      await Promise.all([
+        activeId !== "peer-floor" ? loadActiveAgentMessages() : null,
+        inboxAgent ? loadMessagesForSlug(dmSlugForAgent(inboxAgent.id)) : null
+      ]);
       normalizeHubData();
       if (!silent) toast("Updated · spend stays at $0", "info");
     } catch (err) {
       const defaultBff = (window.STACK_BFF_URL || "").replace(/\/$/, "");
       if ((!err || !err.status) && defaultBff && creds.bff !== defaultBff) {
+        resetChatCache();
         creds.bff = defaultBff;
         saveCreds();
         state.syncing = false;
@@ -968,68 +995,187 @@
       }
     } finally {
       state.syncing = false;
-      render();
+      if (silent && state.view === "agents" && document.activeElement?.id === "agent-chat-input") {
+        pendingChatRender = true;
+        renderChrome();
+      } else {
+        render();
+      }
     }
   }
 
-  async function loadMessagesForSlug(slug) {
-    if (!creds.pin || !creds.bff) return;
+  function resetChatCache() {
+    state.messagesBySlug = {};
+    roomHistory.clear();
+    roomScroll.clear();
+    roomPickerOpen = false;
+  }
+
+  function loadRoomReads() {
+    try { return new Map(JSON.parse(localStorage.getItem("stack-chat-read-v1") || "[]")); }
+    catch (e) { return new Map(); }
+  }
+
+  function roomKey(slug) {
+    return JSON.stringify([creds.bff, slug]);
+  }
+
+  function unreadInRoom(slug) {
+    return chat.unread(state.messagesBySlug[slug] || [], roomReads.get(roomKey(slug)));
+  }
+
+  function totalUnread() {
+    return state.agents.reduce(function (count, agent) {
+      return count + unreadInRoom(dmSlugForAgent(agent.id));
+    }, 0);
+  }
+
+  function markRoomRead(log) {
+    if (document.hidden || document.getElementById("overlay").classList.contains("open") ||
+        log.scrollHeight - log.scrollTop - log.clientHeight > 16) return;
+    const slug = log.dataset.chatRoom;
+    if (!roomHistory.has(roomKey(slug))) return;
+    const marker = chat.latestIncoming(state.messagesBySlug[slug] || []);
+    const through = marker ? marker.id : "";
+    const key = roomKey(slug);
+    if (roomReads.has(key) && roomReads.get(key) === through) return;
+    roomReads.set(key, through);
+    try { localStorage.setItem("stack-chat-read-v1", JSON.stringify(Array.from(roomReads))); } catch (e) {}
+    document.querySelectorAll("[data-unread-room]").forEach(function (badge) {
+      if (badge.dataset.unreadRoom === slug) badge.hidden = true;
+    });
+    renderChrome();
+  }
+
+  function sameOutboxRoom(entry, slug) {
+    return entry.slug === slug && (!entry.bff || entry.bff === creds.bff);
+  }
+
+  function roomMessages(slug) {
+    const messages = state.messagesBySlug[slug] || [];
+    const pending = state.outbox.filter(function (entry) {
+      return sameOutboxRoom(entry, slug) && !messages.some(function (message) { return chat.savedEntry(entry, message); });
+    }).map(function (entry) {
+      return {
+        id: entry.requestId || entry.id, author: "Seth", body: entry.body, created_at: entry.createdAt,
+        _submitting: sendsInFlight.has(entry.requestId || entry.id),
+        _queued: !sendsInFlight.has(entry.requestId || entry.id)
+      };
+    });
+    return chat.merge(messages, pending);
+  }
+
+  function clearSavedOutbox(slug, messages) {
+    const remaining = state.outbox.filter(function (entry) {
+      return !sameOutboxRoom(entry, slug) || !messages.some(function (message) { return chat.savedEntry(entry, message); });
+    });
+    if (remaining.length === state.outbox.length) return;
+    state.outbox = remaining;
+    saveOutbox();
+  }
+
+  async function loadMessagesForSlug(slug, before) {
+    if (!creds.pin || !creds.bff) return false;
+    const key = roomKey(slug);
+    const pin = creds.pin;
     try {
-      const data = await bff("/api/messages?slug=" + encodeURIComponent(slug) + "&limit=40");
-      if (data && Array.isArray(data.messages)) {
-        const seen = new Set();
-        const merged = [];
-        data.messages.forEach(function (m) {
-          if (!m) return;
-          const key = m.id || ((m.created_at || "") + "|" + (m.author || "") + "|" + (m.body || ""));
-          if (!seen.has(key)) {
-            seen.add(key);
-            merged.push(m);
-          }
-        });
-        (state.messagesBySlug[slug] || []).forEach(function (m) {
-          if (!m) return;
-          const key = m.id || ((m.created_at || "") + "|" + (m.author || "") + "|" + (m.body || ""));
-          if (!seen.has(key)) {
-            seen.add(key);
-            merged.push(m);
-          }
-        });
-        merged.sort(function (a, b) { return String(a.created_at || "").localeCompare(String(b.created_at || "")); });
-        state.messagesBySlug[slug] = merged.slice(-60);
-        return;
+      const data = await bff("/api/messages?slug=" + encodeURIComponent(slug) + "&limit=40" +
+        (before ? "&before=" + encodeURIComponent(before) : ""));
+      if (key !== roomKey(slug) || pin !== creds.pin || !Array.isArray(data?.messages)) return false;
+      if (before || !roomHistory.has(key)) roomHistory.set(key, data.next_before || null);
+      const merged = chat.merge(state.messagesBySlug[slug] || [], data.messages);
+      state.messagesBySlug[slug] = merged;
+      clearSavedOutbox(slug, merged);
+      if (!roomReads.has(key)) {
+        const marker = chat.latestIncoming(merged);
+        roomReads.set(key, marker ? marker.id : "");
+        try { localStorage.setItem("stack-chat-read-v1", JSON.stringify(Array.from(roomReads))); } catch (e) {}
       }
+      return true;
     } catch (e) {
-      // Graceful fallback when running against an older Worker deploy or offline cache.
+      return false;
     }
   }
 
   async function loadActiveAgentMessages() {
-    const active = state.agents.find(function (a) { return a.id === state.activeAgentId; });
-    const slug = dmSlugForAgent(active ? active.id : "peer-floor");
-    await loadMessagesForSlug(slug);
+    const active = state.agents.find(function (agent) { return agent.id === state.activeAgentId; });
+    await loadMessagesForSlug(dmSlugForAgent(active ? active.id : "peer-floor"));
+  }
+
+  async function loadEarlierMessages(slug) {
+    const key = roomKey(slug);
+    const before = roomHistory.get(key);
+    if (!before || olderInFlight.has(key)) return;
+    olderInFlight.add(key);
+    try {
+      if (await loadMessagesForSlug(slug, before)) prependRoom = key;
+      else toast("Couldn’t load earlier messages. Try again.", "warning");
+    } finally {
+      olderInFlight.delete(key);
+      render();
+    }
   }
 
   async function postMessage(slug, body, requestId, voiceReply) {
-    const out = await bff("/api/ping", {
-      method: "POST",
-      body: JSON.stringify({
-        slug: slug, author: "Seth", body: body, request_id: requestId, noAutoReply: voiceReply !== true
-      })
-    });
-    if (!out || out.ok !== true || !out.message || !out.message.id) {
+    const endpoint = creds.bff;
+    const pin = creds.pin;
+    const controller = new AbortController();
+    const timeout = setTimeout(function () { controller.abort(); }, 20000);
+    let out;
+    try {
+      out = await bff("/api/ping", {
+        method: "POST", signal: controller.signal,
+        body: JSON.stringify({
+          slug: slug, author: "Seth", body: body, request_id: requestId, noAutoReply: voiceReply !== true
+        })
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (endpoint !== creds.bff || pin !== creds.pin || !out || out.ok !== true || !out.message || !out.message.id) {
       throw new Error("Backend acceptance could not be confirmed");
     }
+    const accepted = Object.assign({}, out.message, { _accepted: true });
+    if (requestId && !chat.savedEntry({ requestId: requestId, body: body }, accepted)) {
+      throw new Error("Backend returned a different message");
+    }
+    state.messagesBySlug[slug] = chat.merge(state.messagesBySlug[slug] || [], [accepted, out.reply]);
+    return accepted.id;
+  }
 
-    const messages = (state.messagesBySlug[slug] || []).filter(function (m) {
-      return (!requestId || m.id !== requestId) && m.id !== out.message.id && (!out.reply || m.id !== out.reply.id);
-    });
-    // Older Workers confirm the write in the response but do not persist a receipt.
-    messages.push(Object.assign({}, out.message, { _accepted: true }));
-    if (out.reply) messages.push(out.reply);
-    messages.sort(function (a, b) { return String(a.created_at || "").localeCompare(String(b.created_at || "")); });
-    state.messagesBySlug[slug] = messages.slice(-60);
-    return out.message.id;
+  async function deliverOutbox(entry) {
+    if (!sameOutboxRoom(entry, entry.slug)) return { accepted: false };
+    if (!entry.requestId) {
+      entry.requestId = crypto.randomUUID();
+      entry.bff = creds.bff;
+      if (!saveOutbox()) {
+        delete entry.requestId;
+        return { accepted: false, queued: true };
+      }
+    }
+    const id = entry.requestId;
+    if (sendsInFlight.has(id)) return { accepted: false };
+    sendsInFlight.add(id);
+    try {
+      const messageId = await postMessage(entry.slug, entry.body, entry.requestId, entry.voiceReply);
+      state.outbox = state.outbox.filter(function (pending) { return pending !== entry; });
+      saveOutbox();
+      return { accepted: true, messageId: messageId };
+    } catch (error) {
+      const recovered = !state.outbox.includes(entry);
+      return { accepted: recovered, queued: !recovered, messageId: id, error: error };
+    } finally {
+      sendsInFlight.delete(id);
+    }
+  }
+
+  async function retryMessage(entry) {
+    if (!entry || sendsInFlight.has(entry.requestId || entry.id)) return;
+    const sending = deliverOutbox(entry);
+    render();
+    const result = await sending;
+    toast(result.accepted ? "Message saved" : "Message still waiting to send", result.accepted ? "info" : "warning");
+    render();
   }
 
   let flushingOutbox = false;
@@ -1038,16 +1184,9 @@
     flushingOutbox = true;
     let sent = 0;
     try {
-      for (const ev of state.outbox.slice()) {
-        if (ev.type !== "message" && ev.type !== "quick") continue;
-        try {
-          await postMessage(ev.slug, ev.body, ev.requestId, ev.voiceReply);
-          state.outbox = state.outbox.filter(function (entry) { return entry !== ev; });
-          saveOutbox();
-          sent += 1;
-        } catch (e) {
-          // Keep the same request ID so a retry can recover an already saved message.
-        }
+      for (const entry of state.outbox.slice()) {
+        if (entry.type !== "message" && entry.type !== "quick") continue;
+        if ((await deliverOutbox(entry)).accepted) sent += 1;
       }
     } finally {
       flushingOutbox = false;
@@ -2224,14 +2363,16 @@
         });
         receipt = '<details class="msg-foot msg-receipt"><summary class="git-chip">Saved to conversation</summary>' +
           (m.backend_accepted_at ? '<div><time datetime="' + esc(m.backend_accepted_at) + '">' + esc(m.backend_accepted_at) + '</time></div>' : '') +
-          '<div>Teammate receipt hasn’t been confirmed for this message.</div>' +
+          '<div>Agent acknowledgement unconfirmed.</div>' +
           (linked.length ? '<div>' + linked.map(function (task) {
             return esc(task.title + ' · ' + assignmentLabels[task.status]);
           }).join('<br>') + '</div><button type="button" class="btn btn-sec btn-sm" data-open-assignments>Open assignments</button>' : '') +
           '</details>';
       } else {
         const label = m._queued ? "In Outbox · Send unconfirmed" : m._submitting ? "Saving message…" : "No send receipt available";
-        receipt = '<div class="msg-foot"><span class="git-chip">' + label + '</span></div>';
+        receipt = '<div class="msg-foot"><span class="git-chip">' + label + '</span>' +
+          (m._queued ? ' <button type="button" class="btn btn-sec btn-sm" data-retry-message="' + esc(m.id) +
+            '" data-retry-room="' + esc(slug) + '">Retry</button>' : "") + '</div>';
       }
     }
     const rawBody = String(m.body || "");
@@ -2287,32 +2428,9 @@
     }
   }
 
-  function renderAttentionBanner(appState) {
-    if (typeof StackAttentionQueue !== "function") return "";
-    const items = new StackAttentionQueue(appState || state).getItems();
-    if (!items.length) return "";
-    const shown = items.slice(0, 3);
-    const rows = shown.map(function (item) {
-      return '<div class="row">' +
-        '<span class="dot ' + esc(item.severity === "red" ? "red" : "amber") + '"></span>' +
-        '<div class="row-main"><div class="row-title">' + esc(item.title) + '</div>' +
-        '<div class="row-sub">' + esc(item.detail) + '</div></div>' +
-        '<span class="row-right">' + esc(item.action) + '</span>' +
-      '</div>';
-    }).join("");
-    const more = items.length > shown.length
-      ? '<div class="row-sub">' + (items.length - shown.length) + ' more</div>'
-      : "";
-    return '<section class="card" aria-label="Needs attention">' +
-      '<div class="card-head"><span class="card-title">Needs attention</span>' +
-      '<span class="count">' + items.length + '</span></div>' +
-      rows + more +
-    '</section>';
-  }
-
   function renderToday() {
     const topNeed = state.needsSeth[0] || null;
-    const allFloorMsgs = state.messagesBySlug["peer-floor"] || [];
+    const allFloorMsgs = roomMessages("peer-floor");
     const floorMsgs = allFloorMsgs.slice(-8);
     const floorHtml = floorMsgs.map(function (m) {
       return renderMessageBubble(m, true, "peer-floor");
@@ -2521,10 +2639,26 @@
         "</div>" +
       "</div>";
 
-    const attentionBanner = renderAttentionBanner(state);
-    const finalHeroHtml = attentionBanner + heroHtml;
+    const brief = '<nav class="control-brief" aria-label="Today shortcuts">' +
+      '<button type="button" class="control-stat" data-go="work"><strong>' + blockedCount + '</strong><span>Blocked teammates</span></button>' +
+      (state.assignmentMode === "enabled" ? '<button type="button" class="control-stat" data-open-assignments><strong>' +
+        (state.assignments ? openAssignments : "—") + '</strong><span>Open assignments</span></button>' : '') +
+      '<button type="button" class="control-stat" data-go="agents"><strong>' + totalUnread() + '</strong><span>Unread messages</span></button>' +
+      '</nav>';
+    return heroHtml + brief + renderAttentionBanner(state) + sessionsPanel + '<div class="today-grid">' + streamCol + sheetsCol + "</div>";
+  }
 
-    return finalHeroHtml + sessionsPanel + '<div class="today-grid">' + streamCol + sheetsCol + "</div>";
+  function renderAttentionBanner(appState) {
+    const items = new StackAttentionQueue(appState).getItems();
+    if (!items.length) return "";
+    const rows = items.map(function (item) {
+      const text = '<span class="row-main"><span class="row-title"><span class="dot ' + esc(item.severity) + '"></span>' +
+        esc(item.title) + '</span><span class="row-sub">' + esc(item.detail) + '</span></span>';
+      if (item.type === 'needs_seth') return '<div class="row">' + text + '</div>';
+      return '<button type="button" class="row" data-attention-ref="' + esc(item.ref) +
+        '" data-attention-type="' + esc(item.type) + '">' + text + '<span class="row-right" aria-hidden="true">›</span></button>';
+    }).join("");
+    return '<details class="panel attention-queue"><summary>Needs your attention (' + items.length + ')</summary>' + rows + '</details>';
   }
 
   async function copyCloudPrompt() {
@@ -2550,7 +2684,7 @@
     if (!agent) return '<div class="empty">Loading agents…</div>';
     const st = agentMeta(agent.status);
     const slug = dmSlugForAgent(agent.id);
-    const msgs = state.messagesBySlug[slug] || [];
+    const msgs = roomMessages(slug);
     const usageTone = agent.usagePct >= 85 ? "red" : agent.usagePct >= 70 ? "amber" : "";
     const pctText = agent.hasLiveUsage
       ? agent.usagePct + "% used · updated " + relTime(agent.usageObservedAt)
@@ -2562,27 +2696,38 @@
 
     const switcher = state.agents.map(function (a) {
       const am = agentMeta(a.status);
+      const agentSlug = dmSlugForAgent(a.id);
+      const unread = unreadInRoom(agentSlug);
       return (
-        '<button type="button" class="agent-pill ' + (a.id === agent.id ? "active" : "") + '" data-select-agent="' + esc(a.id) + '">' +
-          '<span class="agent-pill-top"><span class="dot ' + am.tone + '"></span>' + esc(a.name) + "</span>" +
+        '<button type="button" class="agent-pill ' + (a.id === agent.id ? "active" : "") + '" data-select-agent="' +
+          esc(a.id) + '" aria-pressed="' + (a.id === agent.id) + '">' +
+          '<span class="agent-pill-top"><span class="dot ' + am.tone + '"></span>' + esc(a.name) +
+            '<span class="room-unread" data-unread-room="' + esc(agentSlug) + '"' + (unread ? '' : ' hidden') + '>' + unread + ' unread</span></span>' +
           '<span class="agent-pill-age">' + esc(agentAgeText(a)) + "</span>" +
         "</button>"
       );
     }).join("");
 
-    const msgHtml = msgs.slice(-40).map(function (m) {
+    const msgHtml = msgs.map(function (m) {
       return renderMessageBubble(m, true, slug);
     }).join("");
 
     return (
-      '<div class="agent-strip" style="margin-bottom:10px;">' + switcher + "</div>" +
+      '<div class="conversation-deck">' +
+      '<details class="conversation-picker" id="conversation-picker"' + (wideConversations.matches || roomPickerOpen ? ' open' : '') + '>' +
+        '<summary>Conversations <span>' + esc(agent.name) + '</span></summary>' +
+        '<nav class="agent-strip" aria-label="Conversations">' + switcher + '</nav>' +
+      '</details>' +
       '<section class="hero chat-hero">' +
         '<div class="hero-top">' +
-          '<div style="min-width:0;"><span class="kicker">' + esc(agent.role) + '</span><h2 class="hero-title">' + esc(agent.name) + "</h2></div>" +
+          '<div class="chat-room-heading"><h2 class="hero-title">' + esc(agent.name) + '</h2>' +
+            '<div class="chat-room-state"><span class="dot ' + st.tone + '"></span>' + esc(st.label) + '</div></div>' +
           '<div class="hero-top-actions">' +
-            '<span class="badge ' + st.tone + '"><span class="dot ' + st.tone + '"></span>' + esc(st.label) + "</span>" +
-            '<button type="button" class="btn btn-sec btn-sm" id="btn-agent-memory" aria-label="Notes (' + memEntries.length + ')" title="Shared notes">Notes (' + memEntries.length + ")</button>" +
-            '<button type="button" class="btn btn-sec btn-sm voice-btn" id="btn-voice-agent" data-voice-slug="' + esc(slug) + '" aria-label="Read latest reply" title="Read latest reply">Read reply</button>' +
+            '<details class="chat-tools"' + (wideConversations.matches ? ' open' : '') + '><summary class="btn btn-sec btn-sm">Tools</summary>' +
+              '<div class="chat-tool-list">' +
+                '<button type="button" class="btn btn-sec btn-sm" id="btn-agent-memory" aria-label="Notes (' + memEntries.length + ')" title="Shared notes">Notes (' + memEntries.length + ")</button>" +
+                '<button type="button" class="btn btn-sec btn-sm voice-btn" id="btn-voice-agent" data-voice-slug="' + esc(slug) + '" aria-label="Read latest reply" title="Read latest reply">Read reply</button>' +
+              '</div></details>' +
             '<button type="button" class="btn btn-pri btn-sm" id="btn-start-voice" aria-pressed="' + (voiceCall && voiceCall.alive && voiceCall.slug === slug ? "true" : "false") + '" title="Start opt-in live voice call">' + (voiceCall && voiceCall.alive && voiceCall.slug === slug ? "Stop voice" : "Start voice") + "</button>" +
             '<button type="button" class="btn btn-sec btn-sm kb-done-btn" id="btn-chat-kb-done" aria-label="Hide keyboard">Done</button>' +
           "</div>" +
@@ -2597,7 +2742,11 @@
         "</div>" +
         (agent.id !== "peer-floor" && agent.session ? sessionCardHtml(agent.session) : "") +
         '<div class="chat-log-wrap">' +
-          '<div id="chat-log" class="chat-log">' + (msgHtml || '<div class="empty">No messages yet — type below or use the mic.</div>') + "</div>" +
+          '<div id="chat-log" class="chat-log" data-chat-room="' + esc(slug) +
+            '" aria-label="Messages in ' + esc(agent.name) + '" tabindex="0">' +
+            (roomHistory.get(roomKey(slug)) ? '<div class="chat-history"><button type="button" class="btn btn-sec btn-sm" data-earlier-room="' +
+              esc(slug) + '">Earlier messages</button></div>' : '') +
+            (msgHtml || '<div class="empty">' + (roomHistory.has(roomKey(slug)) ? "No messages yet." : "Waiting for conversation history…") + '</div>') + "</div>" +
           '<button type="button" id="chat-jump-bottom" class="chat-jump-pill hidden">↓ Latest</button>' +
         "</div>" +
         '<div class="chip-strip">' +
@@ -2612,12 +2761,12 @@
         '<div class="composer-wrap">' +
           '<div id="agent-mention-pop" class="mention-pop hidden" role="listbox" aria-label="Mention suggestions"></div>' +
           '<form id="agent-chat-form" class="composer">' +
-            '<input id="agent-chat-input" data-draft-channel="' + esc(slug) + '" data-slug="' + esc(slug) + '" class="input" placeholder="' + (agent.id === "peer-floor" ? "Message the whole team…" : "Message " + esc(agent.name) + "…") + '" autocomplete="off" enterkeyhint="send" required />' +
+            '<input id="agent-chat-input" aria-label="Message" data-draft-channel="' + esc(slug) + '" data-slug="' + esc(slug) + '" class="input" placeholder="' + (agent.id === "peer-floor" ? "Message the whole team…" : "Message " + esc(agent.name) + "…") + '" autocomplete="off" enterkeyhint="send" required />' +
             dictationButton("agent-chat-input") +
             '<button type="submit" class="btn btn-pri btn-sm">Send</button>' +
           "</form>" +
         "</div>" +
-      "</section>"
+      "</section></div>"
     );
   }
 
@@ -3196,7 +3345,7 @@
     if (nc) { nc.textContent = String(unreadNotifs); nc.classList.toggle("hidden", unreadNotifs === 0); }
 
     const hasTriage = state.needsSeth.length > 0 || state.items.some(function (i) { return itemStateMeta(i.state).key === "blocked"; });
-    const hasChatAlert = unreadNotifs > 0 || state.outbox.length > 0;
+    const hasChatAlert = unreadNotifs > 0 || state.outbox.length > 0 || totalUnread() > 0;
     ["sb-triage-badge", "dk-triage-dot"].forEach(function (id) {
       const el = document.getElementById(id);
       if (el) el.classList.toggle("hidden", !hasTriage);
@@ -3246,18 +3395,14 @@
     if (!root) return;
 
     const prevChat = document.getElementById("chat-log");
-    let chatMetrics = null;
+    const previousRoom = prevChat ? roomKey(prevChat.dataset.chatRoom) : "";
     if (prevChat) {
-      const prevScrollTop = prevChat.scrollTop;
-      const prevScrollHeight = prevChat.scrollHeight;
-      const prevClientHeight = prevChat.clientHeight;
-      chatMetrics = {
-        prevScrollTop: prevScrollTop,
-        prevScrollHeight: prevScrollHeight,
-        prevClientHeight: prevClientHeight,
-        wasNearBottom: (prevScrollHeight - prevScrollTop - prevClientHeight) < 72
-      };
+      roomScroll.set(previousRoom, {
+        top: prevChat.scrollTop, height: prevChat.scrollHeight,
+        atBottom: prevChat.scrollHeight - prevChat.scrollTop - prevChat.clientHeight < 16
+      });
     }
+    pendingChatRender = false;
 
     const prevFloor = document.getElementById("today-floor-log");
     let floorMetrics = null;
@@ -3307,18 +3452,19 @@
     const chatLog = document.getElementById("chat-log");
     const jumpBtn = document.getElementById("chat-jump-bottom");
     if (chatLog) {
-      if (state.forceChatBottom || !chatMetrics || chatMetrics.wasNearBottom) {
-        chatLog.scrollTop = chatLog.scrollHeight;
-        state.forceChatBottom = false;
-        if (jumpBtn) jumpBtn.classList.add("hidden");
+      const key = roomKey(chatLog.dataset.chatRoom);
+      const previous = roomScroll.get(key);
+      if (previous && prependRoom === key && key === previousRoom) {
+        chatLog.scrollTop = previous.top + chatLog.scrollHeight - previous.height;
       } else {
-        chatLog.scrollTop = chatMetrics.prevScrollTop;
-        const farFromBottom = (chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight) > 96 && chatLog.clientHeight >= 90;
-        if (jumpBtn) jumpBtn.classList.toggle("hidden", !farFromBottom);
+        chatLog.scrollTop = state.forceChatBottom || !previous || previous.atBottom ? chatLog.scrollHeight : previous.top;
       }
-    } else if (state.view !== "agents") {
-      state.forceChatBottom = false;
+      const farFromBottom = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight > 16;
+      if (jumpBtn) jumpBtn.classList.toggle("hidden", !farFromBottom);
+      markRoomRead(chatLog);
     }
+    prependRoom = "";
+    state.forceChatBottom = false;
 
     const floorLog = document.getElementById("today-floor-log");
     if (floorLog) {
@@ -3837,7 +3983,7 @@
     if (!row) return;
     closeSheet();
     if (row.action === "view:today") { state.view = "today"; render(); }
-    else if (row.action === "view:agents") { state.view = "agents"; state.forceChatBottom = true; render(); await loadActiveAgentMessages(); render(); }
+    else if (row.action === "view:agents") { state.view = "agents"; render(); await loadActiveAgentMessages(); render(); }
     else if (row.action === "view:work") { state.view = "work"; render(); }
     else if (row.action === "view:stats") { state.view = "stats"; render(); }
     else if (row.action === "view:explore") { state.view = "explore"; render(); }
@@ -3891,51 +4037,49 @@
     if (voiceCall && voiceCall.alive && voiceCall.slug !== nextSlug) hangUpVoiceCall("room");
     state.activeAgentId = nextId;
     state.view = "agents";
-    state.forceChatBottom = true;
+    roomPickerOpen = false;
     render();
-    await loadActiveAgentMessages();
-    state.forceChatBottom = true;
-    render();
+    await loadMessagesForSlug(nextSlug);
+    if (state.view === "agents" && state.activeAgentId === nextId) {
+      if (document.activeElement?.id === "agent-chat-input") pendingChatRender = true;
+      else render();
+    }
   }
 
-  async function sendToSlug(slug, text, agentIdForOutbox, voiceReply) {
+  async function sendToSlug(slug, text, agentIdForOutbox, voiceReply, draftInput) {
     const body = String(text || "").trim();
     const channel = slug || "peer-floor";
     if (!body) return { accepted: false, empty: true };
 
     const requestId = crypto.randomUUID();
-    const pending = { id: requestId, channel_slug: channel, author: "Seth", body: body, created_at: new Date().toISOString(), _submitting: true };
-    state.messagesBySlug[channel] = (state.messagesBySlug[channel] || []).concat(pending);
-    state.forceChatBottom = true;
+    const entry = {
+      id: requestId, requestId: requestId, type: "message", slug: channel, body: body,
+      bff: creds.bff, createdAt: new Date().toISOString(), agentId: agentIdForOutbox, voiceReply: voiceReply === true
+    };
+    state.outbox.push(entry);
+    if (!saveOutbox()) {
+      state.outbox.pop();
+      toast(draftInput ? "Browser storage is unavailable. Your message is still in the composer." :
+        "Browser storage is unavailable. The message could not be queued.", "error");
+      return { accepted: false };
+    }
+    if (draftInput) {
+      draftInput.value = "";
+      saveComposerDraft(draftInput);
+    }
+    state.forceChatBottom = state.view === "agents" && dmSlugForAgent(state.activeAgentId) === channel;
     state.sendingPing += 1;
+    const sending = deliverOutbox(entry);
     render();
 
     try {
-      const messageId = await postMessage(channel, body, requestId, voiceReply);
-      toast("Message saved", "info");
-      state.forceChatBottom = true;
+      const result = await sending;
+      toast(result.accepted ? "Message saved" : "Waiting to send · Retry from the conversation", result.accepted ? "info" : "warning");
       normalizeHubData();
-      render();
-      return { accepted: true, messageId: messageId };
-    } catch (e) {
-      // A sync may already have recovered a write whose response was lost.
-      const recovered = (state.messagesBySlug[channel] || []).some(function (m) { return m.id === requestId && m.backend_accepted_at; });
-      if (!recovered) {
-        const evt = { id: requestId, requestId: requestId, type: "message", slug: channel, body: body };
-        if (agentIdForOutbox) evt.agentId = agentIdForOutbox;
-        if (voiceReply === true) evt.voiceReply = true;
-        state.outbox.unshift(evt);
-        saveOutbox();
-        pending._queued = true;
-        pending._submitting = false;
-        toast("Saved to Outbox · Acceptance unconfirmed", "warning");
-      }
-      state.link = (typeof navigator !== "undefined" && navigator.onLine === false) ? "offline" : state.link;
-      state.forceChatBottom = true;
-      render();
-      return { accepted: recovered, queued: !recovered, messageId: requestId, error: e };
+      return result;
     } finally {
       state.sendingPing = Math.max(0, state.sendingPing - 1);
+      render();
     }
   }
 
@@ -3952,13 +4096,21 @@
     });
     root.querySelectorAll("[data-jump-agent]").forEach(function (b) { b.addEventListener("click", function () { jumpToAgent(b.dataset.jumpAgent); }); });
     root.querySelectorAll("[data-select-agent]").forEach(function (b) { b.addEventListener("click", function () { jumpToAgent(b.dataset.selectAgent); }); });
+    root.querySelectorAll("[data-retry-message]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        const entry = state.outbox.find(function (pending) {
+          return sameOutboxRoom(pending, button.dataset.retryRoom) &&
+            (pending.requestId || pending.id) === button.dataset.retryMessage;
+        });
+        retryMessage(entry);
+      });
+    });
     root.querySelectorAll("[data-go]").forEach(function (b) {
       b.addEventListener("click", function () {
         const next = b.dataset.go;
         endDictation();
         if (voiceCall && voiceCall.alive && next !== "agents") hangUpVoiceCall("room");
         state.view = next;
-        if (state.view === "agents") state.forceChatBottom = true;
         render();
       });
     });
@@ -3968,7 +4120,6 @@
         endDictation();
         if (voiceCall && voiceCall.alive && next !== "agents") hangUpVoiceCall("room");
         state.view = next;
-        if (state.view === "agents") state.forceChatBottom = true;
         render();
       });
     });
@@ -3988,12 +4139,11 @@
       b.addEventListener("click", function () {
         const ref = b.dataset.attentionRef;
         const type = b.dataset.attentionType;
-        if (type === 'stale_run' || type === 'blocked_work') {
+        if (type === 'stale_run' && state.assignmentMode === 'enabled') {
+          openAssignmentInbox();
+        } else if (type === 'stale_run' || type === 'blocked_work') {
           state.workFilter = 'attention';
           state.view = 'work';
-          render();
-        } else if (type === 'needs_seth') {
-          state.view = 'today';
           render();
         } else if (type === 'idle_agent') {
           state.view = 'agents';
@@ -4161,9 +4311,7 @@
         e.preventDefault();
         const body = todayFloorInput && todayFloorInput.value.trim();
         if (!body) return;
-        todayFloorInput.value = "";
-        saveComposerDraft(todayFloorInput);
-        await sendToSlug("peer-floor", body);
+        await sendToSlug("peer-floor", body, undefined, false, todayFloorInput);
       });
     }
 
@@ -4194,29 +4342,39 @@
         const active = state.agents.find(function (a) { return a.id === state.activeAgentId; }) || state.agents[0];
         const resolvedId = active ? active.id : "peer-floor";
         const slug = dmSlugForAgent(resolvedId);
-        chatInput.value = "";
-        saveComposerDraft(chatInput);
-        await sendToSlug(slug, body, resolvedId);
+        await sendToSlug(slug, body, resolvedId, false, chatInput);
       });
     }
 
-    const activePill = root.querySelector(".agent-pill.active");
-    if (state.forceChatBottom && activePill && activePill.scrollIntoView) {
-      activePill.scrollIntoView({ inline: "nearest", block: "nearest" });
-    }
+    const picker = document.getElementById("conversation-picker");
+    if (picker) picker.addEventListener("toggle", function () {
+      if (picker.isConnected && !wideConversations.matches) roomPickerOpen = picker.open;
+    });
+    const earlierButton = root.querySelector("[data-earlier-room]");
+    if (earlierButton) earlierButton.addEventListener("click", function () {
+      earlierButton.disabled = true;
+      loadEarlierMessages(earlierButton.dataset.earlierRoom);
+    });
+    if (chatInput) chatInput.addEventListener("blur", function () {
+      setTimeout(function () {
+        if (pendingChatRender && document.activeElement?.id !== "agent-chat-input") render();
+      }, 100);
+    });
 
     const log = document.getElementById("chat-log");
     const jumpBottomBtn = document.getElementById("chat-jump-bottom");
     if (log && jumpBottomBtn) {
       log.addEventListener("scroll", function () {
-        const farFromBottom = (log.scrollHeight - log.scrollTop - log.clientHeight) > 96 && log.clientHeight >= 90;
+        const farFromBottom = log.scrollHeight - log.scrollTop - log.clientHeight > 16;
         jumpBottomBtn.classList.toggle("hidden", !farFromBottom);
+        markRoomRead(log);
       }, { passive: true });
       jumpBottomBtn.addEventListener("click", function () {
         state.forceChatBottom = true;
         log.scrollTop = log.scrollHeight;
         state.forceChatBottom = false;
         jumpBottomBtn.classList.add("hidden");
+        markRoomRead(log);
       });
     }
 
@@ -4252,12 +4410,12 @@
       endDictation();
       if (voiceCall && voiceCall.alive && next !== "agents") hangUpVoiceCall("room");
       state.view = next;
-      if (state.view === "agents") state.forceChatBottom = true;
       render();
       if (state.view === "agents") {
         await loadActiveAgentMessages();
-        state.forceChatBottom = true;
-        render();
+        if (state.view !== "agents") return;
+        if (document.activeElement?.id === "agent-chat-input") pendingChatRender = true;
+        else render();
       }
     });
   });
@@ -4467,15 +4625,31 @@
   }
 
   // iOS Safari / PWA can shrink visualViewport and scroll offsetTop while layout viewport stays full height.
+  wideConversations.addEventListener("change", function () {
+    if (state.view === "agents" && document.activeElement?.id !== "agent-chat-input") render();
+  });
+
   const viewport = window.visualViewport;
   if (viewport) {
     let wasKbOpen = false;
+    let restingHeight = Math.round(viewport.height);
+    let viewportWidth = Math.round(viewport.width);
     const updateChatViewport = function () {
       if (viewport.scale && Math.abs(viewport.scale - 1) > 0.02) return;
       const vh = Math.round(viewport.height);
       const vTop = Math.max(0, Math.round(viewport.offsetTop || 0));
       const focusedChat = Boolean(document.activeElement && document.activeElement.id === "agent-chat-input");
-      const kbOpen = (window.innerHeight - viewport.height > 120) || (focusedChat && vh < 560);
+      const width = Math.round(viewport.width);
+      if (Math.abs(width - viewportWidth) > 40) {
+        viewportWidth = width;
+        restingHeight = vh;
+        wasKbOpen = false;
+      }
+      // Some browsers resize their layout viewport as well as their visual viewport.
+      if (!focusedChat && !wasKbOpen) restingHeight = vh;
+      const viewportReduced = Math.max(window.innerHeight, restingHeight) - vh > 100;
+      const kbOpen = !wideConversations.matches && (focusedChat || wasKbOpen) && viewportReduced;
+      if (wasKbOpen && !kbOpen) restingHeight = vh;
 
       const chatLog = document.getElementById("chat-log");
       const wasNearBottom = !chatLog || (chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight) < 96;
@@ -4484,10 +4658,7 @@
       document.documentElement.style.setProperty("--chat-viewport-top", vTop + "px");
       document.documentElement.classList.toggle("chat-keyboard", kbOpen);
 
-      if (kbOpen && !wasKbOpen && state.view === "agents" && window.scrollY > 0) {
-        try { window.scrollTo(0, 0); } catch (e) {}
-      }
-      if (chatLog && (wasNearBottom || (kbOpen && !wasKbOpen))) {
+      if (chatLog && wasNearBottom) {
         requestAnimationFrame(function () {
           chatLog.scrollTop = chatLog.scrollHeight;
           const jumpBtn = document.getElementById("chat-jump-bottom");

@@ -1,23 +1,211 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-surface="dark">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
-  <meta name="theme-color" content="#0a0a0b" media="(prefers-color-scheme: dark)" />
-  <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#020408" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="The Stack" />
-  <meta name="description" content="Unified AI Agent Workspace - Phone First" />
-  <title>The Stack Mobile</title>
-  <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <link rel="apple-touch-icon" href="/icon-180.png" />
-  <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
-  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+  <meta name="description" content="The Stack is a zero-spend, git-native AI workforce control centre for automated workflows. Orchestrate agents, jobs, notes, and chats from a unified PWA interface.">
+  <title>The Stack — Git-native AI Workforce Control Centre</title>
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="The Stack — Git-native AI Workforce Control Centre">
+  <meta property="og:description" content="The Stack is a zero-spend, git-native AI workforce control centre for automated workflows. Orchestrate agents, jobs, notes, and chats from a unified PWA interface.">
+  <meta property="og:image" content="https://lilfangsproject-wq.github.io/the-stack-ui/og-image.png">
+  <meta property="og:url" content="https://lilfangsproject-wq.github.io/the-stack-ui/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="The Stack">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="The Stack — Git-native AI Workforce Control Centre">
+  <meta name="twitter:description" content="Zero-spend, git-native AI workforce control centre. Orchestrate agents, jobs, notes, and chats from a unified PWA.">
+  <meta name="twitter:image" content="https://lilfangsproject-wq.github.io/the-stack-ui/og-image.png">
+
+  <!-- JSON-LD Schema -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "The Stack",
+    "description": "Git-native AI workforce control centre for automated workflows. Zero spend, opt-in voice.",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Web",
+    "url": "https://lilfangsproject-wq.github.io/the-stack-ui/",
+    "author": {
+      "@type": "Person",
+      "name": "Seth",
+      "sameAs": ["https://github.com/lilfangsproject-wq"]
+    },
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "publisher": {
+      "@type": "Organization",
+      "name": "lilfangsproject-wq",
+      "url": "https://github.com/lilfangsproject-wq"
+    }
+  }
+  </script>
+
+  <link rel="icon" href="favicon.svg?v=50.6.5-control-room" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icon-180.png?v=50.6.5-control-room" />
+  <link rel="manifest" href="manifest.webmanifest?v=50.6.5-control-room" />
+  <link rel="stylesheet" href="style.css?v=50.6.5-control-room" />
+  <script src="config.js?v=50.6.5-control-room"></script>
+  <script>
+    (function () {
+      try {
+        var s = localStorage.getItem("stack-surface-v1");
+        var mode = s === "light" || s === "dark" || s === "system" ? s : "dark";
+        var light = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches;
+        var surface = mode === "system" ? (light ? "light" : "dark") : mode;
+        document.documentElement.dataset.theme = mode;
+        document.documentElement.dataset.surface = surface;
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", surface === "light" ? "#0a1930" : "#020408");
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="module" src="/src/main.jsx"></script>
+  <!-- Access gate: Worker PIN only — never a GitHub PAT in the browser -->
+  <div id="boot-gate" class="boot-gate hidden">
+    <div class="boot-card">
+      <div class="hero-top">
+        <span class="kicker">The Stack</span>
+        <span class="badge neutral">Private · $0 spend</span>
+      </div>
+      <h1 class="hero-title">Unlock The Stack</h1>
+      <p class="hero-copy">Enter your PIN to open your private workspace.</p>
+      <form id="pin-form">
+        <div class="field">
+          <label for="stack-pin">Your PIN</label>
+          <input id="stack-pin" name="pin" type="password" class="input" placeholder="PIN" autocomplete="current-password" required inputmode="numeric" />
+        </div>
+        <p id="pin-error" class="hero-copy hidden" role="alert" style="color:var(--st-red);margin-bottom:10px;"></p>
+        <div class="hero-actions">
+          <button type="submit" class="btn btn-pri" style="width:100%;">Open The Stack</button>
+        </div>
+        <details class="boot-connection">
+          <summary>Connection settings</summary>
+          <div class="field">
+            <label for="bff-url">Server address</label>
+            <input id="bff-url" name="bff" class="input mono" autocomplete="off" />
+          </div>
+        </details>
+      </form>
+    </div>
+  </div>
+
+  <div id="app-shell" class="shell hidden">
+    <aside class="mac-sidebar" aria-label="Mac Navigation">
+      <div class="sb-brand">
+        <span class="sb-brand-name">The Stack</span>
+        <button type="button" id="sb-new-btn" class="btn btn-sec btn-sm">+ New</button>
+      </div>
+      <nav class="sb-nav sb-primary" aria-label="Main navigation">
+        <button type="button" class="sb-item active" data-view="today">
+          <span class="sb-item-left"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/></svg>Today</span>
+          <span id="sb-triage-badge" class="dot amber hidden"></span>
+        </button>
+        <button type="button" class="sb-item" data-view="agents">
+          <span class="sb-item-left"><svg viewBox="0 0 24 24"><path d="M5 17 3.5 20.5V7.5A2.5 2.5 0 0 1 6 5h12a2.5 2.5 0 0 1 2.5 2.5v7A2.5 2.5 0 0 1 18 17Z"/></svg>Team</span>
+          <span id="sb-chat-badge" class="dot amber hidden"></span>
+        </button>
+        <button type="button" class="sb-item" data-view="work">
+          <span class="sb-item-left"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M9 10h6M9 14h4"/></svg>Work</span>
+        </button>
+        <button type="button" class="sb-item" data-view="stats">
+          <span class="sb-item-left"><svg viewBox="0 0 24 24"><path d="M4 18 9 13l4 3 7-9"/></svg>Usage</span>
+        </button>
+        <button type="button" class="sb-item" data-view="ops" id="sb-ops-btn">
+          <span class="sb-item-left"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Ops</span>
+        </button>
+        <button type="button" class="sb-item" data-view="explore">
+          <span class="sb-item-left"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><path d="m11 7-5 9m7-9 5 9M7 18h10"/></svg>Explore</span>
+        </button>
+      </nav>
+      <div class="sb-section">Teammates</div>
+      <nav class="sb-nav" id="sb-agents-nav"></nav>
+      <div class="sb-footer">
+        <button type="button" id="sb-outbox-btn" class="sb-item">
+          <span class="sb-item-left"><span id="sb-outbox-dot" class="dot muted"></span><span id="sb-outbox-lbl">Waiting · 0</span></span>
+        </button>
+          <button type="button" id="sb-refresh-btn" class="sb-item">
+          <span class="sb-item-left"><span class="dot muted"></span><span>Refresh</span></span>
+          <span>↻</span>
+        </button>
+      </div>
+    </aside>
+
+    <div class="stage">
+      <div id="pull-ind" class="pull-ind" aria-live="polite"></div>
+      <header class="topbar">
+        <div class="topbar-left">
+          <h1 id="page-heading" class="page-heading">Home</h1>
+          <button type="button" id="sync-pill" class="glass-pill-tag" title="Git head commit and sync status">
+            <span id="sync-dot" class="dot muted" aria-hidden="true"></span>
+            <span id="sync-text">Connecting…</span>
+          </button>
+        </div>
+        <div class="topbar-actions">
+          <button type="button" id="notif-btn" class="orb-btn" aria-label="Notification Centre" title="Notifications">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span id="notif-count" class="orb-count hidden">0</span>
+          </button>
+          <button type="button" id="cmd-btn" class="orb-btn" aria-label="Command palette" title="Command palette (⌘K)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          </button>
+          <button type="button" id="surface-btn" class="orb-btn" aria-label="Theme Dark" title="Theme: Dark (neutral glass)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor" stroke="none"/></svg>
+          </button>
+        </div>
+      </header>
+      <main id="root" aria-live="polite"></main>
+    </div>
+  </div>
+
+  <div id="mobile-dock-wrap" class="mobile-dock-wrap hidden">
+    <nav class="dock" aria-label="Primary navigation">
+      <button type="button" class="dock-btn active" data-view="today">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/></svg>
+        <span>Today</span>
+        <span id="dk-triage-dot" class="dock-dot hidden"></span>
+      </button>
+      <button type="button" class="dock-btn" data-view="agents">
+        <svg viewBox="0 0 24 24"><path d="M5 17 3.5 20.5V7.5A2.5 2.5 0 0 1 6 5h12a2.5 2.5 0 0 1 2.5 2.5v7A2.5 2.5 0 0 1 18 17Z"/></svg>
+        <span>Team</span>
+        <span id="dk-chat-dot" class="dock-dot hidden"></span>
+      </button>
+      <button type="button" class="dock-btn" data-view="work">
+        <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M9 10h6M9 14h4"/></svg>
+        <span>Work</span>
+      </button>
+      <button type="button" class="dock-btn" data-view="stats">
+        <svg viewBox="0 0 24 24"><path d="M4 18 9 13l4 3 7-9"/></svg>
+        <span>Usage</span>
+      </button>
+      <button type="button" class="dock-btn" data-view="ops" id="dk-ops-btn">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        <span>Ops</span>
+      </button>
+    </nav>
+    <button type="button" id="fab-new" class="dock-fab" aria-label="Quick-Action Inbox" title="Quick-Action Inbox">+</button>
+  </div>
+
+  <div id="overlay" class="overlay" aria-hidden="true">
+    <div id="sheet" class="sheet" role="dialog" aria-modal="true"></div>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="polish.js?v=50.6.5-control-room"></script>
+  <script src="explore.js?v=50.6.5-control-room"></script>
+  <script src="chat.js?v=50.6.5-control-room"></script>
+  <script src="app.js?v=50.6.5-control-room"></script>
 </body>
 </html>
