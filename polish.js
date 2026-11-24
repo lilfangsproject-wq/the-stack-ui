@@ -380,9 +380,15 @@
     return clipSpoken(intro + " " + label + ": " + last.body, 1180);
   }
 
+  function toEpochMs(val) {
+    if (typeof val === "number") return Number.isFinite(val) ? val : NaN;
+    if (typeof val === "string" && /^\d{10,16}$/.test(val.trim())) return Number(val.trim());
+    return Date.parse(val || "");
+  }
+
   function formatWaitDuration(iso, nowMs) {
-    if (!iso) return "Unknown";
-    var t = Date.parse(iso);
+    if (iso == null || iso === "") return "Unknown";
+    var t = toEpochMs(iso);
     if (!Number.isFinite(t)) return "Unknown";
     var now = typeof nowMs === "number" ? nowMs : Date.now();
     var diff = Math.max(0, now - t);
@@ -442,11 +448,14 @@
     };
   }
 
-  function detectWakeDeliveryMode(wake, history, messages) {
+  function detectWakeDeliveryMode(wake, history, messages, assignment) {
     var hayParts = [];
     if (wake) {
       hayParts.push(wake.via, wake.delivery_mode, wake.note, wake.subject, wake.body);
       if (wake.manual_relay === true) return "manual_relay";
+    }
+    if (assignment) {
+      hayParts.push(assignment.evidence, assignment.attention_reason, assignment.review_note);
     }
     (history || []).forEach(function (ev) {
       if (ev && ev.note) hayParts.push(ev.note);
@@ -455,7 +464,7 @@
       if (m && m.body) hayParts.push(m.body);
     });
     var hay = hayParts.filter(Boolean).join(" ");
-    if (/manual[\s_-]?relay|relayed manually/i.test(hay)) return "manual_relay";
+    if (/manual[\s_-]?relay|manually[\s_-]+relayed|relayed[\s_-]+manually/i.test(hay)) return "manual_relay";
     if (wake) {
       var via = String(wake.via || "").toLowerCase();
       if (via === "manual" || via === "manual_relay") return "manual_relay";
@@ -486,7 +495,7 @@
     var cancelEv = history.slice().reverse().find(function (e) { return e && e.action === "cancel"; });
 
     var primaryWake = wakes[wakes.length - 1] || null;
-    var deliveryMode = detectWakeDeliveryMode(primaryWake, history, messages);
+    var deliveryMode = detectWakeDeliveryMode(primaryWake, history, messages, a);
     var wakeAt = (primaryWake && (primaryWake.created_at || primaryWake.updated_at)) || null;
     var isAcknowledged = Boolean(ackEv);
 
@@ -614,8 +623,9 @@
 
     (appState && appState.assignments || []).forEach(function (a) {
       if (!a || !a.id) return;
-      var ageMs = a.updated_at ? (now - Date.parse(a.updated_at)) : (a.created_at ? (now - Date.parse(a.created_at)) : 0);
       var since = a.updated_at || a.created_at || "";
+      var sinceMs = toEpochMs(since);
+      var ageMs = Number.isFinite(sinceMs) ? (now - sinceMs) : NaN;
       if (a.status === "review_pending") {
         add({
           id: "asg-" + a.id,
@@ -690,7 +700,7 @@
     return items.sort(function (a, b) {
       var sd = (sevRank[a.severity] ?? 9) - (sevRank[b.severity] ?? 9);
       if (sd !== 0) return sd;
-      return (Date.parse(a.waitingSince || "") || 0) - (Date.parse(b.waitingSince || "") || 0);
+      return (toEpochMs(a.waitingSince) || 0) - (toEpochMs(b.waitingSince) || 0);
     });
   }
 

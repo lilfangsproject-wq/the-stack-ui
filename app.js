@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const VERSION = window.STACK_VERSION || "v50.8.0-phone-ux";
+  const VERSION = window.STACK_VERSION || "v50.8.1-phone-ux";
   const SURFACE_KEY = "stack-surface-v1";
   const OUTBOX_KEY = "stack-rebirth-outbox-v1";
   const DRAFT_KEY = "stack-composer-drafts-v1";

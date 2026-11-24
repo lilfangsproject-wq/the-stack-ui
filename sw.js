@@ -1,7 +1,7 @@
 /* The Stack v50.6.5 Control Room — network-first shell cache for Cloudflare Pages / GitHub Pages.
  * Always fetches fresh UI when online so pushes appear immediately on iPhone PWAs.
  */
-const CACHE = "the-stack-shell-v50.8.0-phone-ux";
+const CACHE = "the-stack-shell-v50.8.1-phone-ux";
 const SHELL = [
   "./",
   "./index.html",

@@ -1622,6 +1622,11 @@ button.ops-kpi:active { transform: scale(0.98); }
   padding-top: 10px;
   border-top: 1px solid var(--hairline);
 }
+.tl-retry-box .row-sub {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
 .tl-retry-box .btn {
   min-height: 44px;
 }
